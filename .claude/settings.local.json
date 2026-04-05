@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sys; print\\(sys.version_info\\)\")",
+      "Bash(npm --version)",
+      "Bash(py --version)",
+      "Bash(py -3 --version)",
+      "Bash(py -m pip install -r requirements.txt --quiet)"
+    ]
+  }
+}
