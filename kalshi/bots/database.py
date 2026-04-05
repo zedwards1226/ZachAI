@@ -83,6 +83,20 @@ def init_db() -> None:
             total_wins   INTEGER NOT NULL DEFAULT 0,
             total_losses INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS decision_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp    TEXT NOT NULL DEFAULT (datetime('now')),
+            type         TEXT NOT NULL,  -- scan|trade|block|skip|error|system|connect|info
+            city         TEXT,
+            message      TEXT NOT NULL,
+            edge         REAL,
+            contracts    INTEGER,
+            side         TEXT,
+            price_cents  INTEGER,
+            stake_usd    REAL,
+            reason       TEXT
+        );
         """)
 
 
@@ -220,6 +234,36 @@ def get_pnl_history(limit=200) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM pnl_snapshots ORDER BY timestamp DESC LIMIT ?", (limit,)
         ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Decision log ──────────────────────────────────────────────────────────────
+
+def log_decision(type: str, message: str, city=None, edge=None, contracts=None,
+                 side=None, price_cents=None, stake_usd=None, reason=None) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO decision_log
+               (type, message, city, edge, contracts, side, price_cents, stake_usd, reason)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (type, message, city, edge, contracts, side, price_cents, stake_usd, reason)
+        )
+        return cur.lastrowid
+
+
+def get_decision_log(limit: int = 100, since: str | None = None) -> list[dict]:
+    with get_conn() as conn:
+        if since:
+            rows = conn.execute(
+                """SELECT * FROM decision_log WHERE timestamp >= ?
+                   ORDER BY timestamp DESC LIMIT ?""",
+                (since, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM decision_log ORDER BY timestamp DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
     return [dict(r) for r in rows]
 
 

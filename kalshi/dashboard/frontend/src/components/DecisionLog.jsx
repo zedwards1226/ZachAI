@@ -1,74 +1,130 @@
 import { useEffect, useRef } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import * as ScrollArea from '@radix-ui/react-scroll-area'
 
 const TYPE_CONFIG = {
-  scan:    { color: '#006622', icon: '◈', prefix: 'SCAN' },
-  trade:   { color: '#00ff41', icon: '▶', prefix: 'TRADE' },
-  block:   { color: '#ff6600', icon: '⊘', prefix: 'BLOCK' },
-  skip:    { color: '#003311', icon: '—', prefix: 'SKIP' },
-  error:   { color: '#ff0040', icon: '✗', prefix: 'ERROR' },
-  system:  { color: '#004d18', icon: '◆', prefix: 'SYS' },
-  connect: { color: '#00cc33', icon: '◉', prefix: 'CONN' },
+  scan:    { color: '#818cf8', label: 'SCAN'  },
+  trade:   { color: '#26de81', label: 'TRADE' },
+  block:   { color: '#ff5e7d', label: 'BLOCK' },
+  skip:    { color: '#fbbf24', label: 'SKIP'  },
+  error:   { color: '#ff5e7d', label: 'ERROR' },
+  system:  { color: '#475569', label: 'SYS'   },
+  connect: { color: '#38bdf8', label: 'CONN'  },
 }
 
-function LogEntry({ entry, isNew }) {
-  const cfg = TYPE_CONFIG[entry.type] ?? TYPE_CONFIG.system
-
+function TypeBadge({ type }) {
+  const cfg = TYPE_CONFIG[type] ?? TYPE_CONFIG.system
   return (
-    <div className={`flex gap-2 py-1 border-b border-[#020d05] text-[11px] leading-tight
-                     ${isNew ? 'log-entry' : ''}`}>
-      {/* Timestamp */}
-      <span className="shrink-0 text-[#002d11] w-14">
+    <span
+      className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
+      style={{
+        color: cfg.color,
+        background: `${cfg.color}18`,
+        border: `1px solid ${cfg.color}30`,
+        letterSpacing: '0.05em',
+        lineHeight: 1,
+      }}
+    >
+      {cfg.label}
+    </span>
+  )
+}
+
+function LogEntry({ entry }) {
+  return (
+    <motion.div
+      initial={{ x: -8, opacity: 0 }}
+      animate={{ x: 0,  opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2, ease: 'easeOut' }}
+      className="flex items-start gap-2 py-2 border-b"
+      style={{ borderColor: '#1a1a24' }}
+    >
+      <span
+        className="stat-value shrink-0 text-[10px] text-text-muted pt-px"
+        style={{ minWidth: '6ch' }}
+      >
         {new Date(entry.ts).toLocaleTimeString('en-US', {
-          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
         })}
       </span>
-
-      {/* Icon */}
-      <span className="shrink-0 w-3" style={{ color: cfg.color }}>
-        {cfg.icon}
+      <TypeBadge type={entry.type} />
+      <span
+        className="text-[11px] leading-snug break-all"
+        style={{ color: '#94a3b8' }}
+      >
+        {entry.msg}
       </span>
-
-      {/* Tag */}
-      <span className="shrink-0 w-10 text-[9px]" style={{ color: cfg.color }}>
-        {cfg.prefix}
-      </span>
-
-      {/* Message */}
-      <span className="text-[#00aa33] break-all">{entry.msg}</span>
-    </div>
+    </motion.div>
   )
 }
 
 export default function DecisionLog({ entries }) {
-  const scrollRef = useRef(null)
+  const viewportRef = useRef(null)
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = 0
+    if (viewportRef.current) {
+      viewportRef.current.scrollTop = 0
     }
   }, [entries.length])
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={scrollRef}
-           className="flex-1 overflow-y-auto pr-1 space-y-0"
-           style={{ maxHeight: '100%' }}>
-        {entries.length === 0 ? (
-          <div className="text-[#002211] text-xs text-center mt-8">
-            <div className="text-2xl mb-2 text-[#003311]">◈</div>
-            awaiting first scan…
-          </div>
-        ) : (
-          entries.map((entry, i) => (
-            <LogEntry key={entry.id} entry={entry} isNew={i < 3} />
-          ))
-        )}
-      </div>
+      <ScrollArea.Root className="flex-1 min-h-0 overflow-hidden">
+        <ScrollArea.Viewport
+          ref={viewportRef}
+          className="h-full w-full"
+          style={{ maxHeight: '100%' }}
+        >
+          {entries.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center py-12 text-sm"
+              style={{ color: '#475569' }}
+            >
+              <div
+                className="text-3xl mb-3 opacity-30"
+                style={{ color: '#818cf8' }}
+              >
+                ◈
+              </div>
+              Awaiting first scan…
+            </div>
+          ) : (
+            <AnimatePresence initial={false}>
+              {entries.map(entry => (
+                <LogEntry key={entry.id} entry={entry} />
+              ))}
+            </AnimatePresence>
+          )}
+        </ScrollArea.Viewport>
+        <ScrollArea.Scrollbar
+          orientation="vertical"
+          className="flex select-none touch-none"
+          style={{ width: 4, padding: '2px 0' }}
+        >
+          <ScrollArea.Thumb
+            style={{
+              background: '#2a2a3a',
+              borderRadius: 2,
+              flex: 1,
+            }}
+          />
+        </ScrollArea.Scrollbar>
+      </ScrollArea.Root>
 
       {/* Footer */}
-      <div className="border-t border-[#001a08] pt-1 mt-1 text-[9px] text-[#002211] flex justify-between">
-        <span>{entries.length} entries</span>
-        <span className="blink">■</span>
+      <div
+        className="flex items-center justify-between pt-2 mt-1 border-t text-[10px]"
+        style={{ borderColor: '#2a2a3a' }}
+      >
+        <span className="text-text-muted">{entries.length} entries</span>
+        <div className="flex items-center gap-1.5">
+          <div
+            className="w-1.5 h-1.5 rounded-full animate-pulse-glow"
+            style={{ background: '#26de81' }}
+          />
+          <span style={{ color: '#26de81' }}>LIVE</span>
+        </div>
       </div>
     </div>
   )

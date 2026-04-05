@@ -11,7 +11,14 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "recharts": "^2.13.3"
+    "recharts": "^2.13.3",
+    "framer-motion": "^11.0.0",
+    "lucide-react": "^0.400.0",
+    "@radix-ui/react-progress": "^1.1.0",
+    "@radix-ui/react-tabs": "^1.1.0",
+    "@radix-ui/react-scroll-area": "^1.1.0",
+    "@radix-ui/react-tooltip": "^1.1.0",
+    "@radix-ui/react-dialog": "^1.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

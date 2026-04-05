@@ -1,50 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── CSS Variables ── */
 :root {
-  --neon:       #00ff41;
-  --neon-mid:   #00cc33;
-  --neon-dim:   #006622;
-  --neon-faint: #002211;
-  --bg:         #050505;
-  --bg-card:    #080808;
-  --bg-panel:   #060a06;
-  --red:        #ff0040;
-  --red-dim:    #660019;
-  --yellow:     #ffcc00;
-  --orange:     #ff6600;
+  --bg:            #0f0f14;
+  --bg-card:       #1a1a24;
+  --bg-panel:      #141420;
+  --border:        #2a2a3a;
+  --border-light:  #3a3a4a;
+  --profit:        #26de81;
+  --loss:          #ff5e7d;
+  --accent:        #818cf8;
+  --warn:          #fbbf24;
+  --info:          #38bdf8;
+  --text-primary:  #f8fafc;
+  --text-secondary:#94a3b8;
+  --text-muted:    #475569;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* ── Base reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body, #root {
   height: 100%;
   background: var(--bg);
-  color: var(--neon);
-  font-family: 'Share Tech Mono', monospace;
-  overflow: hidden;
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar       { width: 3px; height: 3px; }
+/* ── Custom scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--neon-dim); }
-
-/* ── CRT scanlines ── */
-#root::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg, transparent, transparent 2px,
-    rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px
-  );
-  pointer-events: none;
-  z-index: 9999;
-}
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+* { scrollbar-width: thin; scrollbar-color: var(--border-light) var(--bg); }
 
 /* ── Keyframes ── */
+@keyframes fadeInUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(-10px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes scanLine {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
 @keyframes radarRotate {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
@@ -56,95 +77,91 @@ html, body, #root {
   100% { r: 5; opacity: 0; }
 }
 
-@keyframes neonBlink {
-  0%, 100% { opacity: 1; }
-  49%      { opacity: 1; }
-  50%      { opacity: 0; }
-}
-
-@keyframes scanPulse {
-  0%, 100% { box-shadow: 0 0 4px var(--neon); }
-  50%      { box-shadow: 0 0 16px var(--neon), 0 0 32px var(--neon); }
-}
-
-@keyframes slideRight {
-  from { transform: translateX(-12px); opacity: 0; }
-  to   { transform: translateX(0);     opacity: 1; }
-}
-
-@keyframes barFill {
-  from { width: 0; }
-}
-
-@keyframes dangerPulse {
-  0%, 100% { box-shadow: 0 0 6px var(--red); }
-  50%      { box-shadow: 0 0 16px var(--red), 0 0 28px var(--red); }
-}
-
-@keyframes glowPulse {
-  0%, 100% { filter: drop-shadow(0 0 3px var(--neon)); }
-  50%      { filter: drop-shadow(0 0 10px var(--neon)) drop-shadow(0 0 20px var(--neon)); }
-}
-
-@keyframes countFlash {
-  0%, 100% { color: var(--yellow); }
-  50%      { color: var(--neon); }
-}
-
-@keyframes fadeUp {
-  from { transform: translateY(6px); opacity: 0; }
-  to   { transform: translateY(0);   opacity: 1; }
-}
-
-@keyframes tickDown {
-  from { opacity: 0.4; }
-  to   { opacity: 1; }
-}
-
 /* ── Utility classes ── */
-.font-orbitron { font-family: 'Orbitron', monospace; }
-
-.neon-text {
-  color: var(--neon);
-  text-shadow: 0 0 6px var(--neon), 0 0 12px rgba(0,255,65,0.4);
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
 
-.neon-card {
-  background: var(--bg-panel);
-  border: 1px solid #00ff4133;
-  box-shadow: 0 0 6px rgba(0,255,65,0.08), inset 0 0 12px rgba(0,255,65,0.03);
+.stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
 }
 
-.neon-card-active {
-  border-color: var(--neon);
-  box-shadow: 0 0 10px rgba(0,255,65,0.3), inset 0 0 12px rgba(0,255,65,0.05);
+.badge-profit {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(38, 222, 129, 0.12);
+  color: #26de81;
+  border: 1px solid rgba(38, 222, 129, 0.25);
 }
 
-.red-card {
-  border-color: #ff004044 !important;
-  box-shadow: 0 0 6px rgba(255,0,64,0.15), inset 0 0 8px rgba(255,0,64,0.05) !important;
+.badge-loss {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 94, 125, 0.12);
+  color: #ff5e7d;
+  border: 1px solid rgba(255, 94, 125, 0.25);
 }
 
+.badge-neutral {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(129, 140, 248, 0.12);
+  color: #818cf8;
+  border: 1px solid rgba(129, 140, 248, 0.25);
+}
+
+.probability-bar {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+}
+
+.probability-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Recharts overrides ── */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line { stroke: #2a2a3a !important; }
+.recharts-text tspan {
+  fill: #475569 !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 10px !important;
+}
+.recharts-tooltip-wrapper { outline: none; }
+
+/* ── Radar ── */
 .radar-blade {
   transform-box: fill-box;
   transform-origin: 150px 150px;
   animation: radarRotate 4s linear infinite;
 }
-
 .city-ping {
   transform-box: fill-box;
   transform-origin: center;
-  animation: cityPing 1.2s ease-out infinite;
+  animation: cityPing 1.4s ease-out infinite;
 }
 
-.blink { animation: neonBlink 1s step-end infinite; }
-.glow-pulse { animation: glowPulse 2s ease-in-out infinite; }
-.scan-pulse { animation: scanPulse 1.5s ease-in-out infinite; }
-
-.log-entry { animation: slideRight 0.25s ease-out; }
-.danger-pulse { animation: dangerPulse 0.8s ease-in-out infinite; }
-
-.recharts-cartesian-grid-horizontal line,
-.recharts-cartesian-grid-vertical line { stroke: #002211 !important; }
-.recharts-text tspan { fill: #006622 !important; font-family: 'Share Tech Mono', monospace !important; font-size: 10px !important; }
-.recharts-tooltip-wrapper { outline: none; }
+/* ── Animations ── */
+.animate-pulse-glow { animation: pulseGlow 2s ease-in-out infinite; }
+.animate-slide-in-right { animation: slideInRight 0.25s ease-out; }
+.animate-fade-in-up { animation: fadeInUp 0.3s ease-out; }

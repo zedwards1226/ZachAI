@@ -1,15 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import Radar        from './components/Radar'
-import EdgeMeters   from './components/EdgeMeters'
-import PnlChart     from './components/PnlChart'
-import Guardrails   from './components/Guardrails'
-import DecisionLog  from './components/DecisionLog'
+import { motion, AnimatePresence } from 'framer-motion'
+import { BarChart2, Cloud, History, TrendingUp, ShieldAlert, Layers } from 'lucide-react'
+
+import Header          from './components/Header'
+import CityCard        from './components/CityCard'
+import PnlChart        from './components/PnlChart'
+import GuardrailMeters from './components/GuardrailMeters'
+import DecisionLog     from './components/DecisionLog'
+import MarketBrowser   from './components/MarketBrowser'
+import ScanRadar       from './components/ScanRadar'
 
 const CITIES      = ['NYC', 'CHI', 'MIA', 'LAX', 'MEM', 'DEN']
-const SCAN_PERIOD = 60   // seconds between auto-scans
-const CITY_CYCLE  = 2800 // ms per city in radar
+const SCAN_PERIOD = 60    // seconds
+const CITY_CYCLE  = 2800  // ms per city
 
-// ── Tiny hook: poll an endpoint ──────────────────────────────────────────────
+// ── Poll hook ────────────────────────────────────────────────────────────────
 function useApi(path, interval = 5000) {
   const [data, setData]   = useState(null)
   const [error, setError] = useState(false)
@@ -31,43 +36,110 @@ function useApi(path, interval = 5000) {
   return { data, error }
 }
 
-// ── Log entry factory ────────────────────────────────────────────────────────
+// ── Log entry factory ─────────────────────────────────────────────────────────
 let _lid = 0
 function mkEntry(type, msg) {
   return { id: ++_lid, ts: new Date().toISOString(), type, msg }
 }
 
-// ── Main App ─────────────────────────────────────────────────────────────────
+// ── Stat card ─────────────────────────────────────────────────────────────────
+function StatCard({ label, value, color, sub }) {
+  return (
+    <div
+      className="flex flex-col gap-1 px-4 py-3 rounded-xl shrink-0"
+      style={{ background: '#1a1a24', border: '1px solid #2a2a3a' }}
+    >
+      <div className="text-[10px] font-medium text-text-muted" style={{ letterSpacing: '0.06em' }}>
+        {label}
+      </div>
+      <div
+        className="stat-value font-bold"
+        style={{ fontSize: 18, color: color ?? '#f8fafc', letterSpacing: '-0.02em' }}
+      >
+        {value}
+      </div>
+      {sub && (
+        <div className="text-[10px] text-text-muted">{sub}</div>
+      )}
+    </div>
+  )
+}
+
+// ── Tab bar ───────────────────────────────────────────────────────────────────
+const TABS = [
+  { id: 'weather', label: 'Weather',  Icon: Cloud     },
+  { id: 'markets', label: 'Markets',  Icon: BarChart2 },
+  { id: 'history', label: 'History',  Icon: History   },
+]
+
+function TabBar({ activeTab, onTab }) {
+  return (
+    <div
+      className="flex gap-1 px-2 border-b shrink-0"
+      style={{ borderColor: '#2a2a3a' }}
+    >
+      {TABS.map(({ id, label, Icon }) => {
+        const active = activeTab === id
+        return (
+          <button
+            key={id}
+            onClick={() => onTab(id)}
+            className="relative flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-colors"
+            style={{ color: active ? '#818cf8' : '#475569' }}
+          >
+            <Icon size={14} />
+            {label}
+            {active && (
+              <motion.div
+                layoutId="tabIndicator"
+                className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t"
+                style={{ background: '#818cf8' }}
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              />
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  // API data
-  const { data: health,     error: noKalshi } = useApi('/api/health',     10000)
-  const { data: forecasts }                    = useApi('/api/forecasts',   8000)
-  const { data: pnlData }                      = useApi('/api/pnl',         5000)
-  const { data: guardrails }                   = useApi('/api/guardrails',  5000)
-  const { data: summary }                      = useApi('/api/summary',     8000)
+  // API polling
+  const { data: health     } = useApi('/api/health',       10000)
+  const { data: forecasts  } = useApi('/api/forecasts',     8000)
+  const { data: pnlData    } = useApi('/api/pnl',           5000)
+  const { data: guardrails } = useApi('/api/guardrails',    5000)
+  const { data: summary    } = useApi('/api/summary',       8000)
+  const { data: logData    } = useApi('/api/decision-log',  3000)
 
-  // Radar city cycle
-  const [activeCity, setActiveCity] = useState('NYC')
-  const [scanning,   setScanning]   = useState(false)
+  // UI state
+  const [activeTab,      setActiveTab]      = useState('weather')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [activeCity,     setActiveCity]     = useState('NYC')
+  const [scanning,       setScanning]       = useState(false)
+  const [countdown,      setCountdown]      = useState(SCAN_PERIOD)
+  const [pingMs,         setPingMs]         = useState(null)
 
-  // Countdown
-  const [countdown, setCountdown]   = useState(SCAN_PERIOD)
-  const nextScanRef                 = useRef(Date.now() + SCAN_PERIOD * 1000)
-  const scanningRef                 = useRef(false)
-
-  // Decision log
-  const [logEntries, setLogEntries] = useState([
-    mkEntry('system', 'WeatherAlpha dashboard initialised'),
+  // Local fallback log (used when backend /api/decision-log unavailable)
+  const [localLog, setLocalLog] = useState([
+    mkEntry('system',  'WeatherAlpha dashboard initialised'),
     mkEntry('connect', 'Connecting to Kalshi API…'),
   ])
   const addLog = useCallback((type, msg) => {
-    setLogEntries(prev => [mkEntry(type, msg), ...prev].slice(0, 200))
+    setLocalLog(prev => [mkEntry(type, msg), ...prev].slice(0, 200))
   }, [])
 
-  // Kalshi ping latency
-  const [pingMs, setPingMs] = useState(null)
+  const nextScanRef = useRef(Date.now() + SCAN_PERIOD * 1000)
+  const scanningRef = useRef(false)
 
-  // ── City cycling ────────────────────────────────────────────────────────────
+  // Merge backend + local log
+  const logEntries = logData?.entries
+    ? logData.entries.map((e, i) => ({ ...e, id: e.id ?? `be-${i}` }))
+    : localLog
+
+  // ── City cycling ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
       setActiveCity(c => CITIES[(CITIES.indexOf(c) + 1) % CITIES.length])
@@ -75,7 +147,7 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
-  // ── Scan function ────────────────────────────────────────────────────────────
+  // ── Scan ──────────────────────────────────────────────────────────────────────
   const runScan = useCallback(async () => {
     if (scanningRef.current) return
     scanningRef.current = true
@@ -87,11 +159,11 @@ export default function App() {
       if (d.results) {
         d.results.forEach(res => {
           if (res.trade_placed) {
-            addLog('trade', `${res.city} — ${res.side} ${res.contracts}ct @ ${res.price_cents}¢ | edge ${(res.edge*100).toFixed(1)}%`)
+            addLog('trade', `${res.city} — ${res.side} ${res.contracts}ct @ ${res.price_cents}¢ | edge ${(res.edge * 100).toFixed(1)}%`)
           } else if (res.blocked) {
             addLog('block', `${res.city} — blocked: ${res.reason}`)
           } else if (res.edge != null) {
-            addLog('skip', `${res.city} — edge ${(res.edge*100).toFixed(1)}% (below threshold)`)
+            addLog('skip', `${res.city} — edge ${(res.edge * 100).toFixed(1)}% (below threshold)`)
           } else {
             addLog('skip', `${res.city} — ${res.reason ?? 'no opportunity'}`)
           }
@@ -105,7 +177,7 @@ export default function App() {
     }
   }, [addLog])
 
-  // ── Countdown + auto-scan ───────────────────────────────────────────────────
+  // ── Countdown + auto-scan ────────────────────────────────────────────────────
   useEffect(() => {
     const tick = setInterval(() => {
       const secs = Math.max(0, Math.round((nextScanRef.current - Date.now()) / 1000))
@@ -118,7 +190,7 @@ export default function App() {
     return () => clearInterval(tick)
   }, [runScan])
 
-  // ── Kalshi ping ─────────────────────────────────────────────────────────────
+  // ── Ping ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const measure = async () => {
       const t0 = performance.now()
@@ -133,7 +205,7 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
-  // ── Log connection status ───────────────────────────────────────────────────
+  // ── Log Kalshi connection changes ────────────────────────────────────────────
   const prevConnRef = useRef(null)
   useEffect(() => {
     const connected = health?.kalshi_connected
@@ -143,154 +215,271 @@ export default function App() {
     if (connected === false) addLog('error',   'Kalshi API disconnected')
   }, [health, addLog])
 
-  // ── Derived state ───────────────────────────────────────────────────────────
-  const fcList     = forecasts?.forecasts ?? []
-  const pnlSeries  = pnlData?.snapshots   ?? []
-  const kalshiOk   = health?.kalshi_connected === true
-  const pingColor  = !pingMs ? '#ff0040' : pingMs < 200 ? '#00ff41' : pingMs < 500 ? '#ffcc00' : '#ff0040'
+  // ── Derived values ────────────────────────────────────────────────────────────
+  const fcList    = forecasts?.forecasts ?? []
+  const pnlSeries = pnlData?.snapshots   ?? []
+  const kalshiOk  = health?.kalshi_connected === true
 
   const base     = 1000
-  const capital  = pnlSeries.length ? pnlSeries[pnlSeries.length - 1]?.capital_usd ?? base : base
+  const capital  = pnlSeries.length ? (pnlSeries[pnlSeries.length - 1]?.capital_usd ?? base) : base
   const pnlUsd   = capital - base
-  const pnlPos   = pnlUsd >= 0
+  const winRate  = summary?.win_rate ?? null
+  const trades   = (summary?.wins ?? 0) + (summary?.losses ?? 0)
+  const openRisk = summary?.open_risk_usd ?? 0
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  const pnlPos = pnlUsd >= 0
+
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full" style={{ background: '#050505' }}>
+    <div
+      className="flex flex-col h-full overflow-hidden"
+      style={{ background: '#0f0f14' }}
+    >
+      {/* Header */}
+      <Header
+        pnlUsd={pnlUsd}
+        kalshiOk={kalshiOk}
+        pingMs={pingMs}
+        countdown={countdown}
+        scanning={scanning}
+        onScan={runScan}
+        mobileMenuOpen={mobileMenuOpen}
+        onToggleMobile={() => setMobileMenuOpen(v => !v)}
+      />
 
-      {/* ── TOP BAR ──────────────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between px-4 py-2 border-b border-[#001a08]"
-              style={{ background: '#030803' }}>
-
-        {/* Logo */}
-        <div className="flex items-center gap-3">
-          <div style={{
-            fontFamily: 'Orbitron', color: '#00ff41',
-            textShadow: '0 0 12px #00ff41, 0 0 24px rgba(0,255,65,0.4)',
-            letterSpacing: '0.2em', fontSize: 15, fontWeight: 700,
-          }}>
-            WEATHERALPHA
-          </div>
-          <div className="text-[9px] text-[#003311] border border-[#001a08] rounded px-1">
-            v0.1 · DEMO
-          </div>
-        </div>
-
-        {/* Center: countdown */}
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] text-[#003311]">NEXT SCAN</span>
-          <span className={`font-bold ${countdown <= 10 ? 'text-[#ffcc00]' : 'text-[#006622]'}`}
-                style={{
-                  fontFamily: 'Orbitron', fontSize: 18,
-                  textShadow: countdown <= 10 ? '0 0 8px #ffcc00' : 'none',
-                }}>
-            {String(countdown).padStart(2, '0')}s
-          </span>
-          <button
-            onClick={runScan}
-            disabled={scanning}
-            className={`text-[9px] border rounded px-2 py-0.5 transition-all duration-200 ${
-              scanning
-                ? 'border-[#003311] text-[#003311] cursor-not-allowed'
-                : 'border-[#006622] text-[#00ff41] hover:border-[#00ff41] cursor-pointer'
-            } ${scanning ? '' : 'scan-pulse'}`}>
-            {scanning ? '● SCANNING' : '▶ SCAN'}
-          </button>
-        </div>
-
-        {/* Right: P&L + Kalshi status */}
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <div className="text-[8px] text-[#003311]">P&amp;L TODAY</div>
-            <div className="font-bold" style={{
-              fontFamily: 'Orbitron', fontSize: 14,
-              color: pnlPos ? '#00ff41' : '#ff0040',
-              textShadow: pnlPos ? '0 0 8px #00ff41' : '0 0 8px #ff0040',
-            }}>
-              {pnlPos ? '+' : ''}{pnlUsd.toFixed(2)}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <div className={`w-1.5 h-1.5 rounded-full ${kalshiOk ? 'bg-[#00ff41]' : 'bg-[#ff0040]'} ${kalshiOk ? 'glow-pulse' : ''}`} />
-            <div className="text-[9px]" style={{ color: kalshiOk ? '#006622' : '#cc0030' }}>
-              KALSHI {kalshiOk ? 'LIVE' : 'DOWN'}
-            </div>
-            {pingMs && (
-              <div className="text-[8px] border rounded px-1"
-                   style={{ color: pingColor, borderColor: pingColor + '44' }}>
-                {pingMs}ms
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* ── MAIN GRID ────────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 grid gap-2 p-2"
-           style={{ gridTemplateColumns: '1fr 1.4fr 1fr' }}>
-
-        {/* ── COL 1: Radar + Edge Meters ─── */}
-        <div className="flex flex-col gap-2 min-h-0">
-
-          <div className="neon-card rounded p-2 flex flex-col gap-1">
-            <div className="flex justify-between items-center">
-              <span className="text-[9px] text-[#003311] tracking-widest" style={{ fontFamily: 'Orbitron' }}>
-                MARKET RADAR
-              </span>
-              <span className="text-[8px] text-[#002211]">{activeCity}</span>
-            </div>
-            <Radar forecasts={fcList} activeCity={activeCity} scanning={scanning} />
-          </div>
-
-          <div className="neon-card rounded p-2 flex-1 overflow-y-auto">
-            <div className="text-[9px] text-[#003311] tracking-widest mb-2" style={{ fontFamily: 'Orbitron' }}>
-              EDGE ANALYSIS
-            </div>
-            <EdgeMeters forecasts={fcList} activeCity={activeCity} />
-          </div>
-        </div>
-
-        {/* ── COL 2: P&L Chart + Guardrails ─── */}
-        <div className="flex flex-col gap-2 min-h-0">
-
-          <div className="neon-card rounded p-2 flex-1 min-h-0">
-            <div className="text-[9px] text-[#003311] tracking-widest mb-1" style={{ fontFamily: 'Orbitron' }}>
-              CAPITAL CURVE
-            </div>
-            <div style={{ height: 'calc(100% - 20px)' }}>
-              <PnlChart pnl={pnlSeries} summary={summary} />
-            </div>
-          </div>
-
-          <div className="neon-card rounded p-2">
-            <div className="text-[9px] text-[#003311] tracking-widest mb-2" style={{ fontFamily: 'Orbitron' }}>
-              RISK GUARDRAILS
-            </div>
-            <Guardrails guardrails={guardrails} />
-          </div>
-        </div>
-
-        {/* ── COL 3: Decision Log ─── */}
-        <div className="neon-card rounded p-2 flex flex-col min-h-0">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-[9px] text-[#003311] tracking-widest" style={{ fontFamily: 'Orbitron' }}>
-              DECISION LOG
-            </span>
-            <span className="text-[8px] text-[#002211] blink">■ LIVE</span>
-          </div>
-          <div className="flex-1 min-h-0">
-            <DecisionLog entries={logEntries} />
-          </div>
-        </div>
+      {/* Stats row */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 border-b overflow-x-auto shrink-0"
+        style={{ borderColor: '#2a2a3a', scrollbarWidth: 'none' }}
+      >
+        <StatCard
+          label="CAPITAL"
+          value={`$${capital.toFixed(2)}`}
+          color="#f8fafc"
+        />
+        <StatCard
+          label="TODAY P&L"
+          value={`${pnlPos ? '+' : ''}$${pnlUsd.toFixed(2)}`}
+          color={pnlPos ? '#26de81' : '#ff5e7d'}
+        />
+        {winRate != null && (
+          <StatCard
+            label="WIN RATE"
+            value={`${(winRate * 100).toFixed(0)}%`}
+            color={winRate >= 0.5 ? '#26de81' : '#fbbf24'}
+          />
+        )}
+        <StatCard
+          label="TRADES"
+          value={trades}
+          color="#94a3b8"
+          sub={`${summary?.wins ?? 0}W / ${summary?.losses ?? 0}L`}
+        />
+        {openRisk > 0 && (
+          <StatCard
+            label="OPEN RISK"
+            value={`$${openRisk.toFixed(0)}`}
+            color="#fbbf24"
+          />
+        )}
+        <StatCard
+          label="TRADE WINDOW"
+          value={guardrails?.trade_window_open === false ? 'CLOSED' : 'OPEN'}
+          color={guardrails?.trade_window_open === false ? '#ff5e7d' : '#26de81'}
+        />
+        <StatCard
+          label="KALSHI"
+          value={kalshiOk ? 'LIVE' : 'DOWN'}
+          color={kalshiOk ? '#26de81' : '#ff5e7d'}
+          sub={pingMs ? `${pingMs}ms` : undefined}
+        />
       </div>
 
-      {/* ── STATUS BAR ───────────────────────────────────────────────────────── */}
-      <footer className="flex justify-between items-center px-4 py-1 border-t border-[#001a08] text-[8px] text-[#002211]"
-              style={{ background: '#030803' }}>
-        <span>WEATHERALPHA · KALSHI WEATHER MARKETS · DEMO MODE</span>
-        <span>{new Date().toLocaleString()}</span>
-        <span className="blink">■</span>
+      {/* Tabs */}
+      <TabBar activeTab={activeTab} onTab={setActiveTab} />
+
+      {/* Tab content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {activeTab === 'weather' && (
+            <motion.div
+              key="weather"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              className="h-full overflow-y-auto"
+            >
+              {/* Weather layout: city grid | pnl chart | decision log */}
+              <div
+                className="h-full grid gap-4 p-4"
+                style={{ gridTemplateColumns: '1fr 1.3fr 1fr' }}
+              >
+                {/* Col 1: City cards */}
+                <div className="flex flex-col gap-3 overflow-y-auto min-h-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <h2 className="text-xs font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                      CITY FORECASTS
+                    </h2>
+                    {scanning && (
+                      <span
+                        className="text-[10px] font-semibold animate-pulse-glow"
+                        style={{ color: '#818cf8' }}
+                      >
+                        SCANNING…
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Radar (compact) */}
+                  <div
+                    className="card p-3"
+                    style={{ border: '1px solid #2a2a3a' }}
+                  >
+                    <div className="text-[10px] font-semibold text-text-muted mb-2" style={{ letterSpacing: '0.06em' }}>
+                      MARKET RADAR
+                    </div>
+                    <ScanRadar forecasts={fcList} activeCity={activeCity} scanning={scanning} />
+                  </div>
+
+                  {/* City cards grid */}
+                  <div className="grid grid-cols-1 gap-2">
+                    {CITIES.map(code => {
+                      const fc = fcList.find(f => f.city === code)
+                      return (
+                        <CityCard
+                          key={code}
+                          forecast={fc ? fc : { city: code }}
+                          isActive={code === activeCity}
+                          scanning={scanning && code === activeCity}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Col 2: P&L chart + guardrails */}
+                <div className="flex flex-col gap-4 min-h-0 overflow-y-auto">
+                  <div className="card p-4 flex-1 min-h-0" style={{ minHeight: 280 }}>
+                    <div className="text-[10px] font-semibold text-text-muted mb-3" style={{ letterSpacing: '0.08em' }}>
+                      CAPITAL CURVE
+                    </div>
+                    <div style={{ height: 'calc(100% - 28px)' }}>
+                      <PnlChart pnl={pnlSeries} summary={summary} />
+                    </div>
+                  </div>
+
+                  <div className="card p-4 shrink-0">
+                    <div className="flex items-center gap-2 mb-3">
+                      <ShieldAlert size={13} style={{ color: '#818cf8' }} />
+                      <div className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                        RISK GUARDRAILS
+                      </div>
+                    </div>
+                    <GuardrailMeters guardrails={guardrails} />
+                  </div>
+                </div>
+
+                {/* Col 3: Decision log */}
+                <div className="card p-4 flex flex-col min-h-0">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                      DECISION LOG
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="w-1.5 h-1.5 rounded-full animate-pulse-glow"
+                        style={{ background: '#26de81' }}
+                      />
+                      <span className="text-[10px] font-medium" style={{ color: '#26de81' }}>
+                        LIVE
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    <DecisionLog entries={logEntries} />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'markets' && (
+            <motion.div
+              key="markets"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              className="h-full overflow-y-auto p-4"
+            >
+              <div className="max-w-5xl mx-auto">
+                <div className="flex items-center gap-2 mb-4">
+                  <BarChart2 size={16} style={{ color: '#818cf8' }} />
+                  <h2 className="font-semibold text-text-primary">Market Browser</h2>
+                </div>
+                <MarketBrowser />
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'history' && (
+            <motion.div
+              key="history"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              className="h-full overflow-y-auto p-4"
+            >
+              <div className="max-w-5xl mx-auto">
+                <div className="flex items-center gap-2 mb-4">
+                  <History size={16} style={{ color: '#818cf8' }} />
+                  <h2 className="font-semibold text-text-primary">Trade History</h2>
+                </div>
+
+                {/* P&L chart full width */}
+                <div className="card p-4 mb-4" style={{ height: 320 }}>
+                  <div className="text-[10px] font-semibold text-text-muted mb-3" style={{ letterSpacing: '0.08em' }}>
+                    CAPITAL CURVE
+                  </div>
+                  <div style={{ height: 'calc(100% - 28px)' }}>
+                    <PnlChart pnl={pnlSeries} summary={summary} />
+                  </div>
+                </div>
+
+                {/* Decision log full width */}
+                <div className="card p-4" style={{ minHeight: 400 }}>
+                  <div className="text-[10px] font-semibold text-text-muted mb-3" style={{ letterSpacing: '0.08em' }}>
+                    FULL DECISION LOG
+                  </div>
+                  <div style={{ height: 360 }}>
+                    <DecisionLog entries={logEntries} />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Footer */}
+      <footer
+        className="flex items-center justify-between px-4 py-2 border-t shrink-0 text-[10px] text-text-muted"
+        style={{ borderColor: '#2a2a3a', background: '#0f0f14' }}
+      >
+        <span>WeatherAlpha · Kalshi Weather Markets · Paper Mode</span>
+        <span className="stat-value">{new Date().toLocaleString()}</span>
+        <div className="flex items-center gap-1.5">
+          <div
+            className="w-1.5 h-1.5 rounded-full"
+            style={{
+              background: kalshiOk ? '#26de81' : '#ff5e7d',
+              animation: 'pulseGlow 2s ease-in-out infinite',
+            }}
+          />
+          <span>{kalshiOk ? 'Connected' : 'Disconnected'}</span>
+        </div>
       </footer>
     </div>
   )

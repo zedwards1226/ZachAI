@@ -43,6 +43,7 @@ CITIES = {
     "MIA": {"name": "Miami",         "lat": 25.7617, "lon": -80.1918, "kalshi_series": "KXHIGHMIA"},
     "LAX": {"name": "Los Angeles",   "lat": 34.0522, "lon": -118.2437, "kalshi_series": "KXHIGHLAX"},
     "DEN": {"name": "Denver",        "lat": 39.7392, "lon": -104.9903, "kalshi_series": "KXHIGHDEN"},
+    "MEM": {"name": "Memphis",       "lat": 35.1495, "lon": -90.0490,  "kalshi_series": "KXHIGHMEM"},
 }
 
 # Flask

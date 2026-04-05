@@ -24,7 +24,7 @@ from flask_cors import CORS
 from config import FLASK_HOST, FLASK_PORT, PAPER_MODE, KALSHI_DEMO
 from database import (
     init_db, get_trades, get_latest_forecasts, get_pnl_history,
-    get_summary, get_guardrail_state
+    get_summary, get_guardrail_state, log_decision, get_decision_log
 )
 from guardrails import guardrail_status
 from scheduler import start_scheduler, stop_scheduler, trigger_scan_now
@@ -42,6 +42,15 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app, origins="*")
+
+# Module-level scan state tracker
+_scan_status = {
+    "is_scanning": False,
+    "current_city": None,
+    "last_scan_time": None,
+    "next_scan_time": None,
+    "last_results": [],
+}
 
 
 @app.route("/api/health")
@@ -97,12 +106,35 @@ def summary():
 
 @app.route("/api/scan", methods=["POST"])
 def scan():
+    from datetime import datetime as _dt
+    _scan_status["is_scanning"] = True
+    _scan_status["last_scan_time"] = _dt.utcnow().isoformat()
     try:
         actions = trigger_scan_now()
+        _scan_status["last_results"] = actions if isinstance(actions, list) else []
+        # Persist each action to decision_log
+        if isinstance(actions, list):
+            for action in actions:
+                log_decision(
+                    type=action.get("action", "scan"),
+                    message=action.get("message", str(action)),
+                    city=action.get("city"),
+                    edge=action.get("edge"),
+                    contracts=action.get("contracts"),
+                    side=action.get("side"),
+                    price_cents=action.get("price_cents"),
+                    stake_usd=action.get("stake_usd"),
+                    reason=action.get("reason"),
+                )
+        else:
+            log_decision(type="scan", message="Manual scan triggered", reason="no structured results")
         return jsonify({"ok": True, "actions": actions})
     except Exception as exc:
         log.error("Manual scan error: %s", exc)
+        log_decision(type="error", message=f"Manual scan error: {exc}")
         return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        _scan_status["is_scanning"] = False
 
 
 @app.route("/api/resolve", methods=["POST"])
@@ -112,6 +144,50 @@ def resolve():
         return jsonify({"ok": True})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/decision-log")
+def decision_log():
+    limit = int(request.args.get("limit", 100))
+    since = request.args.get("since")
+    entries = get_decision_log(limit=limit, since=since)
+    return jsonify({"entries": entries, "count": len(entries)})
+
+
+@app.route("/api/scan/status")
+def scan_status():
+    return jsonify(_scan_status)
+
+
+@app.route("/api/markets/browse")
+def markets_browse():
+    from kalshi_client import get_client
+    series = request.args.get("series", "KXHIGHNY")
+    limit = int(request.args.get("limit", 20))
+    client = get_client()
+    try:
+        markets = client.search_kxhigh_markets(series)
+        return jsonify({"markets": markets[:limit], "series": series})
+    except Exception as e:
+        return jsonify({"markets": [], "error": str(e)})
+
+
+@app.route("/api/markets/all")
+def markets_all():
+    from kalshi_client import get_client
+    from config import CITIES
+    client = get_client()
+    all_markets = []
+    for city_code, city_info in CITIES.items():
+        try:
+            markets = client.search_kxhigh_markets(city_code)
+            for m in markets:
+                m["city"] = city_code
+                m["city_name"] = city_info["name"]
+            all_markets.extend(markets)
+        except Exception:
+            pass
+    return jsonify({"markets": all_markets, "count": len(all_markets)})
 
 
 @app.errorhandler(404)
