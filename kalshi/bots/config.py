@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load from kalshi/.env (one level up from bots/)
+_env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(_env_path)
 
 # Kalshi — RSA key auth (API v2)
 # Get keys at: https://demo.kalshi.co (demo) or https://kalshi.com (live)
