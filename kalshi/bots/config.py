@@ -3,14 +3,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Kalshi
-KALSHI_EMAIL = os.getenv("KALSHI_EMAIL", "")
-KALSHI_PASSWORD = os.getenv("KALSHI_PASSWORD", "")
+# Kalshi — RSA key auth (API v2)
+# Get keys at: https://demo.kalshi.co (demo) or https://kalshi.com (live)
+# Settings > API Keys > Generate Key → download private key PEM file
+KALSHI_API_KEY_ID      = os.getenv("KALSHI_API_KEY_ID", "")       # UUID from Kalshi settings
+KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "") # path to .pem file
 KALSHI_DEMO = os.getenv("KALSHI_DEMO", "true").lower() == "true"
 KALSHI_BASE = (
     "https://demo-api.kalshi.co/trade-api/v2"
     if KALSHI_DEMO
-    else "https://trading-api.kalshi.com/trade-api/v2"
+    else "https://api.elections.kalshi.com/trade-api/v2"
 )
 
 # Trading

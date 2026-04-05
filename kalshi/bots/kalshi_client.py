@@ -1,63 +1,108 @@
 """
-Kalshi API client — supports both demo and live.
-Paper mode: all orders are logged but never sent to Kalshi.
+Kalshi API client — RSA-PSS authentication (API v2).
+Supports demo (demo-api.kalshi.co) and live (api.elections.kalshi.com).
+Paper mode: orders logged but never sent to Kalshi.
+
+Auth flow (per Kalshi docs):
+  Headers: KALSHI-ACCESS-KEY, KALSHI-ACCESS-TIMESTAMP, KALSHI-ACCESS-SIGNATURE
+  Signature: RSA-PSS SHA256 of (timestamp_ms + METHOD + path_without_query)
 """
+import base64
 import logging
-import requests
+import time
 from datetime import date
+from pathlib import Path
+
+import requests
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+
 from config import (
-    KALSHI_BASE, KALSHI_EMAIL, KALSHI_PASSWORD,
+    KALSHI_BASE, KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH,
     KALSHI_DEMO, PAPER_MODE, CITIES
 )
 
 log = logging.getLogger(__name__)
 
-# KXHIGH markets follow the pattern: KXHIGH-{TAG}-{YYYYMMDD}-T{STRIKE}
-# e.g. KXHIGH-NY-20240601-T75  (will high exceed 75°F today?)
+
+def _load_private_key():
+    path = Path(KALSHI_PRIVATE_KEY_PATH)
+    if not path.exists():
+        raise FileNotFoundError(f"Kalshi private key not found: {path}")
+    pem = path.read_bytes()
+    return serialization.load_pem_private_key(pem, password=None)
+
+
+def _sign(private_key, timestamp_ms: int, method: str, path: str) -> str:
+    """
+    RSA-PSS SHA256 signature of: str(timestamp_ms) + METHOD + /path/without/query
+    Returns base64-encoded signature string.
+    """
+    # Strip query string from path
+    path_no_query = path.split("?")[0]
+    message = f"{timestamp_ms}{method.upper()}{path_no_query}".encode()
+    sig = private_key.sign(
+        message,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.DIGEST_LENGTH,
+        ),
+        hashes.SHA256(),
+    )
+    return base64.b64encode(sig).decode()
 
 
 class KalshiClient:
     def __init__(self):
         self.session = requests.Session()
-        self.token: str | None = None
-        self._logged_in = False
-
-    # ── Auth ──────────────────────────────────────────────────────────────────
+        self._private_key = None
+        self._ready = False
 
     def login(self) -> bool:
-        if not KALSHI_EMAIL or not KALSHI_PASSWORD:
-            log.warning("Kalshi credentials not set — running unauthenticated (public only)")
+        """Load RSA private key and verify credentials are set."""
+        if not KALSHI_API_KEY_ID:
+            log.warning("KALSHI_API_KEY_ID not set — market data unavailable (paper mode OK)")
+            return False
+        if not KALSHI_PRIVATE_KEY_PATH:
+            log.warning("KALSHI_PRIVATE_KEY_PATH not set — market data unavailable")
             return False
         try:
-            resp = self.session.post(
-                f"{KALSHI_BASE}/login",
-                json={"email": KALSHI_EMAIL, "password": KALSHI_PASSWORD},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            self.token = resp.json().get("token")
-            self.session.headers.update({"Authorization": f"Bearer {self.token}"})
-            self._logged_in = True
-            log.info("Kalshi login OK (demo=%s)", KALSHI_DEMO)
+            self._private_key = _load_private_key()
+            self._ready = True
+            log.info("Kalshi RSA key loaded (demo=%s, key=%s…)", KALSHI_DEMO,
+                     KALSHI_API_KEY_ID[:8])
             return True
         except Exception as exc:
-            log.error("Kalshi login failed: %s", exc)
+            log.error("Failed to load Kalshi private key: %s", exc)
             return False
 
+    def _auth_headers(self, method: str, path: str) -> dict:
+        ts = int(time.time() * 1000)
+        sig = _sign(self._private_key, ts, method, path)
+        return {
+            "KALSHI-ACCESS-KEY":       KALSHI_API_KEY_ID,
+            "KALSHI-ACCESS-TIMESTAMP": str(ts),
+            "KALSHI-ACCESS-SIGNATURE": sig,
+            "Content-Type":            "application/json",
+        }
+
     def _get(self, path: str, params: dict | None = None) -> dict:
-        resp = self.session.get(f"{KALSHI_BASE}{path}", params=params, timeout=10)
+        url  = f"{KALSHI_BASE}{path}"
+        hdrs = self._auth_headers("GET", path) if self._ready else {}
+        resp = self.session.get(url, params=params, headers=hdrs, timeout=10)
         resp.raise_for_status()
         return resp.json()
 
     def _post(self, path: str, body: dict) -> dict:
-        resp = self.session.post(f"{KALSHI_BASE}{path}", json=body, timeout=10)
+        url  = f"{KALSHI_BASE}{path}"
+        hdrs = self._auth_headers("POST", path) if self._ready else {}
+        resp = self.session.post(url, json=body, headers=hdrs, timeout=10)
         resp.raise_for_status()
         return resp.json()
 
-    # ── Market discovery ──────────────────────────────────────────────────────
+    # ── Market discovery (public — no auth needed for market data) ────────────
 
     def get_market(self, ticker: str) -> dict | None:
-        """Fetch a single market by ticker. Returns None if not found."""
         try:
             data = self._get(f"/markets/{ticker}")
             return data.get("market")
@@ -67,17 +112,12 @@ class KalshiClient:
             raise
 
     def search_kxhigh_markets(self, city_code: str, target_date: str | None = None) -> list[dict]:
-        """
-        Search for KXHIGH markets for a city on a given date (YYYY-MM-DD).
-        Returns list of market dicts sorted by strike ascending.
-        """
-        tag  = CITIES[city_code]["kalshi_tag"]
-        dt   = (target_date or date.today().isoformat()).replace("-", "")
+        tag    = CITIES[city_code]["kalshi_tag"]
+        dt     = (target_date or date.today().isoformat()).replace("-", "")
         prefix = f"KXHIGH-{tag}-{dt}"
         try:
-            data = self._get("/markets", params={"series_ticker": f"KXHIGH-{tag}", "limit": 100})
-            markets = data.get("markets", [])
-            # Filter to today's date
+            data     = self._get("/markets", params={"series_ticker": f"KXHIGH-{tag}", "limit": 100})
+            markets  = data.get("markets", [])
             filtered = [m for m in markets if m.get("ticker", "").startswith(prefix)]
             filtered.sort(key=lambda m: m.get("ticker", ""))
             return filtered
@@ -86,78 +126,63 @@ class KalshiClient:
             return []
 
     def get_orderbook(self, ticker: str) -> dict | None:
-        """Return best YES/NO prices from the orderbook."""
         try:
-            data = self._get(f"/markets/{ticker}/orderbook")
-            book = data.get("orderbook", {})
+            data       = self._get(f"/markets/{ticker}/orderbook")
+            book       = data.get("orderbook", {})
             yes_levels = book.get("yes", [])
             no_levels  = book.get("no", [])
-            best_yes = yes_levels[0][0] if yes_levels else None
-            best_no  = no_levels[0][0]  if no_levels  else None
-            return {"yes": best_yes, "no": best_no, "ticker": ticker}
+            return {
+                "yes":    yes_levels[0][0] if yes_levels else None,
+                "no":     no_levels[0][0]  if no_levels  else None,
+                "ticker": ticker,
+            }
         except Exception:
             return None
 
-    # ── Account ───────────────────────────────────────────────────────────────
+    # ── Authenticated endpoints ────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        """Return available balance in USD."""
-        if not self._logged_in:
+        if not self._ready:
             return 0.0
         try:
             data = self._get("/portfolio/balance")
-            cents = data.get("balance", 0)
-            return cents / 100
+            return data.get("balance", 0) / 100
         except Exception:
             return 0.0
 
     def get_positions(self) -> list[dict]:
-        if not self._logged_in:
+        if not self._ready:
             return []
         try:
-            data = self._get("/portfolio/positions")
-            return data.get("market_positions", [])
+            return self._get("/portfolio/positions").get("market_positions", [])
         except Exception:
             return []
 
-    # ── Order placement ───────────────────────────────────────────────────────
-
     def place_order(self, ticker: str, side: str, contracts: int,
                     price_cents: int, client_order_id: str = "") -> dict:
-        """
-        Place a limit order.
-        side: "yes" or "no"
-        price_cents: 1-99
-        Returns order dict or raises.
-        In PAPER_MODE, logs and returns a fake order dict.
-        """
         if PAPER_MODE:
-            log.info(
-                "[PAPER] ORDER: %s %s x%d @ %d¢",
-                ticker, side.upper(), contracts, price_cents
-            )
+            log.info("[PAPER] %s %s x%d @ %d¢", ticker, side.upper(), contracts, price_cents)
             return {
-                "order_id":   f"PAPER-{ticker}-{side}-{contracts}",
-                "ticker":     ticker,
-                "side":       side,
-                "contracts":  contracts,
-                "price":      price_cents,
-                "status":     "paper_filled",
-                "paper":      True,
+                "order_id":  f"PAPER-{ticker}-{side}-{contracts}",
+                "ticker":    ticker,
+                "side":      side,
+                "contracts": contracts,
+                "price":     price_cents,
+                "status":    "paper_filled",
+                "paper":     True,
             }
-
-        if not self._logged_in:
-            raise RuntimeError("Not logged in to Kalshi")
+        if not self._ready:
+            raise RuntimeError("Kalshi client not authenticated")
 
         body = {
-            "ticker":           ticker,
-            "action":           "buy",
-            "side":             side,
-            "type":             "limit",
-            "count":            contracts,
-            "yes_price":        price_cents if side == "yes" else 100 - price_cents,
-            "no_price":         price_cents if side == "no"  else 100 - price_cents,
-            "client_order_id":  client_order_id,
+            "ticker":          ticker,
+            "action":          "buy",
+            "side":            side,
+            "type":            "limit",
+            "count":           contracts,
+            "yes_price":       price_cents if side == "yes" else 100 - price_cents,
+            "no_price":        price_cents if side == "no"  else 100 - price_cents,
+            "client_order_id": client_order_id,
         }
         return self._post("/portfolio/orders", body)
 
