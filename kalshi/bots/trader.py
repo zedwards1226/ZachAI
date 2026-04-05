@@ -1,0 +1,242 @@
+"""
+Core trading logic for WeatherAlpha.
+Orchestrates: fetch forecasts → find markets → compute edge → check guardrails → place orders.
+"""
+import logging
+from datetime import date
+
+from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE
+from database import (
+    insert_forecast, insert_trade, update_guardrail_state,
+    get_guardrail_state, get_summary, snapshot_pnl
+)
+from weather import fetch_all_forecasts
+from kalshi_client import get_client
+from edge import prob_exceeds, compute_edge, best_side, effective_edge, parse_strike_from_ticker
+from kelly import size_stake, size_stake_no
+from guardrails import all_checks
+
+log = logging.getLogger(__name__)
+
+
+def get_capital() -> float:
+    summary = get_summary()
+    return STARTING_CAPITAL + summary["total_pnl_usd"]
+
+
+def scan_and_trade() -> list[dict]:
+    """
+    Main scan loop. Returns list of trade actions taken this cycle.
+    Called by APScheduler every SCAN_INTERVAL_MINUTES.
+    """
+    log.info("=== WeatherAlpha scan starting ===")
+    actions = []
+
+    # 1. Fetch all weather forecasts
+    forecasts = fetch_all_forecasts()
+
+    # 2. Get Kalshi client
+    client = get_client()
+    capital = get_capital()
+
+    for city_code, forecast in forecasts.items():
+        if forecast.get("error"):
+            log.warning("Skipping %s — forecast error: %s", city_code, forecast["error"])
+            continue
+
+        high_f = forecast["high_f"]
+        low_f  = forecast["low_f"]
+
+        # 3. Search relevant KXHIGH markets
+        markets_raw = client.search_kxhigh_markets(city_code)
+        if not markets_raw:
+            log.debug("No KXHIGH markets found for %s", city_code)
+            # Save forecast anyway (no market data)
+            insert_forecast(city_code, high_f, low_f)
+            continue
+
+        # 4. Enrich market data with strike prices and prices
+        markets = []
+        for m in markets_raw:
+            ticker    = m.get("ticker", "")
+            strike    = parse_strike_from_ticker(ticker)
+            yes_price = m.get("yes_bid")  # best bid in cents
+
+            if strike is None:
+                continue
+
+            # Try to get orderbook if no bid in market data
+            if yes_price is None:
+                ob = client.get_orderbook(ticker)
+                if ob:
+                    yes_price = ob.get("yes")
+
+            if yes_price is None:
+                continue
+
+            markets.append({
+                "ticker":         ticker,
+                "strike_f":       strike,
+                "yes_price_cents": int(yes_price),
+                "no_price_cents":  100 - int(yes_price),
+            })
+
+        if not markets:
+            insert_forecast(city_code, high_f, low_f)
+            continue
+
+        # 5. Find market with best edge
+        best = None
+        best_abs_edge = 0.0
+        for m in markets:
+            our_p = prob_exceeds(high_f, m["strike_f"])
+            e     = compute_edge(our_p, m["yes_price_cents"])
+            ae    = effective_edge(e)
+            if ae > best_abs_edge:
+                best_abs_edge = ae
+                best = {**m, "our_prob": our_p, "edge": e, "abs_edge": ae}
+
+        if not best:
+            insert_forecast(city_code, high_f, low_f)
+            continue
+
+        # 6. Determine side
+        side = best_side(best["edge"])
+        price_cents = (best["yes_price_cents"] if side == "yes"
+                       else best["no_price_cents"])
+        our_prob_for_side = best["our_prob"] if side == "yes" else 1 - best["our_prob"]
+
+        # 7. Size position
+        sizing = size_stake(our_prob_for_side, price_cents, capital)
+        stake  = sizing["stake_usd"]
+
+        # 8. Save forecast record
+        insert_forecast(
+            city_code, high_f, low_f,
+            kalshi_market_id   = best["ticker"],
+            kalshi_strike_f    = best["strike_f"],
+            kalshi_yes_price   = best["yes_price_cents"],
+            kalshi_no_price    = best["no_price_cents"],
+            implied_prob_yes   = best["yes_price_cents"] / 100,
+            our_prob_yes       = best["our_prob"],
+            edge               = best["edge"],
+            raw_weather        = forecast.get("raw"),
+        )
+
+        # 9. Guardrail checks
+        passed, reasons = all_checks(best["edge"], stake, capital, paper=PAPER_MODE)
+        if not passed:
+            log.info("Trade blocked [%s %s]: %s", city_code, best["ticker"], "; ".join(reasons))
+            actions.append({
+                "city":    city_code,
+                "ticker":  best["ticker"],
+                "action":  "blocked",
+                "reasons": reasons,
+                "edge":    best["edge"],
+            })
+            continue
+
+        # 10. Place order
+        try:
+            order = client.place_order(
+                ticker        = best["ticker"],
+                side          = side,
+                contracts     = sizing["contracts"],
+                price_cents   = price_cents,
+            )
+            trade_id = insert_trade(
+                city         = city_code,
+                market_id    = best["ticker"],
+                side         = side.upper(),
+                contracts    = sizing["contracts"],
+                price_cents  = price_cents,
+                edge         = best["edge"],
+                kelly_frac   = sizing["frac_kelly"],
+                stake_usd    = stake,
+                paper        = PAPER_MODE,
+                notes        = f"strike={best['strike_f']}F our_prob={best['our_prob']:.3f}",
+            )
+
+            # Update guardrail state
+            gs = get_guardrail_state()
+            update_guardrail_state(
+                daily_trades        = gs["daily_trades"] + 1,
+                daily_pnl_usd       = gs["daily_pnl_usd"],
+                consecutive_losses  = gs["consecutive_losses"],
+                capital_at_risk_usd = gs["capital_at_risk_usd"] + stake,
+                halted              = gs["halted"],
+                halt_reason         = gs["halt_reason"],
+            )
+
+            log.info(
+                "TRADE [%s] %s %s x%d @ %d¢ edge=%.1f%% stake=$%.2f paper=%s",
+                city_code, best["ticker"], side.upper(),
+                sizing["contracts"], price_cents,
+                best["abs_edge"] * 100, stake, PAPER_MODE
+            )
+
+            actions.append({
+                "city":      city_code,
+                "ticker":    best["ticker"],
+                "action":    "traded",
+                "side":      side.upper(),
+                "contracts": sizing["contracts"],
+                "price":     price_cents,
+                "edge":      round(best["edge"], 4),
+                "stake":     stake,
+                "trade_id":  trade_id,
+                "paper":     PAPER_MODE,
+            })
+
+        except Exception as exc:
+            log.error("Order failed [%s %s]: %s", city_code, best["ticker"], exc)
+            actions.append({
+                "city":   city_code,
+                "ticker": best["ticker"],
+                "action": "error",
+                "error":  str(exc),
+            })
+
+    snapshot_pnl(capital, get_guardrail_state().get("capital_at_risk_usd", 0))
+    log.info("=== Scan complete — %d actions ===", len(actions))
+    return actions
+
+
+def resolve_expired_trades() -> None:
+    """
+    Check open paper trades and resolve them (demo settlement simulation).
+    For live mode this would query Kalshi settlement.
+    """
+    from database import get_open_trades, resolve_trade, get_guardrail_state
+    open_trades = get_open_trades()
+    if not open_trades:
+        return
+
+    for trade in open_trades:
+        # In paper mode, simulate 50/50 resolution for testing
+        # In production this would call the Kalshi settlement API
+        if not PAPER_MODE:
+            try:
+                client = get_client()
+                market = client.get_market(trade["market_id"])
+                if market and market.get("status") == "finalized":
+                    result = market.get("result")  # "yes" or "no"
+                    won    = (result == "yes" and trade["side"] == "YES") or \
+                             (result == "no"  and trade["side"] == "NO")
+                    pnl    = (trade["contracts"] * (1 - trade["price_cents"]/100) if won
+                              else -trade["contracts"] * trade["price_cents"]/100)
+                    resolve_trade(trade["id"], won, pnl)
+
+                    gs = get_guardrail_state()
+                    new_risk = max(0, gs["capital_at_risk_usd"] - trade["stake_usd"])
+                    new_consec = 0 if won else gs["consecutive_losses"] + 1
+                    update_guardrail_state(
+                        daily_pnl_usd       = gs["daily_pnl_usd"] + pnl,
+                        consecutive_losses  = new_consec,
+                        capital_at_risk_usd = new_risk,
+                        halted              = gs["halted"],
+                        halt_reason         = gs["halt_reason"],
+                        daily_trades        = gs["daily_trades"],
+                    )
+            except Exception as exc:
+                log.warning("Resolution error for trade %s: %s", trade["id"], exc)

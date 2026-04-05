@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+body {
+  background-color: #050505;
+  color: #00ff41;
+  font-family: 'Share Tech Mono', 'Courier New', monospace;
+  margin: 0;
+}
+
+.neon-text    { text-shadow: 0 0 6px #00ff41, 0 0 12px #00ff41; }
+.neon-card    {
+  border: 1px solid #00ff41;
+  box-shadow: 0 0 4px rgba(0,255,65,0.3), inset 0 0 8px rgba(0,255,65,0.04);
+}
+.neon-red     { border-color: #ff0040; box-shadow: 0 0 4px rgba(255,0,64,0.3); }
+.neon-yellow  { border-color: #ffcc00; box-shadow: 0 0 4px rgba(255,204,0,0.3); }
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #050505; }
+::-webkit-scrollbar-thumb { background: #00ff41; border-radius: 2px; }
+
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line { stroke: #003311; }
+.recharts-text { fill: #006622 !important; font-family: 'Share Tech Mono', monospace; }

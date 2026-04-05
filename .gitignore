@@ -24,6 +24,8 @@ logs/
 
 # Bot state
 telegram-bridge/config.json
+kalshi/bots/weatheralpha.db
+kalshi/.env
 
 # OS
 .DS_Store
