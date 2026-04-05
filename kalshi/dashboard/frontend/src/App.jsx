@@ -136,7 +136,11 @@ export default function App() {
 
   // Merge backend + local log
   const logEntries = logData?.entries
-    ? logData.entries.map((e, i) => ({ ...e, id: e.id ?? `be-${i}` }))
+    ? logData.entries.map((e, i) => ({
+        ...e,
+        id: e.id ?? `be-${i}`,
+        ts: e.ts ?? e.timestamp,   // backend uses 'timestamp', local uses 'ts'
+      }))
     : localLog
 
   // ── City cycling ─────────────────────────────────────────────────────────────

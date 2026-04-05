@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import * as Progress from '@radix-ui/react-progress'
-import { AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock, Unlock } from 'lucide-react'
 
 function GuardrailBar({ label, value, max, unit, isDanger }) {
   const raw  = value ?? 0
@@ -58,9 +59,23 @@ function GuardrailBar({ label, value, max, unit, isDanger }) {
 
 export default function GuardrailMeters({ guardrails }) {
   const g = guardrails ?? {}
-  // API field names: halted, trade_window_active, capital_at_risk_usd, max_capital_at_risk, etc.
   const halted   = g.halted === true
   const inWindow = g.trade_window_active === true
+  const override = g.window_override === true
+  const [toggling, setToggling] = useState(false)
+
+  async function toggleOverride() {
+    setToggling(true)
+    try {
+      await fetch('/api/guardrails/window-override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !override }),
+      })
+    } finally {
+      setToggling(false)
+    }
+  }
 
   const checks = [
     { key: 'daily_trades',        label: 'Daily Trades',   max: g.max_daily_trades      ?? 5,   unit: '',  isDanger: false },
@@ -95,28 +110,53 @@ export default function GuardrailMeters({ guardrails }) {
       </div>
 
       <div
-        className="flex items-center justify-between pt-2 border-t text-[11px]"
+        className="flex flex-col gap-2 pt-2 border-t"
         style={{ borderColor: '#2a2a3a' }}
       >
-        <div className="flex items-center gap-1.5">
-          {halted ? (
-            <AlertTriangle size={12} style={{ color: '#ff5e7d' }} />
-          ) : (
-            <CheckCircle2 size={12} style={{ color: '#26de81' }} />
-          )}
-          <span style={{ color: halted ? '#ff5e7d' : '#26de81', fontWeight: 600 }}>
-            {halted ? 'HALTED' : 'ACTIVE'}
-          </span>
+        {/* Status row */}
+        <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center gap-1.5">
+            {halted ? (
+              <AlertTriangle size={12} style={{ color: '#ff5e7d' }} />
+            ) : (
+              <CheckCircle2 size={12} style={{ color: '#26de81' }} />
+            )}
+            <span style={{ color: halted ? '#ff5e7d' : '#26de81', fontWeight: 600 }}>
+              {halted ? 'HALTED' : 'ACTIVE'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div
+              className="w-1.5 h-1.5 rounded-full"
+              style={{
+                background: (inWindow || override) ? '#26de81' : '#475569',
+                boxShadow: (inWindow || override) ? '0 0 4px #26de81' : 'none',
+              }}
+            />
+            <span className="text-text-muted">
+              {override ? 'Override active' : (g.trade_window_msg ?? (inWindow ? 'Trade window open' : 'Outside trade window'))}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div
-            className="w-1.5 h-1.5 rounded-full"
-            style={{ background: inWindow ? '#26de81' : '#475569', boxShadow: inWindow ? '0 0 4px #26de81' : 'none' }}
-          />
-          <span className="text-text-muted">
-            {g.trade_window_msg ?? (inWindow ? 'Trade window open' : 'Outside trade window')}
-          </span>
-        </div>
+
+        {/* Trade window override button */}
+        <button
+          onClick={toggleOverride}
+          disabled={toggling}
+          className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+          style={{
+            background: override
+              ? 'rgba(251,191,36,0.12)'
+              : 'rgba(129,140,248,0.10)',
+            color: override ? '#fbbf24' : '#818cf8',
+            border: `1px solid ${override ? 'rgba(251,191,36,0.3)' : 'rgba(129,140,248,0.25)'}`,
+            cursor: toggling ? 'wait' : 'pointer',
+            opacity: toggling ? 0.6 : 1,
+          }}
+        >
+          {override ? <Unlock size={11} /> : <Clock size={11} />}
+          {override ? 'OVERRIDE ON — click to disable' : 'Override trade window (paper only)'}
+        </button>
       </div>
     </div>
   )

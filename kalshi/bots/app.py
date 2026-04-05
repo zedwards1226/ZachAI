@@ -26,7 +26,7 @@ from database import (
     init_db, get_trades, get_latest_forecasts, get_pnl_history,
     get_summary, get_guardrail_state, log_decision, get_decision_log
 )
-from guardrails import guardrail_status
+from guardrails import guardrail_status, set_window_override, get_window_override
 from scheduler import start_scheduler, stop_scheduler, trigger_scan_now
 from trader import resolve_expired_trades
 
@@ -154,6 +154,17 @@ def scan():
         return jsonify({"ok": False, "error": str(exc)}), 500
     finally:
         _scan_status["is_scanning"] = False
+
+
+@app.route("/api/guardrails/window-override", methods=["POST"])
+def window_override():
+    enabled = request.json.get("enabled", True) if request.is_json else True
+    set_window_override(enabled)
+    log_decision(
+        type="system",
+        message=f"Trade window override {'ENABLED' if enabled else 'DISABLED'} by user",
+    )
+    return jsonify({"ok": True, "window_override": enabled})
 
 
 @app.route("/api/resolve", methods=["POST"])

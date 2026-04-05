@@ -44,9 +44,14 @@ function LogEntry({ entry }) {
         className="stat-value shrink-0 text-[10px] text-text-muted pt-px"
         style={{ minWidth: '6ch' }}
       >
-        {new Date(entry.ts).toLocaleTimeString('en-US', {
-          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-        })}
+        {(() => {
+          // Backend returns '2026-04-05 16:08:00' (space, no T/Z) — normalize before parsing
+          const raw = entry.ts ?? ''
+          const d = new Date(raw.includes('T') ? raw : raw.replace(' ', 'T'))
+          return isNaN(d) ? '??:??:??' : d.toLocaleTimeString('en-US', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+          })
+        })()}
       </span>
       <TypeBadge type={entry.type} />
       <span

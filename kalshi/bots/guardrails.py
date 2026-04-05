@@ -14,6 +14,19 @@ from database import get_guardrail_state, get_summary
 
 log = logging.getLogger(__name__)
 
+# In-memory override flag — bypasses trade window for testing
+_window_override: bool = False
+
+
+def set_window_override(enabled: bool) -> None:
+    global _window_override
+    _window_override = enabled
+    log.info("Trade window override: %s", "ENABLED" if enabled else "DISABLED")
+
+
+def get_window_override() -> bool:
+    return _window_override
+
 
 def _cst_now() -> datetime:
     tz = pytz.timezone(TIMEZONE)
@@ -21,6 +34,8 @@ def _cst_now() -> datetime:
 
 
 def check_trade_window() -> tuple[bool, str]:
+    if _window_override:
+        return True, "Trade window override active"
     now = _cst_now()
     if TRADE_WINDOW_START_HOUR <= now.hour < TRADE_WINDOW_END_HOUR:
         return True, "ok"
@@ -92,6 +107,7 @@ def all_checks(edge: float, stake: float, capital: float,
     reasons = []
 
     checks = [
+        check_trade_window(),     # always checked; bypassed by override or in-window
         check_halt(state),
         check_edge(edge),
         check_bet_size(stake),
@@ -101,8 +117,9 @@ def all_checks(edge: float, stake: float, capital: float,
         check_capital_at_risk(state, stake, capital),
     ]
 
-    if not paper:
-        checks.insert(0, check_trade_window())
+    # Paper mode: skip window check unless override is explicitly OFF (default: allow anytime)
+    if paper and not _window_override:
+        checks.pop(0)  # remove window check — paper trades run anytime by default
 
     for passed, reason in checks:
         if not passed:
@@ -129,6 +146,7 @@ def guardrail_status() -> dict:
         "halt_reason":         state.get("halt_reason"),
         "trade_window_active": window_ok,
         "trade_window_msg":    window_msg,
+        "window_override":     _window_override,
         "daily_trades":        state["daily_trades"],
         "max_daily_trades":    MAX_DAILY_TRADES,
         "daily_pnl_usd":       round(state["daily_pnl_usd"], 2),
