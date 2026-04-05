@@ -156,16 +156,20 @@ export default function App() {
     try {
       const r = await fetch('/api/scan', { method: 'POST' })
       const d = await r.json()
-      if (d.results) {
-        d.results.forEach(res => {
-          if (res.trade_placed) {
-            addLog('trade', `${res.city} — ${res.side} ${res.contracts}ct @ ${res.price_cents}¢ | edge ${(res.edge * 100).toFixed(1)}%`)
-          } else if (res.blocked) {
-            addLog('block', `${res.city} — blocked: ${res.reason}`)
-          } else if (res.edge != null) {
-            addLog('skip', `${res.city} — edge ${(res.edge * 100).toFixed(1)}% (below threshold)`)
+      const actions = d.actions ?? []
+      if (actions.length === 0) {
+        addLog('skip', 'Scan complete — no tradeable edges found')
+      } else {
+        actions.forEach(a => {
+          if (a.action === 'traded') {
+            addLog('trade', `${a.city} — ${a.side} ${a.contracts}ct @ ${a.price}¢ | edge ${((a.edge ?? 0) * 100).toFixed(1)}%`)
+          } else if (a.action === 'blocked') {
+            const reasons = Array.isArray(a.reasons) ? a.reasons.join('; ') : (a.reason ?? 'guardrail')
+            addLog('block', `${a.city} — blocked: ${reasons}`)
+          } else if (a.action === 'error') {
+            addLog('error', `${a.city} — ${a.error}`)
           } else {
-            addLog('skip', `${res.city} — ${res.reason ?? 'no opportunity'}`)
+            addLog('skip', `${a.city} — ${a.action}`)
           }
         })
       }
@@ -216,15 +220,15 @@ export default function App() {
   }, [health, addLog])
 
   // ── Derived values ────────────────────────────────────────────────────────────
-  const fcList    = forecasts?.forecasts ?? []
-  const pnlSeries = pnlData?.snapshots   ?? []
+  const fcList    = Array.isArray(forecasts) ? forecasts : []
+  const pnlSeries = Array.isArray(pnlData) ? pnlData : []
   const kalshiOk  = health?.kalshi_connected === true
 
   const base     = 1000
   const capital  = pnlSeries.length ? (pnlSeries[pnlSeries.length - 1]?.capital_usd ?? base) : base
-  const pnlUsd   = capital - base
+  const pnlUsd   = (summary?.total_pnl_usd ?? capital - base)
   const winRate  = summary?.win_rate ?? null
-  const trades   = (summary?.wins ?? 0) + (summary?.losses ?? 0)
+  const trades   = summary?.total_trades ?? (summary?.wins ?? 0) + (summary?.losses ?? 0)
   const openRisk = summary?.open_risk_usd ?? 0
 
   const pnlPos = pnlUsd >= 0
@@ -310,11 +314,28 @@ export default function App() {
               transition={{ duration: 0.2 }}
               className="h-full overflow-y-auto"
             >
+              {/* Mobile scan button — only visible on small screens */}
+              <div className="md:hidden flex items-center gap-3 px-4 pt-3 pb-0">
+                <button
+                  onClick={runScan}
+                  disabled={scanning}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                  style={{
+                    background: scanning ? 'rgba(129,140,248,0.08)' : 'rgba(129,140,248,0.15)',
+                    color: scanning ? '#475569' : '#818cf8',
+                    border: `1px solid ${scanning ? '#2a2a3a' : 'rgba(129,140,248,0.35)'}`,
+                    cursor: scanning ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {scanning ? '⏳ SCANNING…' : '▶ SCAN NOW'}
+                </button>
+                <div className="text-xs stat-value" style={{ color: countdown <= 10 ? '#fbbf24' : '#818cf8' }}>
+                  {String(countdown).padStart(2, '0')}s
+                </div>
+              </div>
+
               {/* Weather layout: city grid | pnl chart | decision log */}
-              <div
-                className="h-full grid gap-4 p-4"
-                style={{ gridTemplateColumns: '1fr 1.3fr 1fr' }}
-              >
+              <div className="weather-grid gap-4 p-4">
                 {/* Col 1: City cards */}
                 <div className="flex flex-col gap-3 overflow-y-auto min-h-0">
                   <div className="flex items-center justify-between mb-1">
@@ -380,8 +401,8 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Col 3: Decision log */}
-                <div className="card p-4 flex flex-col min-h-0">
+                {/* Col 3: Decision log — hidden on tablet, visible on desktop */}
+                <div className="card p-4 flex flex-col min-h-0 hidden lg:flex">
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
                       DECISION LOG

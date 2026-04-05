@@ -1,44 +1,29 @@
 import * as Progress from '@radix-ui/react-progress'
 import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 
-const CHECKS = [
-  { key: 'daily_trades',       label: 'Daily Trades',    max: 10,  unit: '',  isDanger: false },
-  { key: 'daily_pnl_usd',      label: 'Daily Loss',      max: 200, unit: '$', isDanger: true  },
-  { key: 'consecutive_losses', label: 'Consec. Losses',  max: 5,   unit: '',  isDanger: false },
-  { key: 'open_risk_usd',      label: 'Open Risk',       max: 500, unit: '$', isDanger: false },
-]
-
 function GuardrailBar({ label, value, max, unit, isDanger }) {
   const raw  = value ?? 0
   const abs  = Math.abs(raw)
-  const pct  = Math.min(100, (abs / max) * 100)
+  const pct  = Math.min(100, max > 0 ? (abs / max) * 100 : 0)
   const hot  = pct >= 80
   const warn = pct >= 60
 
-  const color = hot  ? '#ff5e7d'
-              : warn ? '#fbbf24'
-              :        '#26de81'
-
-  const trackBg = hot  ? 'rgba(255, 94, 125, 0.1)'
-                : warn ? 'rgba(251, 191, 36, 0.1)'
-                :        'rgba(38, 222, 129, 0.08)'
+  const color  = hot ? '#ff5e7d' : warn ? '#fbbf24' : '#26de81'
+  const trackBg = hot  ? 'rgba(255,94,125,0.1)'
+                : warn ? 'rgba(251,191,36,0.1)'
+                :        'rgba(38,222,129,0.08)'
 
   const displayVal = isDanger ? abs.toFixed(0) : raw
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span
-          className="text-[11px] font-medium"
-          style={{ color: hot ? '#ff5e7d' : '#94a3b8' }}
-        >
+        <span className="text-[11px] font-medium" style={{ color: hot ? '#ff5e7d' : '#94a3b8' }}>
           {label}
         </span>
         <span className="stat-value text-[11px] font-semibold" style={{ color }}>
           {unit}{displayVal != null ? displayVal : '—'}
-          <span className="text-text-muted font-normal ml-1">
-            / {unit}{max}
-          </span>
+          <span className="text-text-muted font-normal ml-1">/ {unit}{max}</span>
         </span>
       </div>
 
@@ -57,22 +42,15 @@ function GuardrailBar({ label, value, max, unit, isDanger }) {
             width: `${pct}%`,
             background: color,
             borderRadius: 'inherit',
-            transition: 'width 0.7s cubic-bezier(0.4, 0, 0.2, 1)',
+            transition: 'width 0.7s cubic-bezier(0.4,0,0.2,1)',
             boxShadow: hot ? `0 0 8px ${color}` : warn ? `0 0 4px ${color}` : 'none',
           }}
         />
       </Progress.Root>
 
-      {/* Threshold tick marks */}
       <div className="relative h-1.5">
-        <div
-          className="absolute top-0 w-px h-1.5"
-          style={{ left: '60%', background: 'rgba(251,191,36,0.5)' }}
-        />
-        <div
-          className="absolute top-0 w-px h-1.5"
-          style={{ left: '80%', background: 'rgba(255,94,125,0.5)' }}
-        />
+        <div className="absolute top-0 w-px h-1.5" style={{ left: '60%', background: 'rgba(251,191,36,0.5)' }} />
+        <div className="absolute top-0 w-px h-1.5" style={{ left: '80%', background: 'rgba(255,94,125,0.5)' }} />
       </div>
     </div>
   )
@@ -80,30 +58,31 @@ function GuardrailBar({ label, value, max, unit, isDanger }) {
 
 export default function GuardrailMeters({ guardrails }) {
   const g = guardrails ?? {}
-  const halted = g.trading_halted === true
-  const inWindow = g.trade_window_open !== false
+  // API field names: halted, trade_window_active, capital_at_risk_usd, max_capital_at_risk, etc.
+  const halted   = g.halted === true
+  const inWindow = g.trade_window_active === true
+
+  const checks = [
+    { key: 'daily_trades',        label: 'Daily Trades',   max: g.max_daily_trades      ?? 5,   unit: '',  isDanger: false },
+    { key: 'daily_pnl_usd',       label: 'Daily Loss',     max: g.max_daily_loss        ?? 150, unit: '$', isDanger: true  },
+    { key: 'consecutive_losses',  label: 'Consec. Losses', max: g.max_consecutive_losses ?? 3,   unit: '',  isDanger: false },
+    { key: 'capital_at_risk_usd', label: 'Capital at Risk',max: g.max_capital_at_risk   ?? 400, unit: '$', isDanger: false },
+  ]
 
   return (
     <div className="flex flex-col gap-4">
-
-      {/* Halted banner */}
       {halted && (
         <div
           className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
-          style={{
-            background: 'rgba(255, 94, 125, 0.12)',
-            border: '1px solid rgba(255, 94, 125, 0.35)',
-            color: '#ff5e7d',
-          }}
+          style={{ background: 'rgba(255,94,125,0.12)', border: '1px solid rgba(255,94,125,0.35)', color: '#ff5e7d' }}
         >
           <AlertTriangle size={14} />
-          TRADING HALTED — guardrail limit reached
+          TRADING HALTED — {g.halt_reason ?? 'guardrail limit reached'}
         </div>
       )}
 
-      {/* Progress bars */}
       <div className="flex flex-col gap-3">
-        {CHECKS.map(c => (
+        {checks.map(c => (
           <GuardrailBar
             key={c.key}
             label={c.label}
@@ -115,7 +94,6 @@ export default function GuardrailMeters({ guardrails }) {
         ))}
       </div>
 
-      {/* Status row */}
       <div
         className="flex items-center justify-between pt-2 border-t text-[11px]"
         style={{ borderColor: '#2a2a3a' }}
@@ -133,13 +111,10 @@ export default function GuardrailMeters({ guardrails }) {
         <div className="flex items-center gap-1.5">
           <div
             className="w-1.5 h-1.5 rounded-full"
-            style={{
-              background: inWindow ? '#26de81' : '#475569',
-              boxShadow: inWindow ? '0 0 4px #26de81' : 'none',
-            }}
+            style={{ background: inWindow ? '#26de81' : '#475569', boxShadow: inWindow ? '0 0 4px #26de81' : 'none' }}
           />
           <span className="text-text-muted">
-            {inWindow ? 'Trade window open' : 'Outside trade window'}
+            {g.trade_window_msg ?? (inWindow ? 'Trade window open' : 'Outside trade window')}
           </span>
         </div>
       </div>

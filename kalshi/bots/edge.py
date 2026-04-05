@@ -71,16 +71,34 @@ def find_best_market(markets: list[dict], forecast_high_f: float) -> dict | None
     return best
 
 
+def prob_between(forecast_high_f: float, floor_f: float, cap_f: float,
+                 sigma: float = None) -> float:
+    """
+    P(floor_f <= actual_high < cap_f) for between-style Kalshi markets.
+    Uses CDF difference of normal distribution.
+    """
+    if sigma is None:
+        from config import FORECAST_SIGMA_F
+        sigma = FORECAST_SIGMA_F
+    return float(norm.cdf(cap_f, loc=forecast_high_f, scale=sigma)
+                 - norm.cdf(floor_f, loc=forecast_high_f, scale=sigma))
+
+
 def parse_strike_from_ticker(ticker: str) -> float | None:
     """
     Extract strike temperature from Kalshi ticker.
-    Format: KXHIGH-TAG-YYYYMMDD-TSTRIKE  e.g. KXHIGH-NY-20240601-T75
+    Handles both formats:
+      - Threshold: KXHIGHNY-26APR05-T67       → 67.0
+      - Between:   KXHIGHNY-26APR05-B60.5     → 60.5 (midpoint of the range)
     Returns float or None.
     """
     try:
         parts = ticker.split("-")
         for part in parts:
-            if part.startswith("T") and part[1:].isdigit():
+            if part.startswith("T") and part[1:].replace(".", "").isdigit():
+                return float(part[1:])
+            if part.startswith("B") and part[1:].replace(".", "").isdigit():
+                # B60.5 means the between range centered at 60.5 (floor=60, cap=61)
                 return float(part[1:])
         return None
     except Exception:

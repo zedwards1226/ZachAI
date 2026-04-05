@@ -115,17 +115,36 @@ def scan():
         # Persist each action to decision_log
         if isinstance(actions, list):
             for action in actions:
+                atype = action.get("action", "scan")
+                city  = action.get("city", "")
+                edge  = action.get("edge")
+                # Build a human-readable message
+                if atype == "traded":
+                    msg = (f"{city}: {action.get('side','?')} {action.get('contracts',0)}ct "
+                           f"@ {action.get('price',0)}¢ | edge {round((edge or 0)*100,1)}% "
+                           f"stake ${action.get('stake',0):.2f}")
+                elif atype == "blocked":
+                    reasons = action.get("reasons") or action.get("reason") or []
+                    if isinstance(reasons, list):
+                        reasons = "; ".join(reasons)
+                    msg = f"{city}: blocked — {reasons}"
+                elif atype == "error":
+                    msg = f"{city}: error — {action.get('error','unknown')}"
+                else:
+                    msg = f"{city}: {atype}"
                 log_decision(
-                    type=action.get("action", "scan"),
-                    message=action.get("message", str(action)),
-                    city=action.get("city"),
-                    edge=action.get("edge"),
+                    type=atype,
+                    message=msg,
+                    city=city,
+                    edge=edge,
                     contracts=action.get("contracts"),
                     side=action.get("side"),
-                    price_cents=action.get("price_cents"),
-                    stake_usd=action.get("stake_usd"),
-                    reason=action.get("reason"),
+                    price_cents=action.get("price"),
+                    stake_usd=action.get("stake"),
+                    reason="; ".join(action.get("reasons", [])) if isinstance(action.get("reasons"), list) else action.get("reason"),
                 )
+            if not actions:
+                log_decision(type="scan", message="Scan complete — no tradeable edges found")
         else:
             log_decision(type="scan", message="Manual scan triggered", reason="no structured results")
         return jsonify({"ok": True, "actions": actions})

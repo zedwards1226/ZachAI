@@ -165,3 +165,25 @@ html, body, #root {
 .animate-pulse-glow { animation: pulseGlow 2s ease-in-out infinite; }
 .animate-slide-in-right { animation: slideInRight 0.25s ease-out; }
 .animate-fade-in-up { animation: fadeInUp 0.3s ease-out; }
+
+/* ── Responsive weather grid ── */
+.weather-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 768px) {
+  .weather-grid {
+    grid-template-columns: 1fr 1.3fr;
+  }
+}
+@media (min-width: 1024px) {
+  .weather-grid {
+    grid-template-columns: 1fr 1.3fr 1fr;
+  }
+}
+
+/* ── Mobile touch target sizing ── */
+@media (max-width: 768px) {
+  button { min-height: 40px; }
+  .tab-btn { min-height: 44px; }
+}

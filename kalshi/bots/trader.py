@@ -12,7 +12,7 @@ from database import (
 )
 from weather import fetch_all_forecasts
 from kalshi_client import get_client
-from edge import prob_exceeds, compute_edge, best_side, effective_edge, parse_strike_from_ticker
+from edge import prob_exceeds, prob_between, compute_edge, best_side, effective_edge, parse_strike_from_ticker
 from kelly import size_stake, size_stake_no
 from guardrails import all_checks
 
@@ -56,29 +56,50 @@ def scan_and_trade() -> list[dict]:
             continue
 
         # 4. Enrich market data with strike prices and prices
+        # API returns prices in dollars ("0.2700"), strike as floor_strike/cap_strike ints
+        # and strike_type as "between" or "greater"
         markets = []
         for m in markets_raw:
-            ticker    = m.get("ticker", "")
-            strike    = parse_strike_from_ticker(ticker)
-            yes_price = m.get("yes_bid")  # best bid in cents
+            ticker      = m.get("ticker", "")
+            strike_type = m.get("strike_type", "greater")  # "between" or "greater"
+            floor_f     = m.get("floor_strike")
+            cap_f       = m.get("cap_strike")
+
+            # Determine strike: for "between" use midpoint, for "greater" use floor
+            if strike_type == "between" and floor_f is not None and cap_f is not None:
+                strike = (float(floor_f) + float(cap_f)) / 2.0
+            elif floor_f is not None:
+                strike = float(floor_f)
+            else:
+                # Fallback: parse from ticker
+                strike = parse_strike_from_ticker(ticker)
 
             if strike is None:
                 continue
 
-            # Try to get orderbook if no bid in market data
-            if yes_price is None:
+            # Price: API returns yes_bid_dollars as a string like "0.2700"
+            yes_bid_dollars = m.get("yes_bid_dollars") or m.get("yes_bid")
+            if yes_bid_dollars is None:
+                # Fallback to orderbook
                 ob = client.get_orderbook(ticker)
-                if ob:
-                    yes_price = ob.get("yes")
+                if ob and ob.get("yes") is not None:
+                    yes_price_cents = int(ob["yes"])
+                else:
+                    continue
+            else:
+                yes_price_cents = round(float(yes_bid_dollars) * 100)
 
-            if yes_price is None:
+            if yes_price_cents <= 0 or yes_price_cents >= 100:
                 continue
 
             markets.append({
-                "ticker":         ticker,
-                "strike_f":       strike,
-                "yes_price_cents": int(yes_price),
-                "no_price_cents":  100 - int(yes_price),
+                "ticker":          ticker,
+                "strike_f":        strike,
+                "strike_type":     strike_type,
+                "floor_f":         float(floor_f) if floor_f is not None else strike,
+                "cap_f":           float(cap_f) if cap_f is not None else strike + 1,
+                "yes_price_cents": yes_price_cents,
+                "no_price_cents":  100 - yes_price_cents,
             })
 
         if not markets:
@@ -86,12 +107,16 @@ def scan_and_trade() -> list[dict]:
             continue
 
         # 5. Find market with best edge
+        # Use prob_between for "between" markets, prob_exceeds for threshold markets
         best = None
         best_abs_edge = 0.0
         for m in markets:
-            our_p = prob_exceeds(high_f, m["strike_f"])
-            e     = compute_edge(our_p, m["yes_price_cents"])
-            ae    = effective_edge(e)
+            if m["strike_type"] == "between":
+                our_p = prob_between(high_f, m["floor_f"], m["cap_f"])
+            else:
+                our_p = prob_exceeds(high_f, m["strike_f"])
+            e  = compute_edge(our_p, m["yes_price_cents"])
+            ae = effective_edge(e)
             if ae > best_abs_edge:
                 best_abs_edge = ae
                 best = {**m, "our_prob": our_p, "edge": e, "abs_edge": ae}
@@ -111,10 +136,12 @@ def scan_and_trade() -> list[dict]:
         stake  = sizing["stake_usd"]
 
         # 8. Save forecast record
+        # For between markets, store floor as the strike for display purposes
+        display_strike = best.get("floor_f", best["strike_f"])
         insert_forecast(
             city_code, high_f, low_f,
             kalshi_market_id   = best["ticker"],
-            kalshi_strike_f    = best["strike_f"],
+            kalshi_strike_f    = display_strike,
             kalshi_yes_price   = best["yes_price_cents"],
             kalshi_no_price    = best["no_price_cents"],
             implied_prob_yes   = best["yes_price_cents"] / 100,
