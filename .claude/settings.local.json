@@ -20,7 +20,9 @@
       "Bash(npm run:*)",
       "Bash(curl -s http://localhost:3000/api/health)",
       "Bash(curl -s http://localhost:3000/api/state)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(where claude:*)",
+      "Bash(git:*)"
     ]
   }
 }

@@ -265,7 +265,8 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "claude", "-p", prompt,
+            r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
+            "-p", prompt,
             stdout = asyncio.subprocess.PIPE,
             stderr = asyncio.subprocess.STDOUT,
             cwd    = "C:\\ZachAI",
