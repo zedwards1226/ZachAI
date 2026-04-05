@@ -35,14 +35,14 @@ TRADE_WINDOW_END_HOUR = 10
 TIMEZONE = "America/Chicago"
 SCAN_INTERVAL_MINUTES = 15
 
-# Cities: code -> {name, lat, lon, kalshi_tag}
+# Cities: code -> {name, lat, lon, kalshi_series}
+# Series tickers verified against live api.elections.kalshi.com
 CITIES = {
-    "NYC": {"name": "New York City", "lat": 40.7128, "lon": -74.0060, "kalshi_tag": "NY"},
-    "CHI": {"name": "Chicago",       "lat": 41.8781, "lon": -87.6298, "kalshi_tag": "CHI"},
-    "MIA": {"name": "Miami",         "lat": 25.7617, "lon": -80.1918, "kalshi_tag": "MIA"},
-    "LAX": {"name": "Los Angeles",   "lat": 34.0522, "lon": -118.2437, "kalshi_tag": "LAX"},
-    "MEM": {"name": "Memphis",       "lat": 35.1495, "lon": -90.0490, "kalshi_tag": "MEM"},
-    "DEN": {"name": "Denver",        "lat": 39.7392, "lon": -104.9903, "kalshi_tag": "DEN"},
+    "NYC": {"name": "New York City", "lat": 40.7128, "lon": -74.0060, "kalshi_series": "KXHIGHNY"},
+    "CHI": {"name": "Chicago",       "lat": 41.8781, "lon": -87.6298, "kalshi_series": "KXHIGHCHI"},
+    "MIA": {"name": "Miami",         "lat": 25.7617, "lon": -80.1918, "kalshi_series": "KXHIGHMIA"},
+    "LAX": {"name": "Los Angeles",   "lat": 34.0522, "lon": -118.2437, "kalshi_series": "KXHIGHLAX"},
+    "DEN": {"name": "Denver",        "lat": 39.7392, "lon": -104.9903, "kalshi_series": "KXHIGHDEN"},
 }
 
 # Flask

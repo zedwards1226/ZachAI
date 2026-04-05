@@ -112,15 +112,14 @@ class KalshiClient:
             raise
 
     def search_kxhigh_markets(self, city_code: str, target_date: str | None = None) -> list[dict]:
-        tag    = CITIES[city_code]["kalshi_tag"]
+        series = CITIES[city_code]["kalshi_series"]
         dt     = (target_date or date.today().isoformat()).replace("-", "")
-        prefix = f"KXHIGH-{tag}-{dt}"
+        # Live ticker format: KXHIGHNY-26APR05-T67 (YYMONDD)
         try:
-            data     = self._get("/markets", params={"series_ticker": f"KXHIGH-{tag}", "limit": 100})
+            data     = self._get("/markets", params={"series_ticker": series, "status": "open", "limit": 100})
             markets  = data.get("markets", [])
-            filtered = [m for m in markets if m.get("ticker", "").startswith(prefix)]
-            filtered.sort(key=lambda m: m.get("ticker", ""))
-            return filtered
+            markets.sort(key=lambda m: m.get("ticker", ""))
+            return markets
         except Exception as exc:
             log.warning("Market search failed for %s: %s", city_code, exc)
             return []

@@ -46,7 +46,10 @@ CORS(app, origins="*")
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok", "paper_mode": PAPER_MODE, "demo": KALSHI_DEMO})
+    from kalshi_client import get_client
+    connected = get_client()._ready
+    return jsonify({"status": "ok", "paper_mode": PAPER_MODE, "demo": KALSHI_DEMO,
+                    "kalshi_connected": connected})
 
 
 @app.route("/api/status")

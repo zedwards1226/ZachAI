@@ -22,7 +22,31 @@
       "Bash(curl -s http://localhost:3000/api/state)",
       "Bash(git rm:*)",
       "Bash(where claude:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "WebFetch(domain:trading-api.kalshi.com)",
+      "WebFetch(domain:kalshi.com)",
+      "WebFetch(domain:demo-api.kalshi.co)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:docs.kalshi.com)",
+      "Bash(curl -s http://localhost:5000/api/health)",
+      "Bash(curl -s http://localhost:3001/)",
+      "Bash(curl -s \"http://localhost:3001/assets/$\\(ls C:/ZachAI/kalshi/dashboard/backend/static/assets/)",
+      "mcp__plugin_everything-claude-code_github__search_repositories",
+      "Read(//c/Users/zedwa/.claude/plugins/**)",
+      "Read(//c/Users/zedwa/.claude/skills/**)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(list\\(d.keys\\(\\)\\)[:20], indent=2\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); plugins=d.get\\('plugins',{}\\); print\\(f'Total plugins: {len\\(plugins\\)}'\\); [print\\(f'  {k}'\\) for k in list\\(plugins.keys\\(\\)\\)[:30]]\")",
+      "Bash(claude plugin:*)",
+      "mcp__plugin_everything-claude-code_github__get_file_contents",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); plugins=d.get\\('plugins',[]\\); print\\(f'Total plugins: {len\\(plugins\\)}'\\); [print\\(f'  {p[\\\\\"name\\\\\"]}'\\) for p in plugins[:30]]\")",
+      "Bash(python3:*)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 24952 /F)",
+      "Bash(taskkill /PID 17828 /F)",
+      "Bash(taskkill /PID 11088 /F)",
+      "Bash(cmd:*)",
+      "Bash(xargs -I{} cmd //c \"taskkill /PID {} /F\")"
     ]
   }
 }
