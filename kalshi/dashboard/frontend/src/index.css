@@ -166,7 +166,7 @@ html, body, #root {
 .animate-slide-in-right { animation: slideInRight 0.25s ease-out; }
 .animate-fade-in-up { animation: fadeInUp 0.3s ease-out; }
 
-/* ── Responsive weather grid ── */
+/* ── Responsive weather grid (legacy) ── */
 .weather-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -179,6 +179,23 @@ html, body, #root {
 @media (min-width: 1024px) {
   .weather-grid {
     grid-template-columns: 1fr 1.3fr 1fr;
+  }
+}
+
+/* ── 3-column trading terminal grid ── */
+.terminal-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+@media (min-width: 768px) {
+  .terminal-grid {
+    grid-template-columns: 1fr 1.8fr;
+  }
+}
+@media (min-width: 1200px) {
+  .terminal-grid {
+    grid-template-columns: 320px 1fr 300px;
   }
 }
 

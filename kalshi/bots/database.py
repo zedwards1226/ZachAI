@@ -1,6 +1,6 @@
 """
 SQLite database layer for WeatherAlpha.
-Tables: trades, forecasts, guardrail_state, pnl_snapshots
+Tables: trades, forecasts, guardrail_state, pnl_snapshots, decision_log, signals
 """
 import sqlite3
 import json
@@ -96,6 +96,28 @@ def init_db() -> None:
             price_cents  INTEGER,
             stake_usd    REAL,
             reason       TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS signals (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp        TEXT    NOT NULL,
+            city             TEXT    NOT NULL,
+            market_id        TEXT,
+            direction        TEXT,           -- YES or NO
+            model_prob       REAL,           -- our probability
+            market_price     REAL,           -- Kalshi implied price (0-1)
+            edge             REAL,
+            kelly_fraction   REAL,
+            suggested_size   REAL,
+            actionable       INTEGER NOT NULL DEFAULT 0,
+            reason_skipped   TEXT,           -- why not traded (guardrail, low edge, etc.)
+            trade_id         INTEGER,        -- FK to trades.id if traded
+            actual_outcome   TEXT,           -- YES or NO (after settlement)
+            outcome_correct  INTEGER,        -- 1 if predicted correctly
+            settled_at       TEXT,
+            forecast_hi_f    REAL,
+            forecast_lo_f    REAL,
+            strike_f         REAL
         );
         """)
 
@@ -293,3 +315,131 @@ def get_summary() -> dict:
         "total_pnl_usd": round(pnl, 2),
         "win_rate": round(wins / total, 3) if total else 0.0,
     }
+
+
+# ── Signals (calibration tracking) ──────────────────────────────────────────
+
+def insert_signal(city, market_id=None, direction=None, model_prob=None,
+                  market_price=None, edge=None, kelly_fraction=None,
+                  suggested_size=None, actionable=False, reason_skipped=None,
+                  trade_id=None, forecast_hi_f=None, forecast_lo_f=None,
+                  strike_f=None) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO signals
+               (timestamp, city, market_id, direction, model_prob, market_price,
+                edge, kelly_fraction, suggested_size, actionable, reason_skipped,
+                trade_id, forecast_hi_f, forecast_lo_f, strike_f)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (datetime.utcnow().isoformat(), city, market_id, direction,
+             model_prob, market_price, edge, kelly_fraction, suggested_size,
+             int(actionable), reason_skipped, trade_id,
+             forecast_hi_f, forecast_lo_f, strike_f)
+        )
+        return cur.lastrowid
+
+
+def settle_signal(signal_id: int, actual_outcome: str, outcome_correct: bool) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE signals SET actual_outcome=?, outcome_correct=?, settled_at=?
+               WHERE id=?""",
+            (actual_outcome, int(outcome_correct), datetime.utcnow().isoformat(), signal_id)
+        )
+
+
+def get_signals(limit=100) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM signals ORDER BY timestamp DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_unsettled_signals() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM signals WHERE actual_outcome IS NULL ORDER BY timestamp DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_equity_curve() -> list[dict]:
+    """Build cumulative P&L curve from settled trades in chronological order."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, timestamp, resolved_at, city, market_id, side,
+                      price_cents, stake_usd, pnl_usd, status
+               FROM trades WHERE status IN ('won', 'lost')
+               ORDER BY COALESCE(resolved_at, timestamp) ASC"""
+        ).fetchall()
+    from config import STARTING_CAPITAL
+    curve = [{"timestamp": None, "pnl": 0.0, "capital": STARTING_CAPITAL, "trade_id": None}]
+    cumulative = 0.0
+    for r in rows:
+        d = dict(r)
+        cumulative += d["pnl_usd"] or 0.0
+        curve.append({
+            "timestamp": d["resolved_at"] or d["timestamp"],
+            "pnl": round(cumulative, 2),
+            "capital": round(STARTING_CAPITAL + cumulative, 2),
+            "trade_id": d["id"],
+        })
+    return curve
+
+
+def get_calibration() -> dict:
+    """Compute calibration metrics from settled signals."""
+    with get_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+        settled = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE actual_outcome IS NOT NULL"
+        ).fetchone()[0]
+        correct = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE outcome_correct = 1"
+        ).fetchone()[0]
+        # Brier score: mean of (predicted_prob - actual_outcome)^2
+        brier_rows = conn.execute(
+            """SELECT model_prob, outcome_correct FROM signals
+               WHERE actual_outcome IS NOT NULL AND model_prob IS NOT NULL"""
+        ).fetchall()
+
+    accuracy = round(correct / settled, 4) if settled else 0.0
+
+    # Brier score
+    brier = 0.0
+    if brier_rows:
+        sq_errors = []
+        for r in brier_rows:
+            p = r["model_prob"]
+            actual = r["outcome_correct"]  # 1 or 0
+            sq_errors.append((p - actual) ** 2)
+        brier = round(sum(sq_errors) / len(sq_errors), 4) if sq_errors else 0.0
+
+    return {
+        "total_signals": total,
+        "settled": settled,
+        "correct": correct,
+        "accuracy": accuracy,
+        "brier_score": brier,
+    }
+
+
+def get_trades_with_verification(limit=100) -> list[dict]:
+    """Trades joined with forecast data for verification."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT t.*,
+                      f.forecast_hi_f, f.forecast_lo_f,
+                      f.kalshi_strike_f, f.our_prob_yes, f.implied_prob_yes
+               FROM trades t
+               LEFT JOIN forecasts f ON f.kalshi_market_id = t.market_id
+                   AND f.id = (
+                       SELECT MAX(f2.id) FROM forecasts f2
+                       WHERE f2.kalshi_market_id = t.market_id
+                         AND f2.timestamp <= t.timestamp
+                   )
+               ORDER BY t.timestamp DESC LIMIT ?""",
+            (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]

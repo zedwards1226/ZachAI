@@ -1,18 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { BarChart2, Cloud, History, TrendingUp, ShieldAlert, Layers } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { ShieldAlert, Activity, Target, Layers, Database } from 'lucide-react'
 
-import Header          from './components/Header'
-import CityCard        from './components/CityCard'
-import PnlChart        from './components/PnlChart'
-import GuardrailMeters from './components/GuardrailMeters'
-import DecisionLog     from './components/DecisionLog'
-import MarketBrowser   from './components/MarketBrowser'
-import ScanRadar       from './components/ScanRadar'
+import Header           from './components/Header'
+import EquityChart      from './components/EquityChart'
+import TradesTable      from './components/TradesTable'
+import SignalsTable     from './components/SignalsTable'
+import CalibrationPanel from './components/CalibrationPanel'
+import GuardrailMeters  from './components/GuardrailMeters'
+import DecisionLog      from './components/DecisionLog'
 
-const CITIES      = ['NYC', 'CHI', 'MIA', 'LAX', 'MEM', 'DEN']
-const SCAN_PERIOD = 60    // seconds
-const CITY_CYCLE  = 2800  // ms per city
+const SCAN_PERIOD = 60 // seconds
 
 // ── Poll hook ────────────────────────────────────────────────────────────────
 function useApi(path, interval = 5000) {
@@ -46,60 +44,16 @@ function mkEntry(type, msg) {
 function StatCard({ label, value, color, sub }) {
   return (
     <div
-      className="flex flex-col gap-1 px-4 py-3 rounded-xl shrink-0"
+      className="flex flex-col gap-0.5 px-3 py-2 rounded-lg shrink-0"
       style={{ background: '#1a1a24', border: '1px solid #2a2a3a' }}
     >
-      <div className="text-[10px] font-medium text-text-muted" style={{ letterSpacing: '0.06em' }}>
+      <div className="text-[9px] font-semibold text-text-muted" style={{ letterSpacing: '0.06em' }}>
         {label}
       </div>
-      <div
-        className="stat-value font-bold"
-        style={{ fontSize: 18, color: color ?? '#f8fafc', letterSpacing: '-0.02em' }}
-      >
+      <div className="stat-value font-bold" style={{ fontSize: 16, color: color ?? '#f8fafc' }}>
         {value}
       </div>
-      {sub && (
-        <div className="text-[10px] text-text-muted">{sub}</div>
-      )}
-    </div>
-  )
-}
-
-// ── Tab bar ───────────────────────────────────────────────────────────────────
-const TABS = [
-  { id: 'weather', label: 'Weather',  Icon: Cloud     },
-  { id: 'markets', label: 'Markets',  Icon: BarChart2 },
-  { id: 'history', label: 'History',  Icon: History   },
-]
-
-function TabBar({ activeTab, onTab }) {
-  return (
-    <div
-      className="flex gap-1 px-2 border-b shrink-0"
-      style={{ borderColor: '#2a2a3a' }}
-    >
-      {TABS.map(({ id, label, Icon }) => {
-        const active = activeTab === id
-        return (
-          <button
-            key={id}
-            onClick={() => onTab(id)}
-            className="relative flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-colors"
-            style={{ color: active ? '#818cf8' : '#475569' }}
-          >
-            <Icon size={14} />
-            {label}
-            {active && (
-              <motion.div
-                layoutId="tabIndicator"
-                className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t"
-                style={{ background: '#818cf8' }}
-                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-              />
-            )}
-          </button>
-        )
-      })}
+      {sub && <div className="text-[9px] text-text-muted">{sub}</div>}
     </div>
   )
 }
@@ -107,25 +61,25 @@ function TabBar({ activeTab, onTab }) {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   // API polling
-  const { data: health     } = useApi('/api/health',       10000)
-  const { data: forecasts  } = useApi('/api/forecasts',     8000)
-  const { data: pnlData    } = useApi('/api/pnl',           5000)
-  const { data: guardrails } = useApi('/api/guardrails',    5000)
-  const { data: summary    } = useApi('/api/summary',       8000)
-  const { data: logData    } = useApi('/api/decision-log',  3000)
+  const { data: health       } = useApi('/api/health',            10000)
+  const { data: summary      } = useApi('/api/summary',            8000)
+  const { data: guardrails   } = useApi('/api/guardrails',         5000)
+  const { data: equityCurve  } = useApi('/api/equity-curve',       8000)
+  const { data: tradesData   } = useApi('/api/trades/verified',    5000)
+  const { data: signalsData  } = useApi('/api/signals',            8000)
+  const { data: calibration  } = useApi('/api/calibration',       15000)
+  const { data: logData      } = useApi('/api/decision-log',       3000)
 
   // UI state
-  const [activeTab,      setActiveTab]      = useState('weather')
+  const [scanning,  setScanning]  = useState(false)
+  const [countdown, setCountdown] = useState(SCAN_PERIOD)
+  const [pingMs,    setPingMs]    = useState(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [activeCity,     setActiveCity]     = useState('NYC')
-  const [scanning,       setScanning]       = useState(false)
-  const [countdown,      setCountdown]      = useState(SCAN_PERIOD)
-  const [pingMs,         setPingMs]         = useState(null)
 
-  // Local fallback log (used when backend /api/decision-log unavailable)
+  // Local fallback log
   const [localLog, setLocalLog] = useState([
-    mkEntry('system',  'WeatherAlpha dashboard initialised'),
-    mkEntry('connect', 'Connecting to Kalshi API…'),
+    mkEntry('system', 'WeatherAlpha trading terminal initialised'),
+    mkEntry('connect', 'Connecting to Kalshi API...'),
   ])
   const addLog = useCallback((type, msg) => {
     setLocalLog(prev => [mkEntry(type, msg), ...prev].slice(0, 200))
@@ -139,24 +93,16 @@ export default function App() {
     ? logData.entries.map((e, i) => ({
         ...e,
         id: e.id ?? `be-${i}`,
-        ts: e.ts ?? e.timestamp,   // backend uses 'timestamp', local uses 'ts'
+        ts: e.ts ?? e.timestamp,
       }))
     : localLog
-
-  // ── City cycling ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const id = setInterval(() => {
-      setActiveCity(c => CITIES[(CITIES.indexOf(c) + 1) % CITIES.length])
-    }, CITY_CYCLE)
-    return () => clearInterval(id)
-  }, [])
 
   // ── Scan ──────────────────────────────────────────────────────────────────────
   const runScan = useCallback(async () => {
     if (scanningRef.current) return
     scanningRef.current = true
     setScanning(true)
-    addLog('scan', 'Initiating market scan across all cities…')
+    addLog('scan', 'Initiating market scan across all cities...')
     try {
       const r = await fetch('/api/scan', { method: 'POST' })
       const d = await r.json()
@@ -166,7 +112,7 @@ export default function App() {
       } else {
         actions.forEach(a => {
           if (a.action === 'traded') {
-            addLog('trade', `${a.city} — ${a.side} ${a.contracts}ct @ ${a.price}¢ | edge ${((a.edge ?? 0) * 100).toFixed(1)}%`)
+            addLog('trade', `${a.city} — ${a.side} ${a.contracts}ct @ ${a.price}c | edge ${((a.edge ?? 0) * 100).toFixed(1)}%`)
           } else if (a.action === 'blocked') {
             const reasons = Array.isArray(a.reasons) ? a.reasons.join('; ') : (a.reason ?? 'guardrail')
             addLog('block', `${a.city} — blocked: ${reasons}`)
@@ -224,25 +170,22 @@ export default function App() {
   }, [health, addLog])
 
   // ── Derived values ────────────────────────────────────────────────────────────
-  const fcList    = Array.isArray(forecasts) ? forecasts : []
-  const pnlSeries = Array.isArray(pnlData) ? pnlData : []
-  const kalshiOk  = health?.kalshi_connected === true
-
+  const kalshiOk = health?.kalshi_connected === true
   const base     = 1000
-  const capital  = pnlSeries.length ? (pnlSeries[pnlSeries.length - 1]?.capital_usd ?? base) : base
-  const pnlUsd   = (summary?.total_pnl_usd ?? capital - base)
-  const winRate  = summary?.win_rate ?? null
-  const trades   = summary?.total_trades ?? (summary?.wins ?? 0) + (summary?.losses ?? 0)
-  const openRisk = summary?.open_risk_usd ?? 0
+  const pnlUsd   = summary?.total_pnl_usd ?? 0
+  const capital   = base + pnlUsd
+  const winRate   = summary?.win_rate ?? null
+  const trades    = summary?.total_trades ?? 0
+  const openRisk  = summary?.open_risk_usd ?? 0
+  const pnlPos    = pnlUsd >= 0
 
-  const pnlPos = pnlUsd >= 0
+  const tradesVerified = Array.isArray(tradesData) ? tradesData : []
+  const signals = Array.isArray(signalsData) ? signalsData : []
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
-    <div
-      className="flex flex-col h-full overflow-hidden"
-      style={{ background: '#0f0f14' }}
-    >
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#0f0f14' }}>
+
       {/* Header */}
       <Header
         pnlUsd={pnlUsd}
@@ -257,16 +200,12 @@ export default function App() {
 
       {/* Stats row */}
       <div
-        className="flex items-center gap-3 px-4 py-3 border-b overflow-x-auto shrink-0"
+        className="flex items-center gap-2 px-3 py-2 border-b overflow-x-auto shrink-0"
         style={{ borderColor: '#2a2a3a', scrollbarWidth: 'none' }}
       >
+        <StatCard label="CAPITAL" value={`$${capital.toFixed(2)}`} />
         <StatCard
-          label="CAPITAL"
-          value={`$${capital.toFixed(2)}`}
-          color="#f8fafc"
-        />
-        <StatCard
-          label="TODAY P&L"
+          label="TOTAL P&L"
           value={`${pnlPos ? '+' : ''}$${pnlUsd.toFixed(2)}`}
           color={pnlPos ? '#26de81' : '#ff5e7d'}
         />
@@ -284,216 +223,137 @@ export default function App() {
           sub={`${summary?.wins ?? 0}W / ${summary?.losses ?? 0}L`}
         />
         {openRisk > 0 && (
-          <StatCard
-            label="OPEN RISK"
-            value={`$${openRisk.toFixed(0)}`}
-            color="#fbbf24"
-          />
+          <StatCard label="OPEN RISK" value={`$${openRisk.toFixed(0)}`} color="#fbbf24" />
         )}
-        <StatCard
-          label="TRADE WINDOW"
-          value={guardrails?.trade_window_open === false ? 'CLOSED' : 'OPEN'}
-          color={guardrails?.trade_window_open === false ? '#ff5e7d' : '#26de81'}
-        />
         <StatCard
           label="KALSHI"
           value={kalshiOk ? 'LIVE' : 'DOWN'}
           color={kalshiOk ? '#26de81' : '#ff5e7d'}
           sub={pingMs ? `${pingMs}ms` : undefined}
         />
+
+        {/* SQLite badge */}
+        <div
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg shrink-0 ml-auto"
+          style={{ background: '#1a1a24', border: '1px solid #2a2a3a' }}
+        >
+          <Database size={11} style={{ color: '#818cf8' }} />
+          <span className="text-[9px] font-semibold" style={{ color: '#818cf8', letterSpacing: '0.04em' }}>
+            SQLite VERIFIED
+          </span>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <TabBar activeTab={activeTab} onTab={setActiveTab} />
+      {/* 3-column layout */}
+      <div className="flex-1 min-h-0 overflow-hidden terminal-grid">
 
-      {/* Tab content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <AnimatePresence mode="wait">
-          {activeTab === 'weather' && (
-            <motion.div
-              key="weather"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-              className="h-full overflow-y-auto"
-            >
-              {/* Mobile scan button — only visible on small screens */}
-              <div className="md:hidden flex items-center gap-3 px-4 pt-3 pb-0">
-                <button
-                  onClick={runScan}
-                  disabled={scanning}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all"
-                  style={{
-                    background: scanning ? 'rgba(129,140,248,0.08)' : 'rgba(129,140,248,0.15)',
-                    color: scanning ? '#475569' : '#818cf8',
-                    border: `1px solid ${scanning ? '#2a2a3a' : 'rgba(129,140,248,0.35)'}`,
-                    cursor: scanning ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {scanning ? '⏳ SCANNING…' : '▶ SCAN NOW'}
-                </button>
-                <div className="text-xs stat-value" style={{ color: countdown <= 10 ? '#fbbf24' : '#818cf8' }}>
-                  {String(countdown).padStart(2, '0')}s
-                </div>
+        {/* ── LEFT COLUMN: Signals + Calibration + Guardrails ── */}
+        <div className="flex flex-col gap-3 p-3 overflow-y-auto min-h-0 border-r" style={{ borderColor: '#2a2a3a' }}>
+
+          {/* Signals */}
+          <div className="card p-3 flex flex-col" style={{ minHeight: 260 }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Activity size={13} style={{ color: '#818cf8' }} />
+              <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                SIGNALS
+              </span>
+              <span className="text-[9px] stat-value text-text-muted ml-auto">
+                {signals.filter(s => s.actionable).length} live
+              </span>
+            </div>
+            <div className="flex-1 min-h-0">
+              <SignalsTable signals={signals} />
+            </div>
+          </div>
+
+          {/* Calibration */}
+          <div className="card p-3">
+            <CalibrationPanel calibration={calibration} />
+          </div>
+
+          {/* Guardrails */}
+          <div className="card p-3">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldAlert size={13} style={{ color: '#818cf8' }} />
+              <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                RISK GUARDRAILS
+              </span>
+            </div>
+            <GuardrailMeters guardrails={guardrails} />
+          </div>
+        </div>
+
+        {/* ── CENTER COLUMN: Equity Chart + Trades Table ── */}
+        <div className="flex flex-col gap-3 p-3 min-h-0 overflow-hidden">
+
+          {/* Equity Chart */}
+          <div className="card p-4 shrink-0" style={{ height: 280 }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Layers size={13} style={{ color: '#818cf8' }} />
+                <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                  EQUITY CURVE
+                </span>
               </div>
-
-              {/* Weather layout: city grid | pnl chart | decision log */}
-              <div className="weather-grid gap-4 p-4">
-                {/* Col 1: City cards */}
-                <div className="flex flex-col gap-3 overflow-y-auto min-h-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <h2 className="text-xs font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
-                      CITY FORECASTS
-                    </h2>
-                    {scanning && (
-                      <span
-                        className="text-[10px] font-semibold animate-pulse-glow"
-                        style={{ color: '#818cf8' }}
-                      >
-                        SCANNING…
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Radar (compact) */}
-                  <div
-                    className="card p-3"
-                    style={{ border: '1px solid #2a2a3a' }}
-                  >
-                    <div className="text-[10px] font-semibold text-text-muted mb-2" style={{ letterSpacing: '0.06em' }}>
-                      MARKET RADAR
-                    </div>
-                    <ScanRadar forecasts={fcList} activeCity={activeCity} scanning={scanning} />
-                  </div>
-
-                  {/* City cards grid */}
-                  <div className="grid grid-cols-1 gap-2">
-                    {CITIES.map(code => {
-                      const fc = fcList.find(f => f.city === code)
-                      return (
-                        <CityCard
-                          key={code}
-                          forecast={fc ? fc : { city: code }}
-                          isActive={code === activeCity}
-                          scanning={scanning && code === activeCity}
-                        />
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Col 2: P&L chart + guardrails */}
-                <div className="flex flex-col gap-4 min-h-0 overflow-y-auto">
-                  <div className="card p-4 flex-1 min-h-0" style={{ minHeight: 280 }}>
-                    <div className="text-[10px] font-semibold text-text-muted mb-3" style={{ letterSpacing: '0.08em' }}>
-                      CAPITAL CURVE
-                    </div>
-                    <div style={{ height: 'calc(100% - 28px)' }}>
-                      <PnlChart pnl={pnlSeries} summary={summary} />
-                    </div>
-                  </div>
-
-                  <div className="card p-4 shrink-0">
-                    <div className="flex items-center gap-2 mb-3">
-                      <ShieldAlert size={13} style={{ color: '#818cf8' }} />
-                      <div className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
-                        RISK GUARDRAILS
-                      </div>
-                    </div>
-                    <GuardrailMeters guardrails={guardrails} />
-                  </div>
-                </div>
-
-                {/* Col 3: Decision log — hidden on tablet, visible on desktop */}
-                <div className="card p-4 flex flex-col min-h-0 hidden lg:flex">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
-                      DECISION LOG
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div
-                        className="w-1.5 h-1.5 rounded-full animate-pulse-glow"
-                        style={{ background: '#26de81' }}
-                      />
-                      <span className="text-[10px] font-medium" style={{ color: '#26de81' }}>
-                        LIVE
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-h-0">
-                    <DecisionLog entries={logEntries} />
-                  </div>
-                </div>
+              <div className="flex items-center gap-3">
+                <span className="stat-value text-sm font-bold" style={{ color: pnlPos ? '#26de81' : '#ff5e7d' }}>
+                  {pnlPos ? '+' : ''}${pnlUsd.toFixed(2)}
+                </span>
               </div>
-            </motion.div>
-          )}
+            </div>
+            <div style={{ height: 'calc(100% - 32px)' }}>
+              <EquityChart curve={equityCurve} startingCapital={base} />
+            </div>
+          </div>
 
-          {activeTab === 'markets' && (
-            <motion.div
-              key="markets"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-              className="h-full overflow-y-auto p-4"
-            >
-              <div className="max-w-5xl mx-auto">
-                <div className="flex items-center gap-2 mb-4">
-                  <BarChart2 size={16} style={{ color: '#818cf8' }} />
-                  <h2 className="font-semibold text-text-primary">Market Browser</h2>
-                </div>
-                <MarketBrowser />
+          {/* Trades Table */}
+          <div className="card p-4 flex-1 min-h-0 flex flex-col">
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <Database size={13} style={{ color: '#818cf8' }} />
+                <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                  TRADE LOG
+                </span>
+                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded"
+                  style={{ background: 'rgba(129,140,248,0.12)', color: '#818cf8', border: '1px solid rgba(129,140,248,0.25)' }}>
+                  SQLite Backed
+                </span>
               </div>
-            </motion.div>
-          )}
+              <span className="stat-value text-[10px] text-text-muted">
+                {tradesVerified.length} records
+              </span>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <TradesTable trades={tradesVerified} />
+            </div>
+          </div>
+        </div>
 
-          {activeTab === 'history' && (
-            <motion.div
-              key="history"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-              className="h-full overflow-y-auto p-4"
-            >
-              <div className="max-w-5xl mx-auto">
-                <div className="flex items-center gap-2 mb-4">
-                  <History size={16} style={{ color: '#818cf8' }} />
-                  <h2 className="font-semibold text-text-primary">Trade History</h2>
-                </div>
-
-                {/* P&L chart full width */}
-                <div className="card p-4 mb-4" style={{ height: 320 }}>
-                  <div className="text-[10px] font-semibold text-text-muted mb-3" style={{ letterSpacing: '0.08em' }}>
-                    CAPITAL CURVE
-                  </div>
-                  <div style={{ height: 'calc(100% - 28px)' }}>
-                    <PnlChart pnl={pnlSeries} summary={summary} />
-                  </div>
-                </div>
-
-                {/* Decision log full width */}
-                <div className="card p-4" style={{ minHeight: 400 }}>
-                  <div className="text-[10px] font-semibold text-text-muted mb-3" style={{ letterSpacing: '0.08em' }}>
-                    FULL DECISION LOG
-                  </div>
-                  <div style={{ height: 360 }}>
-                    <DecisionLog entries={logEntries} />
-                  </div>
-                </div>
+        {/* ── RIGHT COLUMN: Decision Log ── */}
+        <div className="flex flex-col p-3 min-h-0 overflow-hidden border-l" style={{ borderColor: '#2a2a3a' }}>
+          <div className="card p-3 flex flex-col flex-1 min-h-0">
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                DECISION LOG
+              </span>
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full animate-pulse-glow" style={{ background: '#26de81' }} />
+                <span className="text-[10px] font-medium" style={{ color: '#26de81' }}>LIVE</span>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+            <div className="flex-1 min-h-0">
+              <DecisionLog entries={logEntries} />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Footer */}
       <footer
-        className="flex items-center justify-between px-4 py-2 border-t shrink-0 text-[10px] text-text-muted"
+        className="flex items-center justify-between px-4 py-1.5 border-t shrink-0 text-[10px] text-text-muted"
         style={{ borderColor: '#2a2a3a', background: '#0f0f14' }}
       >
-        <span>WeatherAlpha · Kalshi Weather Markets · Paper Mode</span>
+        <span>WeatherAlpha Trading Terminal | Kalshi Weather Markets | Paper Mode</span>
         <span className="stat-value">{new Date().toLocaleString()}</span>
         <div className="flex items-center gap-1.5">
           <div

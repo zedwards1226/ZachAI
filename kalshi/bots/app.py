@@ -24,7 +24,8 @@ from flask_cors import CORS
 from config import FLASK_HOST, FLASK_PORT, PAPER_MODE, KALSHI_DEMO
 from database import (
     init_db, get_trades, get_latest_forecasts, get_pnl_history,
-    get_summary, get_guardrail_state, log_decision, get_decision_log
+    get_summary, get_guardrail_state, log_decision, get_decision_log,
+    get_signals, get_equity_curve, get_calibration, get_trades_with_verification
 )
 from guardrails import guardrail_status, set_window_override, get_window_override
 from scheduler import start_scheduler, stop_scheduler, trigger_scan_now
@@ -187,6 +188,28 @@ def decision_log():
 @app.route("/api/scan/status")
 def scan_status():
     return jsonify(_scan_status)
+
+
+@app.route("/api/signals")
+def signals():
+    limit = int(request.args.get("limit", 100))
+    return jsonify(get_signals(limit))
+
+
+@app.route("/api/equity-curve")
+def equity_curve():
+    return jsonify(get_equity_curve())
+
+
+@app.route("/api/calibration")
+def calibration():
+    return jsonify(get_calibration())
+
+
+@app.route("/api/trades/verified")
+def trades_verified():
+    limit = int(request.args.get("limit", 100))
+    return jsonify(get_trades_with_verification(limit))
 
 
 @app.route("/api/markets/browse")
