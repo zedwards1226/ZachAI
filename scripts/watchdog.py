@@ -212,11 +212,21 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW
 
 # ── Process management ────────────────────────────────────────────────────────
 def _is_process_running(name_fragment: str) -> bool:
-    """Check if a python/pythonw process with given script name is running."""
+    """Check if a python/pythonw process with given script name is running.
+    Uses tasklist + findstr to avoid PowerShell overhead and CMD flash."""
     try:
+        # Use HTTP check for monitor — more reliable than process scanning
+        if "monitor" in name_fragment:
+            # Check if monitor.log was written in last 60 seconds
+            mlog = Path(r"C:\ZachAI\kalshi\bots\monitor.log")
+            if mlog.exists():
+                age = time.time() - mlog.stat().st_mtime
+                return age < 90  # alive if log updated within 90s
+            return False
+        # Generic: use PowerShell
         result = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
-             f"(Get-CimInstance Win32_Process -Filter "
+             f"@(Get-CimInstance Win32_Process -Filter "
              f"\"(name='python.exe' OR name='pythonw.exe') AND "
              f"CommandLine LIKE '%{name_fragment}%'\").Count"],
             capture_output=True, text=True, timeout=10,
