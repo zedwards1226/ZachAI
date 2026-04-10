@@ -8,13 +8,11 @@ Telegram: command center
 Location: Memphis TN
 Work schedule: 7AM-7PM, Fridays off
 
-## VM SETUP
-VM Name: ClaudeVM
+## PC SETUP
 Host User: zedwa
-Shared Folder: C:\ZachAI (also Z: inside VM)
+Working Directory: C:\ZachAI
 OS: Windows 10
-RAM: 6GB
-Storage: 200GB
+GitHub: https://github.com/zedwards1226/ZachAI
 
 ## BACKUP SYSTEM (AUTO)
 - Git push every 2 hours via Task Scheduler
@@ -313,15 +311,6 @@ C:\ZachAI\
 │   └── state.json
 ├── dropship\ (empty structure — PrecisionFittedParts)
 └── logs\
-
-## VM AGENT INSTRUCTIONS
-If VM crashes or restarts:
-1. Open VirtualBox on host
-2. Start ClaudeVM
-3. cd C:\ZachAI
-4. git pull origin master
-5. Resume work from last commit
-6. Startup folder scripts auto-launch bot + dashboard + tunnel
 
 ## MISSION
 Build autonomous digital companies with zero/minimal overhead.
