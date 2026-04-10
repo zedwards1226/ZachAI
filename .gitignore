@@ -26,6 +26,10 @@ logs/
 telegram-bridge/config.json
 kalshi/bots/weatheralpha.db
 kalshi/.env
+trading/weather_alpha.db
+
+# Reference repos (cloned for study, not part of project)
+reference/
 
 # OS
 .DS_Store
