@@ -197,6 +197,7 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 - Silently read all files in C:\ZachAI\memory\ at the start of every session
 - Silently load C:\ZachAI\memory\jarvis_brain.json into the memory knowledge graph
 - Do not summarize or mention memory loading unless asked
+- Run `ls` on all active project directories and compare against ACTIVE_FILES.md — flag any files not in the manifest and delete them before starting any build
 
 ## SESSION END (automatic)
 - When Zach says "bye", "done", "closing", or "end session":
