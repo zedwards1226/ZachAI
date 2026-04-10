@@ -8,7 +8,8 @@ from datetime import date
 from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
-    get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market
+    get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
+    insert_signal, settle_signal_by_trade
 )
 from weather import fetch_all_forecasts
 from kalshi_client import get_client
@@ -135,6 +136,15 @@ def scan_and_trade() -> list[dict]:
         sizing = size_stake(our_prob_for_side, price_cents, capital)
         stake  = sizing["stake_usd"]
 
+        # Signal data for calibration tracking
+        _sig = dict(
+            city=city_code, market_id=best["ticker"],
+            direction=side.upper(), model_prob=our_prob_for_side,
+            market_price=price_cents / 100, edge=best["edge"],
+            kelly_fraction=sizing["frac_kelly"], suggested_size=stake,
+            forecast_hi_f=high_f, forecast_lo_f=low_f, strike_f=best["strike_f"],
+        )
+
         # 8. Save forecast record
         # For between markets, store floor as the strike for display purposes
         display_strike = best.get("floor_f", best["strike_f"])
@@ -154,6 +164,7 @@ def scan_and_trade() -> list[dict]:
         if has_open_trade_for_market(best["ticker"]):
             log.info("Skipping %s %s — already have open position", city_code, best["ticker"])
             actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+            insert_signal(**_sig, reason_skipped="duplicate open position")
             continue
 
         # 9. Guardrail checks
@@ -167,6 +178,7 @@ def scan_and_trade() -> list[dict]:
                 "reasons": reasons,
                 "edge":    best["edge"],
             })
+            insert_signal(**_sig, reason_skipped="; ".join(reasons))
             continue
 
         # 10. Place order
@@ -220,6 +232,7 @@ def scan_and_trade() -> list[dict]:
                 "trade_id":  trade_id,
                 "paper":     PAPER_MODE,
             })
+            insert_signal(**_sig, actionable=True, trade_id=trade_id)
 
         except Exception as exc:
             log.error("Order failed [%s %s]: %s", city_code, best["ticker"], exc)
@@ -229,6 +242,7 @@ def scan_and_trade() -> list[dict]:
                 "action": "error",
                 "error":  str(exc),
             })
+            insert_signal(**_sig, reason_skipped=f"order error: {exc}")
 
     snapshot_pnl(capital, get_guardrail_state().get("capital_at_risk_usd", 0))
     log.info("=== Scan complete — %d actions ===", len(actions))
@@ -329,6 +343,7 @@ def resolve_expired_trades() -> None:
             pnl = (trade["contracts"] * (1 - trade["price_cents"] / 100) if won
                    else -trade["contracts"] * trade["price_cents"] / 100)
             resolve_trade(trade["id"], won, pnl)
+            settle_signal_by_trade(trade["id"], "YES" if yes_won else "NO", won)
             gs = get_guardrail_state()
             update_guardrail_state(
                 daily_pnl_usd       = gs["daily_pnl_usd"] + pnl,
@@ -355,6 +370,7 @@ def resolve_expired_trades() -> None:
                     pnl    = (trade["contracts"] * (1 - trade["price_cents"]/100) if won
                               else -trade["contracts"] * trade["price_cents"]/100)
                     resolve_trade(trade["id"], won, pnl)
+                    settle_signal_by_trade(trade["id"], result.upper(), won)
                     gs = get_guardrail_state()
                     update_guardrail_state(
                         daily_pnl_usd       = gs["daily_pnl_usd"] + pnl,

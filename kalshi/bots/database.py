@@ -119,6 +119,20 @@ def init_db() -> None:
             forecast_lo_f    REAL,
             strike_f         REAL
         );
+
+        CREATE TABLE IF NOT EXISTS scan_logs (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id            TEXT    NOT NULL UNIQUE,
+            started_at        TEXT    NOT NULL,
+            completed_at      TEXT,
+            cities_scanned    TEXT,
+            markets_found     INTEGER DEFAULT 0,
+            signals_generated INTEGER DEFAULT 0,
+            trades_executed   INTEGER DEFAULT 0,
+            errors            INTEGER DEFAULT 0,
+            success           INTEGER DEFAULT 1,
+            error_detail      TEXT
+        );
         """)
 
 
@@ -345,6 +359,16 @@ def settle_signal(signal_id: int, actual_outcome: str, outcome_correct: bool) ->
             """UPDATE signals SET actual_outcome=?, outcome_correct=?, settled_at=?
                WHERE id=?""",
             (actual_outcome, int(outcome_correct), datetime.utcnow().isoformat(), signal_id)
+        )
+
+
+def settle_signal_by_trade(trade_id: int, actual_outcome: str, outcome_correct: bool) -> None:
+    """Settle the signal linked to a given trade."""
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE signals SET actual_outcome=?, outcome_correct=?, settled_at=?
+               WHERE trade_id=?""",
+            (actual_outcome, int(outcome_correct), datetime.utcnow().isoformat(), trade_id)
         )
 
 
