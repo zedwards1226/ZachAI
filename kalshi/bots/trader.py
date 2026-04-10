@@ -327,8 +327,9 @@ def resolve_expired_trades() -> None:
                 log.warning("Cannot parse market_id for resolution: %s", trade["market_id"])
                 continue
             city_code, market_date, strike_type, strike_f = parsed
-            # Only resolve if market date has passed (or is today — markets settle EOD)
-            if market_date > today:
+            # Only resolve if market date has FULLY passed — never resolve same-day
+            # because the actual high temp isn't final until evening
+            if market_date >= today:
                 continue
             actual_high = _fetch_actual_high(city_code, market_date)
             if actual_high is None:
