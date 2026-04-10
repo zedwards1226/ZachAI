@@ -9,6 +9,7 @@ import SignalsTable     from './components/SignalsTable'
 import CalibrationPanel from './components/CalibrationPanel'
 import GuardrailMeters  from './components/GuardrailMeters'
 import DecisionLog      from './components/DecisionLog'
+import PositionsPanel   from './components/PositionsPanel'
 
 const SCAN_PERIOD = 60 // seconds
 
@@ -70,6 +71,7 @@ export default function App() {
   const { data: signalsData  } = useApi('/api/signals',            8000)
   const { data: calibration  } = useApi('/api/calibration',       15000)
   const { data: logData      } = useApi('/api/decision-log',       3000)
+  const { data: posData      } = useApi('/api/positions',          5000)
 
   // UI state
   const [scanning,  setScanning]  = useState(false)
@@ -284,11 +286,19 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── CENTER COLUMN: Equity Chart + Trades Table ── */}
-        <div className="flex flex-col gap-3 p-3 min-h-0 overflow-hidden">
+        {/* ── CENTER COLUMN: Positions + Equity Chart + Trades ── */}
+        <div className="flex flex-col gap-3 p-3 min-h-0 overflow-y-auto">
+
+          {/* Live Positions */}
+          <div className="card flex flex-col shrink-0" style={{ minHeight: 200, maxHeight: 360 }}>
+            <PositionsPanel
+              positions={posData?.positions}
+              totalUnrealizedPnl={posData?.total_unrealized_pnl}
+            />
+          </div>
 
           {/* Equity Chart */}
-          <div className="card p-4 shrink-0" style={{ height: 280 }}>
+          <div className="card p-4 shrink-0" style={{ height: 240 }}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <Layers size={13} style={{ color: '#818cf8' }} />
@@ -308,8 +318,8 @@ export default function App() {
           </div>
 
           {/* Trades Table */}
-          <div className="card p-4 flex-1 min-h-0 flex flex-col">
-            <div className="flex items-center justify-between mb-2 shrink-0">
+          <div className="card p-4 shrink-0" style={{ minHeight: 200 }}>
+            <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <Database size={13} style={{ color: '#818cf8' }} />
                 <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
@@ -324,9 +334,7 @@ export default function App() {
                 {tradesVerified.length} records
               </span>
             </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <TradesTable trades={tradesVerified} />
-            </div>
+            <TradesTable trades={tradesVerified} />
           </div>
         </div>
 

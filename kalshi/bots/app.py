@@ -212,6 +212,85 @@ def trades_verified():
     return jsonify(get_trades_with_verification(limit))
 
 
+@app.route("/api/positions")
+def positions():
+    """Open trades enriched with live Kalshi prices and unrealized P&L."""
+    from kalshi_client import get_client
+    from database import get_open_trades
+    client = get_client()
+    open_trades = get_open_trades()
+    positions = []
+    # Deduplicate market tickers for batch price fetch
+    price_cache = {}
+    for t in open_trades:
+        mid = t["market_id"]
+        if mid not in price_cache:
+            try:
+                m = client.get_market(mid)
+                if m:
+                    # Kalshi API v2 returns prices as dollar strings: "0.0200" = 2 cents
+                    yes_bid = m.get("yes_bid_dollars") or m.get("yes_bid")
+                    no_bid = m.get("no_bid_dollars") or m.get("no_bid")
+                    yes_ask = m.get("yes_ask_dollars") or m.get("yes_ask")
+                    no_ask = m.get("no_ask_dollars") or m.get("no_ask")
+                    price_cache[mid] = {
+                        "yes_bid": round(float(yes_bid) * 100) if yes_bid else None,
+                        "no_bid": round(float(no_bid) * 100) if no_bid else None,
+                        "yes_ask": round(float(yes_ask) * 100) if yes_ask else None,
+                        "no_ask": round(float(no_ask) * 100) if no_ask else None,
+                        "title": m.get("title", ""),
+                        "volume": m.get("volume_24h_fp"),
+                    }
+                else:
+                    price_cache[mid] = None
+            except Exception:
+                price_cache[mid] = None
+
+    for t in open_trades:
+        mid = t["market_id"]
+        live = price_cache.get(mid)
+        entry_price = t["price_cents"]
+        side = t["side"]  # YES or NO
+        contracts = t["contracts"]
+        stake = t["stake_usd"]
+
+        # Current market bid for our side (what we could sell at)
+        current_price = None
+        ask_price = None
+        if live:
+            if side == "YES":
+                current_price = live.get("yes_bid")
+                ask_price = live.get("yes_ask")
+            else:
+                current_price = live.get("no_bid")
+                ask_price = live.get("no_ask")
+
+        # Unrealized P&L = contracts * (current_price - entry_price) / 100
+        if current_price is not None and current_price > 0:
+            unrealized_pnl = round(contracts * (current_price - entry_price) / 100, 2)
+        else:
+            unrealized_pnl = None
+
+        positions.append({
+            "id": t["id"],
+            "city": t["city"],
+            "market_id": mid,
+            "side": side,
+            "contracts": contracts,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "ask_price": ask_price,
+            "stake": stake,
+            "edge": t["edge"],
+            "unrealized_pnl": unrealized_pnl,
+            "timestamp": t["timestamp"],
+            "title": live.get("title", "") if live else "",
+            "volume": live.get("volume") if live else None,
+        })
+    total_unrealized = sum(p["unrealized_pnl"] for p in positions if p["unrealized_pnl"] is not None)
+    return jsonify({"positions": positions, "total_unrealized_pnl": round(total_unrealized, 2)})
+
+
 @app.route("/api/markets/browse")
 def markets_browse():
     from kalshi_client import get_client
