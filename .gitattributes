@@ -1,0 +1,2 @@
+# Force CRLF line endings on Windows checkouts
+* text=auto eol=crlf
