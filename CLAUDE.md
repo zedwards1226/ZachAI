@@ -144,6 +144,28 @@ TradingView captures keys globally even when dialogs are open:
 - Update ACTIVE_FILES.md and CLAUDE.md folder structure after every file create/delete
 - Run `ls` on project dirs at start of every build session to catch orphans
 
+## GIT AUTO-MERGE POLICY
+After every completed task, automatically do the following without asking:
+```
+git add .
+git commit -m "[brief description of what was done]"
+git checkout master
+git merge [current-branch]
+git push origin master
+git branch -d [current-branch]
+```
+
+**Trigger this automatically when you:**
+- Add or update skills
+- Add or update rules in CLAUDE.md
+- Finish building a feature or file
+- Fix a bug
+- End any task marked as complete
+
+**Exception:** If the task touches paper_trader.py, Kalshi credentials, or anything that affects live trading — commit and push but notify Zach before merging.
+
+Never leave work sitting on a branch. Master should always reflect the latest stable state.
+
 ## AUTONOMY RULES
 - Never ask for approval on bash commands, file edits, code changes, tool use, or any build decision
 - Auto-accept everything: Bash(*), Write(*), Edit(*), Read(*), WebFetch(*), WebSearch(*) in settings.local.json
