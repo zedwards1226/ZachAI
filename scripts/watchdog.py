@@ -206,16 +206,21 @@ def _db_count_today_trades() -> int:
         conn.close()
 
 
+# Hide all subprocess windows — prevents CMD flash on screen
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+
+
 # ── Process management ────────────────────────────────────────────────────────
 def _is_process_running(name_fragment: str) -> bool:
     """Check if a python/pythonw process with given script name is running."""
     try:
         result = subprocess.run(
-            ["powershell", "-Command",
+            ["powershell", "-NoProfile", "-Command",
              f"(Get-CimInstance Win32_Process -Filter "
              f"\"(name='python.exe' OR name='pythonw.exe') AND "
              f"CommandLine LIKE '%{name_fragment}%'\").Count"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10,
+            creationflags=_NO_WINDOW,
         )
         count = int(result.stdout.strip()) if result.stdout.strip().isdigit() else 0
         return count > 0
@@ -242,12 +247,13 @@ def _kill_and_restart(script_path: str, name_fragment: str, label: str) -> bool:
     """Kill existing process and start fresh."""
     try:
         subprocess.run(
-            ["powershell", "-Command",
+            ["powershell", "-NoProfile", "-Command",
              f"Get-CimInstance Win32_Process -Filter "
              f"\"(name='python.exe' OR name='pythonw.exe') AND "
              f"CommandLine LIKE '%{name_fragment}%'\" | "
              f"ForEach-Object {{ Stop-Process -Id $($_.ProcessId) -Force }}"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10,
+            creationflags=_NO_WINDOW,
         )
     except Exception:
         pass
