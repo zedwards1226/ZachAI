@@ -436,11 +436,11 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     if not is_authorized(update):
         return
     text = update.message.text or ""
+    if not text.strip():
+        return
     log_message("in", text)
-    await update.message.reply_text(
-        "Use /help or `/claude <prompt>` to run Claude Code.",
-        parse_mode="Markdown",
-    )
+    task_id = str(uuid.uuid4())[:8]
+    asyncio.create_task(run_claude(task_id, text, update.effective_chat.id))
 
 # ── Startup / main ────────────────────────────────────────────────────────────
 

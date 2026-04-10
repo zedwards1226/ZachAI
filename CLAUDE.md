@@ -128,9 +128,21 @@ TradingView captures keys globally even when dialogs are open:
 ### Active Pipeline Reference
 - **Cloudflare tunnel:** `https://clocks-jason-trend-using.trycloudflare.com/alert`
 - **paper_trader.py:** `C:\ZachAI\trading\paper_trader.py` on port 8766
-- **MNQ1! ORB alert ID:** `4408739058` (CME_MINI:MNQ1!, 5m, active)
-- **Message format:** `{"action":"{{strategy.order.action}}","price":{{strategy.order.price}},"qty":{{strategy.order.contracts}},"symbol":"{{ticker}}"}`
-- **Tunnel VBS:** `C:\ZachAI\trading\CloudflareTunnel.vbs` (auto-starts on boot)
+- **MNQ1! ORB alert ID:** `4426604329` (CME_MINI:MNQ1!, 15m, active, webhook enabled)
+- **Message format:** `{"action":"{{strategy.order.action}}","price":{{strategy.order.price}},"qty":{{strategy.order.contracts}},"symbol":"{{ticker}}","order_id":"{{strategy.order.id}}","position_size":{{strategy.position_size}}}`
+- **Tunnel VBS:** `C:\ZachAI\trading\CloudflareTunnel.vbs` (auto-starts on boot via Startup folder)
+
+## FILE HYGIENE RULES
+- Every project has an ACTIVE_FILES.md manifest — if a file isn't listed, it shouldn't exist
+- When REPLACING a file with a new approach, DELETE the old file in the same session — never leave dead code behind
+- No backup copies (_old, _backup, v2, copy), no temp files committed to git
+- No local .pine files — Pine Scripts live ONLY in TradingView editor, never saved to disk
+- VBS startup scripts must match running services 1:1 — if a service is killed, its VBS goes too
+- Before creating ANY new .py/.js/.vbs file, grep for existing files doing the same thing — enhance, don't duplicate
+- When a build approach changes (e.g. webhook replaces polling), delete ALL files from the old approach
+- Log files are gitignored and auto-rotate — never commit .log files
+- Update ACTIVE_FILES.md and CLAUDE.md folder structure after every file create/delete
+- Run `ls` on project dirs at start of every build session to catch orphans
 
 ## AUTONOMY RULES
 - Never ask for approval on bash commands, file edits, code changes, tool use, or any build decision
@@ -257,17 +269,18 @@ C:\ZachAI\
 │   └── keys\ (gitignored — private keys)
 ├── trading\
 │   ├── paper_trader.py (Flask :8766 — receives TradingView webhooks)
-│   └── tunnel.log
+│   ├── paper_trades.json (trade log — auto-managed)
+│   ├── CloudflareTunnel.vbs (source copy)
+│   └── .env (Telegram bot token — gitignored)
 ├── tradingview-mcp\ (78-tool TradingView MCP server)
 ├── telegram-bridge\
 │   ├── bot.py (retired approval bot)
 │   └── chat_bot.py (retired — replaced by Claude Channels)
-├── scripts\ (all VBS + bat startup scripts)
+├── scripts\ (VBS + bat startup scripts — source copies only)
 │   ├── start_claude_channel.vbs (Jarvis — Claude Channels)
 │   ├── WeatherAlpha_Bot.vbs
 │   ├── WeatherAlpha_Dashboard.vbs
-│   ├── WeatherAlpha_Tunnel.bat
-│   └── PaperTrader.vbs
+│   └── WeatherAlpha_Tunnel.bat
 ├── plugins\
 │   └── awesome-claude-code-toolkit\ (135 agents/skills reference)
 ├── agents\ (future autonomous agents)

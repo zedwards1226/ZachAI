@@ -133,6 +133,15 @@ def get_open_trades() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def has_open_trade_for_market(market_id: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM trades WHERE market_id=? AND status='open' LIMIT 1",
+            (market_id,)
+        ).fetchone()
+    return row is not None
+
+
 def get_trades(limit=100) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(

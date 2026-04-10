@@ -8,7 +8,7 @@ from datetime import date
 from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
-    get_guardrail_state, get_summary, snapshot_pnl
+    get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market
 )
 from weather import fetch_all_forecasts
 from kalshi_client import get_client
@@ -150,6 +150,12 @@ def scan_and_trade() -> list[dict]:
             raw_weather        = forecast.get("raw"),
         )
 
+        # 9a. Skip if already have an open position for this market
+        if has_open_trade_for_market(best["ticker"]):
+            log.info("Skipping %s %s — already have open position", city_code, best["ticker"])
+            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+            continue
+
         # 9. Guardrail checks
         passed, reasons = all_checks(best["edge"], stake, capital, paper=PAPER_MODE)
         if not passed:
@@ -229,20 +235,116 @@ def scan_and_trade() -> list[dict]:
     return actions
 
 
+def _fetch_actual_high(city_code: str, dt: date) -> float | None:
+    """Fetch the actual recorded high temp (°F) for a city on a given date via Open-Meteo archive."""
+    import requests
+    from config import CITIES
+    city = CITIES.get(city_code)
+    if not city:
+        return None
+    try:
+        ds = dt.isoformat()
+        r = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive",
+            params={
+                "latitude": city["lat"], "longitude": city["lon"],
+                "start_date": ds, "end_date": ds,
+                "daily": "temperature_2m_max",
+                "temperature_unit": "fahrenheit",
+                "timezone": "auto",
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()["daily"]["temperature_2m_max"][0]
+    except Exception as exc:
+        log.warning("Archive weather fetch failed for %s %s: %s", city_code, dt, exc)
+        return None
+
+
+def _parse_market_id(market_id: str):
+    """
+    Parse KXHIGH ticker into (city_code, market_date, strike_type, strike_f).
+    e.g. KXHIGHNY-26APR06-T54  → ('NYC', date(2026,4,6), 'greater', 54.0)
+         KXHIGHMIA-26APR06-B84.5 → ('MIA', date(2026,4,6), 'between', 84.5)
+    Returns None on parse failure.
+    """
+    import re
+    from datetime import datetime
+    SERIES_MAP = {
+        "KXHIGHNY": "NYC", "KXHIGHCHI": "CHI", "KXHIGHMIA": "MIA",
+        "KXHIGHLAX": "LAX", "KXHIGHDEN": "DEN", "KXHIGHMEM": "MEM",
+    }
+    try:
+        parts = market_id.split("-")
+        if len(parts) < 3:
+            return None
+        series, date_part, strike_part = parts[0], parts[1], parts[2]
+        city_code = SERIES_MAP.get(series)
+        if not city_code:
+            return None
+        market_date = datetime.strptime(date_part, "%y%b%d").date()
+        if strike_part.startswith("T"):
+            return city_code, market_date, "greater", float(strike_part[1:])
+        elif strike_part.startswith("B"):
+            return city_code, market_date, "between", float(strike_part[1:])
+        return None
+    except Exception:
+        return None
+
+
 def resolve_expired_trades() -> None:
     """
-    Check open paper trades and resolve them (demo settlement simulation).
-    For live mode this would query Kalshi settlement.
+    Check open trades and resolve them.
+    Paper mode: use actual historical weather from Open-Meteo archive.
+    Live mode: query Kalshi settlement API.
     """
     from database import get_open_trades, resolve_trade, get_guardrail_state
     open_trades = get_open_trades()
     if not open_trades:
         return
 
+    today = date.today()
+
     for trade in open_trades:
-        # In paper mode, simulate 50/50 resolution for testing
-        # In production this would call the Kalshi settlement API
-        if not PAPER_MODE:
+        if PAPER_MODE:
+            parsed = _parse_market_id(trade["market_id"])
+            if not parsed:
+                log.warning("Cannot parse market_id for resolution: %s", trade["market_id"])
+                continue
+            city_code, market_date, strike_type, strike_f = parsed
+            # Only resolve if market date has passed (or is today — markets settle EOD)
+            if market_date > today:
+                continue
+            actual_high = _fetch_actual_high(city_code, market_date)
+            if actual_high is None:
+                log.warning("No actual temp data for %s %s — skipping resolution", city_code, market_date)
+                continue
+            # Determine YES outcome
+            if strike_type == "greater":
+                yes_won = actual_high >= strike_f
+            else:  # between: YES wins if actual is within ~1°F below the cap
+                yes_won = (strike_f - 1.0) <= actual_high < strike_f
+            won = (yes_won and trade["side"] == "YES") or (not yes_won and trade["side"] == "NO")
+            pnl = (trade["contracts"] * (1 - trade["price_cents"] / 100) if won
+                   else -trade["contracts"] * trade["price_cents"] / 100)
+            resolve_trade(trade["id"], won, pnl)
+            gs = get_guardrail_state()
+            update_guardrail_state(
+                daily_pnl_usd       = gs["daily_pnl_usd"] + pnl,
+                consecutive_losses  = 0 if won else gs["consecutive_losses"] + 1,
+                capital_at_risk_usd = max(0, gs["capital_at_risk_usd"] - trade["stake_usd"]),
+                halted              = gs["halted"],
+                halt_reason         = gs["halt_reason"],
+                daily_trades        = gs["daily_trades"],
+            )
+            log.info(
+                "RESOLVED [%s] %s %s — actual %.1f°F vs %.1f°F %s → %s  P&L=$%.2f",
+                city_code, trade["market_id"], trade["side"],
+                actual_high, strike_f, strike_type,
+                "WON" if won else "LOST", pnl,
+            )
+        else:
             try:
                 client = get_client()
                 market = client.get_market(trade["market_id"])
@@ -253,14 +355,11 @@ def resolve_expired_trades() -> None:
                     pnl    = (trade["contracts"] * (1 - trade["price_cents"]/100) if won
                               else -trade["contracts"] * trade["price_cents"]/100)
                     resolve_trade(trade["id"], won, pnl)
-
                     gs = get_guardrail_state()
-                    new_risk = max(0, gs["capital_at_risk_usd"] - trade["stake_usd"])
-                    new_consec = 0 if won else gs["consecutive_losses"] + 1
                     update_guardrail_state(
                         daily_pnl_usd       = gs["daily_pnl_usd"] + pnl,
-                        consecutive_losses  = new_consec,
-                        capital_at_risk_usd = new_risk,
+                        consecutive_losses  = 0 if won else gs["consecutive_losses"] + 1,
+                        capital_at_risk_usd = max(0, gs["capital_at_risk_usd"] - trade["stake_usd"]),
                         halted              = gs["halted"],
                         halt_reason         = gs["halt_reason"],
                         daily_trades        = gs["daily_trades"],

@@ -32,3 +32,23 @@ kalshi/.env
 Thumbs.db
 System Volume Information/
 kalshi/keys/
+
+# Dead code patterns — never commit these
+*_old.*
+*_backup.*
+*_copy.*
+*.bak
+*.tmp
+*.pine
+
+# Binaries
+cloudflared.exe
+*.exe
+
+# Claude worktrees
+.claude/worktrees/
+
+# External repos (have their own .git — manage separately)
+tradingview-mcp/
+tradingview-mcp-jackson/
+plugins/
