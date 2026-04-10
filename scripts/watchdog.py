@@ -78,7 +78,7 @@ log = logging.getLogger("watchdog")
 
 # ── Alert cooldown ────────────────────────────────────────────────────────────
 _last_alert = {}
-ALERT_COOLDOWN = 300  # 5 minutes
+ALERT_COOLDOWN = 3600  # 1 hour between same alerts
 
 
 def _cooldown_ok(key: str) -> bool:

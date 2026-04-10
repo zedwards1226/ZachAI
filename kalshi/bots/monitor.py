@@ -14,7 +14,7 @@ from pathlib import Path
 
 API_BASE = "http://localhost:5000"
 CHECK_INTERVAL = 30  # seconds between checks
-ALERT_COOLDOWN = 300  # don't repeat same alert within 5 min
+ALERT_COOLDOWN = 3600  # don't repeat same alert within 1 hour
 
 # Telegram config — read from trading .env or fall back to hardcoded
 def _load_telegram_config():
