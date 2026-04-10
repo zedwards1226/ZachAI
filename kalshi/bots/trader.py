@@ -9,6 +9,7 @@ from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
+    has_trade_for_market_today, has_open_trade_for_city,
     insert_signal, settle_signal_by_trade
 )
 from weather import fetch_all_forecasts
@@ -160,11 +161,21 @@ def scan_and_trade() -> list[dict]:
             raw_weather        = forecast.get("raw"),
         )
 
-        # 9a. Skip if already have an open position for this market
+        # 9a. Skip if already have an open position OR any trade placed today for this market
         if has_open_trade_for_market(best["ticker"]):
             log.info("Skipping %s %s — already have open position", city_code, best["ticker"])
             actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
             insert_signal(**_sig, reason_skipped="duplicate open position")
+            continue
+        if has_trade_for_market_today(best["ticker"]):
+            log.info("Skipping %s %s — already traded this market today", city_code, best["ticker"])
+            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+            insert_signal(**_sig, reason_skipped="already traded today")
+            continue
+        if has_open_trade_for_city(city_code):
+            log.info("Skipping %s %s — already have open trade for this city", city_code, best["ticker"])
+            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+            insert_signal(**_sig, reason_skipped="city already has open trade")
             continue
 
         # 9. Guardrail checks
@@ -201,6 +212,13 @@ def scan_and_trade() -> list[dict]:
                 paper        = PAPER_MODE,
                 notes        = f"strike={best['strike_f']}F our_prob={best['our_prob']:.3f}",
             )
+
+            # DB-level duplicate guard fired
+            if trade_id == -1:
+                log.warning("DB blocked duplicate for %s %s", city_code, best["ticker"])
+                actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+                insert_signal(**_sig, reason_skipped="DB unique constraint blocked duplicate")
+                continue
 
             # Update guardrail state
             gs = get_guardrail_state()

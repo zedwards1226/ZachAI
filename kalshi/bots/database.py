@@ -2,6 +2,7 @@
 SQLite database layer for WeatherAlpha.
 Tables: trades, forecasts, guardrail_state, pnl_snapshots, decision_log, signals
 """
+import logging
 import sqlite3
 import json
 from contextlib import contextmanager
@@ -133,6 +134,10 @@ def init_db() -> None:
             success           INTEGER DEFAULT 1,
             error_detail      TEXT
         );
+
+        -- Prevent duplicate trades: one open trade per market at a time
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_market_open
+            ON trades (market_id) WHERE status = 'open';
         """)
 
 
@@ -140,16 +145,24 @@ def init_db() -> None:
 
 def insert_trade(city, market_id, side, contracts, price_cents,
                  edge, kelly_frac, stake_usd, paper=True, notes="") -> int:
-    with get_conn() as conn:
-        cur = conn.execute(
-            """INSERT INTO trades
-               (timestamp, city, market_id, side, contracts, price_cents,
-                edge, kelly_frac, stake_usd, paper, notes)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (datetime.utcnow().isoformat(), city, market_id, side, contracts,
-             price_cents, edge, kelly_frac, stake_usd, int(paper), notes)
+    """Insert a trade. Returns row id, or -1 if blocked by unique constraint (duplicate)."""
+    import sqlite3
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO trades
+                   (timestamp, city, market_id, side, contracts, price_cents,
+                    edge, kelly_frac, stake_usd, paper, notes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (datetime.utcnow().isoformat(), city, market_id, side, contracts,
+                 price_cents, edge, kelly_frac, stake_usd, int(paper), notes)
+            )
+            return cur.lastrowid
+    except sqlite3.IntegrityError:
+        logging.getLogger(__name__).warning(
+            "Duplicate trade blocked by DB constraint: %s %s", city, market_id
         )
-        return cur.lastrowid
+        return -1
 
 
 def resolve_trade(trade_id: int, won: bool, pnl_usd: float) -> None:
@@ -174,6 +187,29 @@ def has_open_trade_for_market(market_id: str) -> bool:
         row = conn.execute(
             "SELECT id FROM trades WHERE market_id=? AND status='open' LIMIT 1",
             (market_id,)
+        ).fetchone()
+    return row is not None
+
+
+def has_trade_for_market_today(market_id: str) -> bool:
+    """Check if ANY trade (open, won, lost) was placed today for this market.
+    Prevents duplicate entries during rapid restarts or repeated scans."""
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM trades WHERE market_id=? AND timestamp LIKE ? LIMIT 1",
+            (market_id, f"{today_str}%")
+        ).fetchone()
+    return row is not None
+
+
+def has_open_trade_for_city(city: str) -> bool:
+    """Check if there's already an open trade for this city.
+    Prevents multiple bets on same city (different strikes)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM trades WHERE city=? AND status='open' LIMIT 1",
+            (city,)
         ).fetchone()
     return row is not None
 

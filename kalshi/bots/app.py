@@ -322,6 +322,49 @@ def markets_all():
     return jsonify({"markets": all_markets, "count": len(all_markets)})
 
 
+@app.route("/api/monitor/check")
+def monitor_check():
+    """One-shot health check — same logic as monitor.py, returns JSON report."""
+    from database import get_open_trades, get_summary, get_guardrail_state
+    from kalshi_client import get_client
+    issues = []
+
+    # Kalshi connection
+    try:
+        connected = get_client()._ready
+        if not connected:
+            issues.append("Kalshi API disconnected")
+    except Exception as e:
+        issues.append(f"Kalshi check error: {e}")
+
+    # Duplicate open trades
+    open_trades = get_open_trades()
+    market_ids = [t["market_id"] for t in open_trades]
+    dupes = [mid for mid in set(market_ids) if market_ids.count(mid) > 1]
+    if dupes:
+        issues.append(f"Duplicate open trades: {', '.join(dupes)}")
+
+    # Guardrail state
+    gs = get_guardrail_state()
+    if gs.get("halted"):
+        issues.append(f"Bot halted: {gs.get('halt_reason', 'unknown')}")
+    if gs.get("daily_pnl_usd", 0) < -15:
+        issues.append(f"Daily P&L critical: ${gs['daily_pnl_usd']:.2f}")
+
+    # Open trade count sanity
+    if len(open_trades) > 12:
+        issues.append(f"Too many open trades: {len(open_trades)}")
+
+    summary = get_summary()
+    return jsonify({
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "open_trades": len(open_trades),
+        "total_trades": summary.get("total_trades", 0),
+        "checked_at": __import__("datetime").datetime.utcnow().isoformat(),
+    })
+
+
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "not found"}), 404
