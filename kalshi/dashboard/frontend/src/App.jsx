@@ -62,6 +62,7 @@ function StatCard({ label, value, color, sub }) {
 export default function App() {
   // API polling
   const { data: health       } = useApi('/api/health',            10000)
+  const { data: statusData   } = useApi('/api/status',             8000)
   const { data: summary      } = useApi('/api/summary',            8000)
   const { data: guardrails   } = useApi('/api/guardrails',         5000)
   const { data: equityCurve  } = useApi('/api/equity-curve',       8000)
@@ -170,10 +171,10 @@ export default function App() {
   }, [health, addLog])
 
   // ── Derived values ────────────────────────────────────────────────────────────
-  const kalshiOk = health?.kalshi_connected === true
-  const base     = 1000
-  const pnlUsd   = summary?.total_pnl_usd ?? 0
-  const capital   = base + pnlUsd
+  const kalshiOk       = health?.kalshi_connected === true
+  const capital        = statusData?.capital_usd ?? 80
+  const pnlUsd         = summary?.total_pnl_usd ?? 0
+  const startingCapital = capital - pnlUsd
   const winRate   = summary?.win_rate ?? null
   const trades    = summary?.total_trades ?? 0
   const openRisk  = summary?.open_risk_usd ?? 0
@@ -302,7 +303,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ height: 'calc(100% - 32px)' }}>
-              <EquityChart curve={equityCurve} startingCapital={base} />
+              <EquityChart curve={equityCurve} startingCapital={startingCapital} />
             </div>
           </div>
 
