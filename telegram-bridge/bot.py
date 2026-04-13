@@ -251,61 +251,31 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
             await asyncio.sleep(4)
     typing_task = asyncio.create_task(_keep_typing())
 
-    output_lines: list[str] = []
-    last_sent_at  = asyncio.get_event_loop().time()
-    last_sent_idx = 0
-
-    async def send_progress():
-        nonlocal last_sent_idx, last_sent_at
-        chunk = output_lines[last_sent_idx:]
-        if not chunk:
-            return
-        text = "".join(chunk)[-3500:]
-        await _bot_app.bot.send_message(
-            chat_id    = chat_id,
-            text       = f"*Progress* `[{task_id}]`\n```\n{text}\n```",
-            parse_mode = "Markdown",
-        )
-        last_sent_idx = len(output_lines)
-        last_sent_at  = asyncio.get_event_loop().time()
-
     try:
         proc = await asyncio.create_subprocess_exec(
             r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
-            "-p", prompt,
+            "-p", "--output-format", "json", prompt,
             stdout = asyncio.subprocess.PIPE,
-            stderr = asyncio.subprocess.STDOUT,
+            stderr = asyncio.subprocess.PIPE,
             cwd    = "C:\\ZachAI",
         )
         active_tasks[task_id]["process"] = proc
 
-        while True:
-            try:
-                raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
-            except (asyncio.TimeoutError, TimeoutError):
-                if asyncio.get_event_loop().time() - last_sent_at >= PROGRESS_SECS:
-                    await send_progress()
-                continue
-
-            if not raw:
-                break
-
-            line = raw.decode(errors="replace")
-            output_lines.append(line)
-            tail = "".join(output_lines[-50:])
-            active_tasks[task_id]["output"] = tail
-            upsert_task(task_id, output=tail, status="running")
-
-            if asyncio.get_event_loop().time() - last_sent_at >= PROGRESS_SECS:
-                await send_progress()
-
-        await proc.wait()
+        stdout_bytes, _ = await proc.communicate()
         rc = proc.returncode
 
         typing_active = False
         typing_task.cancel()
 
-        final = "".join(output_lines).strip()
+        # Extract clean text from JSON response — strips all tool use status lines
+        raw_out = stdout_bytes.decode(errors="replace").strip()
+        final = raw_out
+        try:
+            data = json.loads(raw_out)
+            final = data.get("result") or data.get("message") or raw_out
+        except Exception:
+            pass
+
         if len(final) > 3800:
             final = "…" + final[-3800:]
 
