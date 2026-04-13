@@ -15,6 +15,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes,
@@ -245,6 +246,17 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
         parse_mode = "Markdown",
     )
 
+    # Keep Telegram "typing..." indicator alive while Claude runs
+    typing_active = True
+    async def _keep_typing():
+        while typing_active:
+            try:
+                await _bot_app.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            await asyncio.sleep(4)
+    typing_task = asyncio.create_task(_keep_typing())
+
     output_lines: list[str] = []
     last_sent_at  = asyncio.get_event_loop().time()
     last_sent_idx = 0
@@ -296,6 +308,9 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
         await proc.wait()
         rc = proc.returncode
 
+        typing_active = False
+        typing_task.cancel()
+
         final = "".join(output_lines).strip()
         if len(final) > 3800:
             final = "…" + final[-3800:]
@@ -314,6 +329,8 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
         )
 
     except Exception as exc:
+        typing_active = False
+        typing_task.cancel()
         log.exception("Claude task error: %s", exc)
         upsert_task(task_id, status="failed")
         active_tasks.pop(task_id, None)
