@@ -150,6 +150,20 @@ class TVClient:
 
         return result.get("result", {}).get("value")
 
+    async def evaluate_async(self, js: str, timeout: float = 15.0) -> Any:
+        """Evaluate async JavaScript (returns a Promise) in the TradingView page context."""
+        result = await self._send("Runtime.evaluate", {
+            "expression": js,
+            "returnByValue": True,
+            "awaitPromise": True,
+        }, timeout=timeout)
+
+        if "exceptionDetails" in result:
+            err = result["exceptionDetails"]
+            raise RuntimeError("JS evaluation error: %s" % err.get("text", str(err)))
+
+        return result.get("result", {}).get("value")
+
     async def _reconnect(self, retries: int = 5) -> None:
         """Reconnect with exponential backoff."""
         delay = 0.5
