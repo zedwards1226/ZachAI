@@ -256,6 +256,15 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 - Paper mode: ON (NEVER change without explicit approval)
 - Cities: NYC, CHI, MIA, LAX, MEM, DEN
 
+## ORB TRADING SYSTEM STATUS
+- Main controller: C:\ZachAI\trading\main.py (APScheduler — auto-start via ORBAgents.vbs)
+- Paper trader webhook: C:\ZachAI\trading\paper_trader.py :8766 (auto-start via PaperTrader.vbs)
+- Cloudflare tunnel: auto-start via CloudflareTunnel.vbs
+- Telegram bot: C:\ZachAI\telegram-bridge\bot.py (auto-start via Jarvis_Bot.vbs)
+- Agents: structure (8:45 AM), sentinel (8 AM + every 60s), sweep (every 15s),
+  combiner (every 15s), briefing (8:50 AM), memory (6 PM), trade_monitor (every 30s)
+- Paper mode: ON (NEVER change without explicit approval)
+
 ## AGENT STACK
 - SCOUT — scans internet 24/7, daily pitch report to Telegram
 - ARCHITECT — designs approved business ideas
@@ -289,16 +298,21 @@ C:\ZachAI\
 │   ├── dashboard\ (React frontend + Flask proxy :3001)
 │   └── keys\ (gitignored — private keys)
 ├── trading\
+│   ├── main.py (ORB multi-agent controller — APScheduler, auto-start via ORBAgents.vbs)
 │   ├── paper_trader.py (Flask :8766 — receives TradingView webhooks)
 │   ├── paper_trades.json (trade log — auto-managed)
 │   ├── CloudflareTunnel.vbs (source copy)
-│   └── .env (Telegram bot token — gitignored)
+│   ├── agents\ (structure, sentinel, sweep, combiner, briefing, memory, journal)
+│   ├── services\ (telegram.py, tv_client.py, tv_trader.py, state_manager.py)
+│   └── .env (Telegram bot token + chat ID — gitignored)
 ├── tradingview-mcp\ (78-tool TradingView MCP server)
 ├── telegram-bridge\
-│   ├── bot.py (retired approval bot)
-│   └── chat_bot.py (retired — replaced by Claude Channels)
+│   ├── bot.py (ACTIVE — Jarvis Telegram bot: /claude, /run, /tasks, approvals)
+│   └── chat_bot.py (retired — replaced by bot.py)
 ├── scripts\ (VBS + bat startup scripts — source copies only)
-│   ├── start_claude_channel.vbs (Jarvis — Claude Channels)
+│   ├── Jarvis_Bot.vbs (starts telegram-bridge/bot.py — ACTIVE)
+│   ├── ORBAgents.vbs (starts trading/main.py — ACTIVE)
+│   ├── start_claude_channel.vbs (Claude Channels — retired, kept for reference)
 │   ├── WeatherAlpha_Bot.vbs
 │   ├── WeatherAlpha_Dashboard.vbs
 │   └── WeatherAlpha_Tunnel.bat
