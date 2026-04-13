@@ -390,10 +390,12 @@ def _get_static_events(now: datetime) -> list[dict]:
             "within_session_window": True,
         })
 
-    if 10 <= day <= 15:
+    # CPI: typically 2nd Tuesday or Wednesday of month (10th-15th range)
+    # Only flag as HIGH when ForexFactory is unavailable AND it's a Tue/Wed in range
+    if 10 <= day <= 15 and weekday in (1, 2):  # Tuesday or Wednesday only
         events.append({
             "time": "8:30am",
-            "event": "CPI (estimated)",
+            "event": "CPI (estimated — verify manually)",
             "impact": "HIGH",
             "within_session_window": True,
         })

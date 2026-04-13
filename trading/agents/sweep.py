@@ -84,22 +84,38 @@ async def poll() -> Optional[dict]:
     prev = bars[-2] if len(bars) >= 2 else None
     prev2 = bars[-3] if len(bars) >= 3 else None
 
+    new_sweeps = []
     for pool in list(_known_pools):
         sweep_result = _check_pool_takeout(pool, latest, prev, prev2)
         if sweep_result:
             _sweeps.append(sweep_result)
+            new_sweeps.append(sweep_result)
             _known_pools.remove(pool)
 
             logger.info("SWEEP: %s %s at %.2f — %s",
                         sweep_result["sweep_type"], sweep_result["direction"],
                         sweep_result["level"], sweep_result.get("detail", ""))
 
-            # Send Telegram alert
-            await telegram.notify_sweep(
-                direction=sweep_result["direction"],
-                level=sweep_result["level"],
-                sweep_type=sweep_result["sweep_type"],
-            )
+    # Batch sweep notifications — send ONE summary instead of spamming per-level
+    if new_sweeps:
+        confirmed = [s for s in new_sweeps if s["sweep_type"] == SweepType.SWEEP_CONFIRMED.value]
+        breaks = [s for s in new_sweeps if s["sweep_type"] == SweepType.GENUINE_BREAK.value]
+        parts = []
+        if confirmed:
+            dirs = set(s["direction"] for s in confirmed)
+            levels = ", ".join(f"{s['level']:.2f}" for s in confirmed[:3])
+            parts.append(f"{len(confirmed)} sweep(s) confirmed ({'/'.join(dirs)}) at {levels}")
+        if breaks:
+            dirs = set(s["direction"] for s in breaks)
+            levels = ", ".join(f"{s['level']:.2f}" for s in breaks[:3])
+            parts.append(f"{len(breaks)} genuine break(s) ({'/'.join(dirs)}) at {levels}")
+        summary_dir = new_sweeps[-1]["direction"]
+        summary_type = "BATCH" if len(new_sweeps) > 1 else new_sweeps[0]["sweep_type"]
+        await telegram.notify_sweep(
+            direction=summary_dir,
+            level=new_sweeps[-1]["level"],
+            sweep_type=f"{summary_type}: {'; '.join(parts)}",
+        )
 
     # --- Step 3: Detect stop hunt wicks ---
     wick_sweep = _detect_stop_hunt_wick(bars)
