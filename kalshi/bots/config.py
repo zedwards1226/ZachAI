@@ -28,6 +28,8 @@ MAX_CAPITAL_AT_RISK = float(os.getenv("MAX_CAPITAL_AT_RISK", "0.40"))
 MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
 MIN_EDGE = float(os.getenv("MIN_EDGE", "0.08"))
 KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))
+MIN_PRICE_CENTS = int(os.getenv("MIN_PRICE_CENTS", "5"))     # skip illiquid penny contracts
+MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "100"))        # Kalshi weather depth is ~50-200
 
 # Schedule (all times CST = America/Chicago)
 TRADE_WINDOW_START_HOUR = 6

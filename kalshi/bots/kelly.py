@@ -16,7 +16,7 @@ For a Kalshi YES contract at price P cents:
 Quarter-Kelly: stake = f* * 0.25 * capital
 Capped at MAX_BET.
 """
-from config import KELLY_FRACTION, MAX_BET, STARTING_CAPITAL
+from config import KELLY_FRACTION, MAX_BET, MAX_CONTRACTS, STARTING_CAPITAL
 
 
 def kelly_fraction(our_prob: float, price_cents: int) -> float:
@@ -53,6 +53,7 @@ def size_stake(our_prob: float, price_cents: int, capital_usd: float) -> dict:
 
     cost_per = price_cents / 100.0
     contracts = int(stake / cost_per) if cost_per > 0 else 0
+    contracts = min(contracts, MAX_CONTRACTS)  # cap for liquidity
     actual_stake = contracts * cost_per
 
     return {

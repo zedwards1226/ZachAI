@@ -64,7 +64,10 @@ def check_consecutive_losses(state: dict) -> tuple[bool, str]:
 
 
 def check_capital_at_risk(state: dict, new_stake: float, capital: float) -> tuple[bool, str]:
-    current_risk = state.get("capital_at_risk_usd", 0.0)
+    # Compute actual risk from open trades — never trust incremental counter
+    from database import get_open_trades
+    open_trades = get_open_trades()
+    current_risk = sum(t["stake_usd"] for t in open_trades)
     if capital <= 0:
         return False, "No capital"
     ratio = (current_risk + new_stake) / capital
@@ -134,9 +137,14 @@ def all_checks(edge: float, stake: float, capital: float,
 
 def guardrail_status() -> dict:
     """Return human-readable guardrail status for the dashboard."""
+    from database import get_open_trades
     state   = get_guardrail_state()
     summary = get_summary()
     capital = STARTING_CAPITAL + summary["total_pnl_usd"]
+
+    # Compute actual risk from open trades — authoritative source
+    open_trades = get_open_trades()
+    actual_risk = sum(t["stake_usd"] for t in open_trades)
 
     window_ok, window_msg   = check_trade_window()
     halt_ok, halt_msg       = check_halt(state)
@@ -153,7 +161,7 @@ def guardrail_status() -> dict:
         "max_daily_loss":      MAX_DAILY_LOSS,
         "consecutive_losses":  state["consecutive_losses"],
         "max_consecutive_losses": MAX_CONSECUTIVE_LOSSES,
-        "capital_at_risk_usd": round(state["capital_at_risk_usd"], 2),
+        "capital_at_risk_usd": round(actual_risk, 2),
         "max_capital_at_risk": round(capital * MAX_CAPITAL_AT_RISK, 2),
         "capital_usd":         round(capital, 2),
     }

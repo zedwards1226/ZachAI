@@ -5,7 +5,7 @@ Orchestrates: fetch forecasts → find markets → compute edge → check guardr
 import logging
 from datetime import date
 
-from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE
+from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
@@ -60,6 +60,7 @@ def scan_and_trade() -> list[dict]:
         # 4. Enrich market data with strike prices and prices
         # API returns prices in dollars ("0.2700"), strike as floor_strike/cap_strike ints
         # and strike_type as "between" or "greater"
+        # USE ASK PRICE (what you actually pay), not bid (what you'd receive selling)
         markets = []
         for m in markets_raw:
             ticker      = m.get("ticker", "")
@@ -79,19 +80,29 @@ def scan_and_trade() -> list[dict]:
             if strike is None:
                 continue
 
-            # Price: API returns yes_bid_dollars as a string like "0.2700"
+            # Price: use ASK (what we'd pay to buy), fall back to bid+1 if no ask
+            yes_ask_dollars = m.get("yes_ask_dollars") or m.get("yes_ask")
             yes_bid_dollars = m.get("yes_bid_dollars") or m.get("yes_bid")
-            if yes_bid_dollars is None:
+            if yes_ask_dollars is not None:
+                yes_price_cents = round(float(yes_ask_dollars) * 100)
+            elif yes_bid_dollars is not None:
+                # No ask available — use bid + 1c spread estimate
+                yes_price_cents = round(float(yes_bid_dollars) * 100) + 1
+            else:
                 # Fallback to orderbook
                 ob = client.get_orderbook(ticker)
                 if ob and ob.get("yes") is not None:
-                    yes_price_cents = int(ob["yes"])
+                    yes_price_cents = int(ob["yes"]) + 1  # assume 1c spread
                 else:
                     continue
-            else:
-                yes_price_cents = round(float(yes_bid_dollars) * 100)
 
             if yes_price_cents <= 0 or yes_price_cents >= 100:
+                continue
+
+            # Skip illiquid penny contracts — no real depth below MIN_PRICE_CENTS
+            if yes_price_cents < MIN_PRICE_CENTS or (100 - yes_price_cents) < MIN_PRICE_CENTS:
+                log.debug("Skipping %s — price %d/%dc below %dc floor",
+                          ticker, yes_price_cents, 100 - yes_price_cents, MIN_PRICE_CENTS)
                 continue
 
             markets.append({

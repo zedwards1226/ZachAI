@@ -124,7 +124,7 @@ TradingView captures keys globally even when dialogs are open:
 | Webhook URL input | `input.input-RUSovanF` |
 
 ### Active Pipeline Reference
-- **Cloudflare tunnel:** `https://clocks-jason-trend-using.trycloudflare.com/alert`
+- **Cloudflare tunnel:** `https://setting-cbs-cardiovascular-moreover.trycloudflare.com/alert`
 - **paper_trader.py:** `C:\ZachAI\trading\paper_trader.py` on port 8766
 - **MNQ1! ORB alert ID:** `4426604329` (CME_MINI:MNQ1!, 15m, active, webhook enabled)
 - **Message format:** `{"action":"{{strategy.order.action}}","price":{{strategy.order.price}},"qty":{{strategy.order.contracts}},"symbol":"{{ticker}}","order_id":"{{strategy.order.id}}","position_size":{{strategy.position_size}}}`
