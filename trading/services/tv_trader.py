@@ -22,6 +22,7 @@ ET = pytz.timezone(TIMEZONE)
 
 # Track active chart orders
 _active_orders: dict[int, dict] = {}  # trade_id -> order info
+_trade_shape_ids: dict[int, list[str]] = {}  # trade_id -> list of shape IDs
 
 
 async def place_bracket_order(direction: str, entry_price: float,
@@ -41,7 +42,7 @@ async def place_bracket_order(direction: str, entry_price: float,
     if not success:
         # Method 2: Draw levels on chart as visual markers
         logger.info("Using visual markers (lines) for trade display")
-        success = await _draw_trade_levels(tv, direction, entry_price, stop_price, target_1, target_2)
+        success = await _draw_trade_levels(tv, direction, entry_price, stop_price, target_1, target_2, trade_id)
 
     if success:
         _active_orders[trade_id] = {
@@ -94,17 +95,17 @@ async def _try_internal_api(tv, side: str, stop: float, t1: float, t2: float) ->
 
 
 async def _draw_trade_levels(tv, direction: str, entry: float, stop: float,
-                              t1: float, t2: float) -> bool:
+                              t1: float, t2: float, trade_id: int = 0) -> bool:
     """Draw horizontal lines on chart for entry, stop, and targets."""
     try:
         # Entry line (blue)
-        await _draw_hline(tv, entry, "Entry " + direction, "#2196F3", 2)
+        await _draw_hline(tv, entry, "Entry " + direction, "#2196F3", 2, trade_id)
         # Stop line (red)
-        await _draw_hline(tv, stop, "Stop", "#F44336", 1)
+        await _draw_hline(tv, stop, "Stop", "#F44336", 1, trade_id)
         # Target 1 (green)
-        await _draw_hline(tv, t1, "T1", "#4CAF50", 1)
+        await _draw_hline(tv, t1, "T1", "#4CAF50", 1, trade_id)
         # Target 2 (green dashed)
-        await _draw_hline(tv, t2, "T2", "#4CAF50", 1)
+        await _draw_hline(tv, t2, "T2", "#4CAF50", 1, trade_id)
         logger.info("Trade levels drawn: entry=%.2f stop=%.2f t1=%.2f t2=%.2f", entry, stop, t1, t2)
         return True
     except Exception as e:
@@ -112,13 +113,14 @@ async def _draw_trade_levels(tv, direction: str, entry: float, stop: float,
         return False
 
 
-async def _draw_hline(tv, price: float, text: str, color: str, width: int) -> None:
+async def _draw_hline(tv, price: float, text: str, color: str, width: int,
+                      trade_id: Optional[int] = None) -> None:
     """Draw a horizontal line with label via TradingView drawing API."""
     js = f"""
     (function() {{
       try {{
         var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        chart.createMultipointShape([{{price: {price}, time: Date.now()/1000}}], {{
+        var id = chart.createMultipointShape([{{price: {price}, time: Date.now()/1000}}], {{
           shape: 'horizontal_line',
           overrides: {{
             linecolor: '{color}',
@@ -131,11 +133,13 @@ async def _draw_hline(tv, price: float, text: str, color: str, width: int) -> No
             fontsize: 10
           }}
         }});
-        return true;
-      }} catch(e) {{ return false; }}
+        return {{success: true, id: id ? id.toString() : null}};
+      }} catch(e) {{ return {{success: false}}; }}
     }})()
     """
-    await tv.evaluate(js)
+    result = await tv.evaluate(js)
+    if result and result.get("id") and trade_id is not None:
+        _trade_shape_ids.setdefault(trade_id, []).append(result["id"])
 
 
 async def close_position(trade_id: int, exit_price: float, reason: str = "") -> dict:
@@ -179,38 +183,45 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "") -> 
     # Clean chart drawings
     try:
         tv = await get_client()
-        await _clear_trade_drawings(tv)
+        await _clear_trade_drawings(tv, trade_id)
     except Exception as e:
         logger.warning("Failed to clear chart drawings: %s", e)
 
     return result
 
 
-async def _clear_trade_drawings(tv) -> None:
-    """Remove trade-related drawings from the chart."""
-    js = """
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        var shapes = chart.getAllShapes();
-        for (var i = 0; i < shapes.length; i++) {
-          var s = shapes[i];
-          var name = s.name || '';
-          if (name === 'horizontal_line') {
-            try {
-              var props = chart.getShapeById(s.id);
-              var text = props ? (props.text || '') : '';
-              if (/Entry|Stop|T1|T2/.test(text)) {
-                chart.removeEntity(s.id);
-              }
-            } catch(e) {}
-          }
-        }
-        return true;
-      } catch(e) { return false; }
-    })()
-    """
-    await tv.evaluate(js)
+async def _clear_trade_drawings(tv, trade_id: Optional[int] = None) -> None:
+    """Remove trade-related drawings from the chart using tracked shape IDs."""
+    # Remove by tracked IDs (reliable)
+    if trade_id and trade_id in _trade_shape_ids:
+        ids = _trade_shape_ids.pop(trade_id)
+        for shape_id in ids:
+            js = f"""
+            (function() {{
+              try {{
+                var chart = window.TradingViewApi._activeChartWidgetWV.value();
+                chart.removeEntity('{shape_id}');
+                return true;
+              }} catch(e) {{ return false; }}
+            }})()
+            """
+            await tv.evaluate(js)
+        return
+
+    # Fallback: remove all tracked shape IDs
+    for tid, ids in list(_trade_shape_ids.items()):
+        for shape_id in ids:
+            js = f"""
+            (function() {{
+              try {{
+                var chart = window.TradingViewApi._activeChartWidgetWV.value();
+                chart.removeEntity('{shape_id}');
+                return true;
+              }} catch(e) {{ return false; }}
+            }})()
+            """
+            await tv.evaluate(js)
+    _trade_shape_ids.clear()
 
 
 async def monitor_trades() -> None:
@@ -271,7 +282,7 @@ async def monitor_trades() -> None:
                 logger.info("T1 hit for trade %d — stop moved to breakeven %.2f", trade_id, entry)
                 # Update chart
                 try:
-                    await _draw_hline(tv, entry, "BE Stop", "#FF9800", 1)
+                    await _draw_hline(tv, entry, "BE Stop", "#FF9800", 1, trade_id)
                 except Exception:
                     pass
 
