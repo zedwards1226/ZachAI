@@ -172,10 +172,10 @@ async def run() -> bool:
     # Expected scoring
     if "BULLISH" in bias_dir:
         lines.append(f"If ORB breaks HIGH → LONG, score likely {SCORE_FULL_SIZE}+ (full size)")
-        lines.append(f"If ORB breaks LOW → counter-bias, score likely <{SCORE_HALF_SIZE} (skip)")
+        lines.append(f"If ORB breaks LOW → counter-bias, score likely &lt;{SCORE_HALF_SIZE} (skip)")
     elif "BEARISH" in bias_dir:
         lines.append(f"If ORB breaks LOW → SHORT, score likely {SCORE_FULL_SIZE}+ (full size)")
-        lines.append(f"If ORB breaks HIGH → counter-bias, score likely <{SCORE_HALF_SIZE} (skip)")
+        lines.append(f"If ORB breaks HIGH → counter-bias, score likely &lt;{SCORE_HALF_SIZE} (skip)")
 
     # Hard blocks check
     blocks = []
