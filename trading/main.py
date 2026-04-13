@@ -165,22 +165,28 @@ async def main():
                       id="briefing", name="Morning Briefing")
 
     # ─── Interval Polls (check clock internally) ───
+    # max_instances=1 + coalesce=True prevents overlapping runs if a poll
+    # stalls (e.g. CDP hang) — late runs are dropped instead of piling up.
 
     # Sweep detector: every 15 seconds
     scheduler.add_job(run_sweep_poll, "interval", seconds=15,
-                      id="sweep_poll", name="Sweep Poll")
+                      id="sweep_poll", name="Sweep Poll",
+                      max_instances=1, coalesce=True)
 
     # Sentinel continuous: every 60 seconds
     scheduler.add_job(run_sentinel_poll, "interval", seconds=60,
-                      id="sentinel_poll", name="Sentinel Poll")
+                      id="sentinel_poll", name="Sentinel Poll",
+                      max_instances=1, coalesce=True)
 
     # Combiner: every 15 seconds
     scheduler.add_job(run_combiner_poll, "interval", seconds=15,
-                      id="combiner_poll", name="Combiner Poll")
+                      id="combiner_poll", name="Combiner Poll",
+                      max_instances=1, coalesce=True)
 
     # Trade monitor: every 30 seconds
     scheduler.add_job(run_trade_monitor, "interval", seconds=30,
-                      id="trade_monitor", name="Trade Monitor")
+                      id="trade_monitor", name="Trade Monitor",
+                      max_instances=1, coalesce=True)
 
     # Weekly journal report: Sunday 7:00 AM ET
     scheduler.add_job(run_weekly_report, "cron", day_of_week="sun",

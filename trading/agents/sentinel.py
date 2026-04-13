@@ -132,22 +132,20 @@ async def poll() -> Optional[dict]:
                 _last_truth_ids.add(post_id)
                 logger.warning("NEW high-impact Truth Social post: %s", post["text"][:100])
 
-    # Update news_block based on time proximity to events
-    news_block = current.get("news_block", False)
+    # Recompute news_block based on any upcoming high-impact event within 15
+    # min. If nothing is imminent, clear the block (otherwise a stale block
+    # from hours ago could linger for the whole session).
+    news_block = False
     for event in current.get("economic_events", []):
-        if event["impact"] == "HIGH":
-            event_time = _parse_event_time(event.get("time", ""))
-            if event_time:
-                minutes_until = (event_time - now).total_seconds() / 60
-                if 0 <= minutes_until <= 15:
-                    news_block = True
-                elif minutes_until < -15:
-                    # Event passed more than 15 min ago, clear block
-                    if not any(
-                        e["impact"] == "HIGH" and _is_upcoming(e.get("time"), now)
-                        for e in current.get("economic_events", [])
-                    ):
-                        news_block = False
+        if event["impact"] != "HIGH":
+            continue
+        event_time = _parse_event_time(event.get("time", ""))
+        if not event_time:
+            continue
+        minutes_until = (event_time - now).total_seconds() / 60
+        if 0 <= minutes_until <= 15:
+            news_block = True
+            break
 
     # Update state
     current["truth_block"] = truth_block
