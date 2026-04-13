@@ -368,6 +368,13 @@ def _check_hard_blocks(states: dict, orb: ORBRange) -> Optional[str]:
     if vix and vix > VIX_HARD_BLOCK:
         return f"VIX {vix:.1f} above {VIX_HARD_BLOCK} hard block"
 
+    # FOMC/CPI/NFP day — hard block entire day (Finding 8: news days destroy ORB)
+    for event in sentinel.get("economic_events", []):
+        if event.get("impact") == "HIGH" and event.get("within_session_window"):
+            event_name = event.get("event", "").upper()
+            if any(kw in event_name for kw in ("CPI", "NFP", "NON-FARM", "FOMC", "FED")):
+                return f"High-impact news day: {event.get('event')} — no ORB trades"
+
     # ORB range outside ATR band
     atr = structure.get("atr_14", 0)
     if atr and orb.range > 0:
