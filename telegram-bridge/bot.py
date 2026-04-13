@@ -240,12 +240,6 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
                 start_time=_now(), output="")
     active_tasks[task_id] = {"prompt": prompt, "status": "running", "output": ""}
 
-    await _bot_app.bot.send_message(
-        chat_id    = chat_id,
-        text       = f"*Task started* `[{task_id}]`\n\n_{prompt}_",
-        parse_mode = "Markdown",
-    )
-
     # Keep Telegram "typing..." indicator alive while Claude runs
     typing_active = True
     async def _keep_typing():
@@ -321,11 +315,7 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
 
         await _bot_app.bot.send_message(
             chat_id    = chat_id,
-            text       = (
-                f"*Task {status}* `[{task_id}]`  exit={rc}\n\n"
-                f"```\n{final[-3500:] or '(no output)'}\n```"
-            ),
-            parse_mode = "Markdown",
+            text       = final[-3500:] or "(no output)",
         )
 
     except Exception as exc:
@@ -335,9 +325,8 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
         upsert_task(task_id, status="failed")
         active_tasks.pop(task_id, None)
         await _bot_app.bot.send_message(
-            chat_id    = chat_id,
-            text       = f"*Task failed* `[{task_id}]`\nError: {exc}",
-            parse_mode = "Markdown",
+            chat_id = chat_id,
+            text    = f"Error: {exc}",
         )
 
 # ── Command handlers ──────────────────────────────────────────────────────────
