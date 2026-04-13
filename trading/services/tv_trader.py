@@ -1,6 +1,7 @@
 """TradingView Paper Trading — place/manage orders on TradingView's demo account via CDP.
 
-Orders appear directly on Zach's chart: entry markers, stop loss lines, target lines, live P&L.
+Orders appear directly on Zach's chart with real paper fills: entry markers,
+stop loss lines, target lines, live P&L. Uses the TradingView Trading Panel DOM.
 Starting balance: $5,000 demo on MNQ.
 """
 from __future__ import annotations
@@ -22,27 +23,21 @@ ET = pytz.timezone(TIMEZONE)
 
 # Track active chart orders
 _active_orders: dict[int, dict] = {}  # trade_id -> order info
-_trade_shape_ids: dict[int, list[str]] = {}  # trade_id -> list of shape IDs
 
 
 async def place_bracket_order(direction: str, entry_price: float,
                               stop_price: float, target_1: float, target_2: float,
                               trade_id: int) -> bool:
-    """Place a paper trade on TradingView with stop and target bracket orders.
+    """Place a paper trade on TradingView with stop and take profit.
 
-    Uses TradingView's internal trading panel. Falls back to drawing
-    horizontal lines if the trading API is not accessible.
+    Uses the Trading Panel DOM: clicks Sell/Buy, sets qty=1, enables TP/SL,
+    sets prices, and clicks the submit button. This creates a real paper
+    position visible on the chart with fill markers and live P&L.
     """
     tv = await get_client()
     side = "buy" if direction == "LONG" else "sell"
 
-    # Try Method 1: TradingView internal trading API
-    success = await _try_internal_api(tv, side, stop_price, target_1, target_2)
-
-    if not success:
-        # Method 2: Draw levels on chart as visual markers
-        logger.info("Using visual markers (lines) for trade display")
-        success = await _draw_trade_levels(tv, direction, entry_price, stop_price, target_1, target_2, trade_id)
+    success = await _place_via_trading_panel(tv, side, stop_price, target_1)
 
     if success:
         _active_orders[trade_id] = {
@@ -54,96 +49,316 @@ async def place_bracket_order(direction: str, entry_price: float,
             "opened_at": datetime.now(ET).isoformat(),
             "t1_hit": False,
         }
+        logger.info("Paper order placed: %s 1 %s @ ~%.2f  SL=%.2f TP=%.2f",
+                     side.upper(), DEFAULT_SYMBOL, entry_price, stop_price, target_1)
 
     return success
 
 
-async def _try_internal_api(tv, side: str, stop: float, t1: float, t2: float) -> bool:
-    """Try to place order via TradingView's internal trading controller."""
-    js = f"""
-    (function() {{
-      try {{
-        var chart = window.TradingViewApi._activeChartWidgetWV.value()._chartWidget;
-        var tc = chart.model().model().tradingController();
-        if (!tc || !tc.placeOrder) return {{success: false, reason: 'No trading controller'}};
+async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> bool:
+    """Place order through TradingView's Trading Panel DOM.
 
-        // Place market order
-        tc.placeOrder({{
-          symbol: '{DEFAULT_SYMBOL}',
-          side: '{side}',
-          type: 'market',
-          qty: 1
-        }});
-
-        return {{success: true}};
-      }} catch(e) {{
-        return {{success: false, reason: e.message}};
-      }}
-    }})()
+    Steps:
+    1. Click the Trade tab to open the order ticket
+    2. Click Buy or Sell side
+    3. Ensure Market order type
+    4. Set qty to 1
+    5. Enable TP/SL toggles and set prices
+    6. Click the submit button
     """
     try:
-        result = await tv.evaluate(js)
-        if result and result.get("success"):
-            logger.info("Paper order placed via internal API: %s 1 %s", side, DEFAULT_SYMBOL)
+        # Step 1: Open the Trade tab
+        js_open = """
+        (function() {
+          var tabs = document.querySelectorAll('button');
+          for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].textContent.trim() === 'Trade') {
+              tabs[i].click();
+              return true;
+            }
+          }
+          return false;
+        })()
+        """
+        await tv.evaluate(js_open)
+        await asyncio.sleep(0.5)
+
+        # Step 2: Click Buy or Sell side (these are DIVs, not buttons)
+        side_class = "buy-" if side == "buy" else "sell-"
+        js_side = f"""
+        (function() {{
+          var els = document.querySelectorAll('*');
+          for (var i = 0; i < els.length; i++) {{
+            var cls = (els[i].className || '').toString();
+            var rect = els[i].getBoundingClientRect();
+            if (cls.includes('{side_class}') && cls.includes('OnZ1FRe5') && rect.width > 50) {{
+              els[i].click();
+              return true;
+            }}
+          }}
+          return false;
+        }})()
+        """
+        await tv.evaluate(js_side)
+        await asyncio.sleep(0.3)
+
+        # Step 3: Ensure Market order type
+        js_market = """
+        (function() {
+          var tabs = document.querySelectorAll('button');
+          for (var i = 0; i < tabs.length; i++) {
+            var t = tabs[i].textContent.trim();
+            var rect = tabs[i].getBoundingClientRect();
+            if (t === 'Market' && rect.x > 350) {
+              tabs[i].click();
+              return true;
+            }
+          }
+          return false;
+        })()
+        """
+        await tv.evaluate(js_market)
+        await asyncio.sleep(0.3)
+
+        # Step 4: Set qty to 1
+        js_qty = """
+        (function() {
+          var inputs = document.querySelectorAll('input[type="text"]');
+          var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          for (var i = 0; i < inputs.length; i++) {
+            var rect = inputs[i].getBoundingClientRect();
+            if (rect.x > 350 && rect.y > 250 && rect.y < 320 && rect.width > 0) {
+              setter.call(inputs[i], '1');
+              inputs[i].dispatchEvent(new Event('input', {bubbles: true}));
+              inputs[i].dispatchEvent(new Event('change', {bubbles: true}));
+              return true;
+            }
+          }
+          return false;
+        })()
+        """
+        await tv.evaluate(js_qty)
+        await asyncio.sleep(0.3)
+
+        # Step 5: Enable TP and SL toggles
+        js_toggles = """
+        (function() {
+          var switches = document.querySelectorAll('[role="switch"]');
+          var rightSwitches = [];
+          for (var i = 0; i < switches.length; i++) {
+            var rect = switches[i].getBoundingClientRect();
+            if (rect.x > 350 && rect.width > 0) {
+              rightSwitches.push({el: switches[i], y: rect.y, checked: switches[i].getAttribute('aria-checked')});
+            }
+          }
+          rightSwitches.sort(function(a,b) { return a.y - b.y; });
+          var enabled = 0;
+          for (var j = 0; j < rightSwitches.length; j++) {
+            if (rightSwitches[j].checked !== 'true') {
+              rightSwitches[j].el.click();
+            }
+            enabled++;
+          }
+          return enabled;
+        })()
+        """
+        await tv.evaluate(js_toggles)
+        await asyncio.sleep(0.3)
+
+        # Step 5b: Ensure TP/SL are in "price" mode (not ticks/USD)
+        js_price_mode = """
+        (function() {
+          var btns = document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {
+            var t = btns[i].textContent.trim();
+            var rect = btns[i].getBoundingClientRect();
+            if (rect.x > 350 && (t === 'Take profit, price' || t === 'Stop loss, price')) continue;
+            if (rect.x > 350 && rect.y > 340 && (t.includes('ticks') || t.includes('USD')) && !t.includes('price')) {
+              // Click to cycle to price mode - these buttons cycle through modes
+              btns[i].click();
+            }
+          }
+          return true;
+        })()
+        """
+        await tv.evaluate(js_price_mode)
+        await asyncio.sleep(0.3)
+
+        # Step 6: Set TP and SL prices via triple-click select + type
+        js_prices = f"""
+        (function() {{
+          var inputs = document.querySelectorAll('input');
+          var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          var rightInputs = [];
+          for (var i = 0; i < inputs.length; i++) {{
+            var rect = inputs[i].getBoundingClientRect();
+            if (rect.x > 350 && rect.width > 40 && rect.height > 0 && rect.y > 320 && inputs[i].type !== 'checkbox') {{
+              rightInputs.push({{el: inputs[i], y: rect.y}});
+            }}
+          }}
+          rightInputs.sort(function(a,b) {{ return a.y - b.y; }});
+          var set = 0;
+          // First = TP price, Second = SL price
+          if (rightInputs.length >= 1) {{
+            var tpEl = rightInputs[0].el;
+            tpEl.focus();
+            tpEl.select();
+            setter.call(tpEl, '{tp:.2f}');
+            tpEl.dispatchEvent(new Event('input', {{bubbles: true}}));
+            tpEl.dispatchEvent(new Event('change', {{bubbles: true}}));
+            tpEl.blur();
+            set++;
+          }}
+          if (rightInputs.length >= 2) {{
+            var slEl = rightInputs[1].el;
+            slEl.focus();
+            slEl.select();
+            setter.call(slEl, '{stop:.2f}');
+            slEl.dispatchEvent(new Event('input', {{bubbles: true}}));
+            slEl.dispatchEvent(new Event('change', {{bubbles: true}}));
+            slEl.blur();
+            set++;
+          }}
+          return set;
+        }})()
+        """
+        await tv.evaluate(js_prices)
+        await asyncio.sleep(0.5)
+
+        # Step 7: Click the submit button (Buy/Sell X MNQ1! MARKET)
+        side_word = "Buy" if side == "buy" else "Sell"
+        js_submit = f"""
+        (function() {{
+          var btns = document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {{
+            var t = btns[i].textContent.trim();
+            if (t.includes('{side_word}') && t.includes('MNQ')) {{
+              btns[i].click();
+              return {{clicked: true, text: t}};
+            }}
+          }}
+          return {{clicked: false}};
+        }})()
+        """
+        result = await tv.evaluate(js_submit)
+        if result and result.get("clicked"):
+            logger.info("Trading panel order submitted: %s", result.get("text"))
             return True
         else:
-            logger.info("Internal API unavailable: %s", result.get("reason", "unknown"))
+            logger.warning("Could not find submit button, falling back to line drawing")
             return False
+
     except Exception as e:
-        logger.info("Internal API error: %s", e)
+        logger.error("Trading panel order failed: %s", e)
         return False
 
 
-async def _draw_trade_levels(tv, direction: str, entry: float, stop: float,
-                              t1: float, t2: float, trade_id: int = 0) -> bool:
-    """Draw horizontal lines on chart for entry, stop, and targets."""
-    try:
-        # Entry line (blue)
-        await _draw_hline(tv, entry, "Entry " + direction, "#2196F3", 2, trade_id)
-        # Stop line (red)
-        await _draw_hline(tv, stop, "Stop", "#F44336", 1, trade_id)
-        # Target 1 (green)
-        await _draw_hline(tv, t1, "T1", "#4CAF50", 1, trade_id)
-        # Target 2 (green dashed)
-        await _draw_hline(tv, t2, "T2", "#4CAF50", 1, trade_id)
-        logger.info("Trade levels drawn: entry=%.2f stop=%.2f t1=%.2f t2=%.2f", entry, stop, t1, t2)
-        return True
-    except Exception as e:
-        logger.error("Failed to draw trade levels: %s", e)
-        return False
+async def close_via_trading_panel(tv, direction: str) -> bool:
+    """Close a position by placing an opposite market order via the Trading Panel.
 
-
-async def _draw_hline(tv, price: float, text: str, color: str, width: int,
-                      trade_id: Optional[int] = None) -> None:
-    """Draw a horizontal line with label via TradingView drawing API."""
-    js = f"""
-    (function() {{
-      try {{
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        var id = chart.createMultipointShape([{{price: {price}, time: Date.now()/1000}}], {{
-          shape: 'horizontal_line',
-          overrides: {{
-            linecolor: '{color}',
-            linewidth: {width},
-            linestyle: 0,
-            showLabel: true,
-            text: '{text} {price:.2f}',
-            horzLabelsAlign: 'right',
-            textcolor: '{color}',
-            fontsize: 10
-          }}
-        }});
-        return {{success: true, id: id ? id.toString() : null}};
-      }} catch(e) {{ return {{success: false}}; }}
-    }})()
+    If position is LONG, places a Sell Market. If SHORT, places a Buy Market.
     """
-    result = await tv.evaluate(js)
-    if result and result.get("id") and trade_id is not None:
-        _trade_shape_ids.setdefault(trade_id, []).append(result["id"])
+    try:
+        close_side = "sell" if direction == "LONG" else "buy"
+        side_class = "sell" if close_side == "sell" else "buy"
+        side_word = "Sell" if close_side == "sell" else "Buy"
+
+        # Open Trade tab
+        js_open = """
+        (function() {
+          var tabs = document.querySelectorAll('button');
+          for (var i = 0; i < tabs.length; i++) {
+            if (tabs[i].textContent.trim() === 'Trade') {
+              tabs[i].click();
+              return true;
+            }
+          }
+          return false;
+        })()
+        """
+        await tv.evaluate(js_open)
+        await asyncio.sleep(0.5)
+
+        # Click opposite side (these are DIVs, not buttons)
+        side_cls = "sell-" if close_side == "sell" else "buy-"
+        js_side = f"""
+        (function() {{
+          var els = document.querySelectorAll('*');
+          for (var i = 0; i < els.length; i++) {{
+            var cls = (els[i].className || '').toString();
+            var rect = els[i].getBoundingClientRect();
+            if (cls.includes('{side_cls}') && cls.includes('OnZ1FRe5') && rect.width > 50) {{
+              els[i].click();
+              return true;
+            }}
+          }}
+          return false;
+        }})()
+        """
+        await tv.evaluate(js_side)
+        await asyncio.sleep(0.3)
+
+        # Ensure Market
+        js_market = """
+        (function() {
+          var tabs = document.querySelectorAll('button');
+          for (var i = 0; i < tabs.length; i++) {
+            var t = tabs[i].textContent.trim();
+            var rect = tabs[i].getBoundingClientRect();
+            if (t === 'Market' && rect.x > 350) {
+              tabs[i].click();
+              return true;
+            }
+          }
+          return false;
+        })()
+        """
+        await tv.evaluate(js_market)
+        await asyncio.sleep(0.3)
+
+        # Disable TP/SL toggles
+        js_off = """
+        (function() {
+          var switches = document.querySelectorAll('[role="switch"]');
+          for (var i = 0; i < switches.length; i++) {
+            var rect = switches[i].getBoundingClientRect();
+            if (rect.x > 350 && rect.width > 0 && switches[i].getAttribute('aria-checked') === 'true') {
+              switches[i].click();
+            }
+          }
+          return true;
+        })()
+        """
+        await tv.evaluate(js_off)
+        await asyncio.sleep(0.3)
+
+        # Click submit
+        js_submit = f"""
+        (function() {{
+          var btns = document.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {{
+            var t = btns[i].textContent.trim();
+            if (t.includes('{side_word}') && t.includes('MNQ')) {{
+              btns[i].click();
+              return {{clicked: true, text: t}};
+            }}
+          }}
+          return {{clicked: false}};
+        }})()
+        """
+        result = await tv.evaluate(js_submit)
+        if result and result.get("clicked"):
+            logger.info("Position closed via trading panel: %s", result.get("text"))
+            return True
+        return False
+
+    except Exception as e:
+        logger.error("Failed to close via trading panel: %s", e)
+        return False
 
 
 async def close_position(trade_id: int, exit_price: float, reason: str = "") -> dict:
-    """Close a paper trade position. Cleans up chart drawings."""
+    """Close a paper trade position."""
     order = _active_orders.pop(trade_id, None)
     if not order:
         logger.warning("No active order for trade %d", trade_id)
@@ -151,6 +366,13 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "") -> 
 
     direction = order["direction"]
     entry = order["entry"]
+
+    # Close on TradingView chart
+    try:
+        tv = await get_client()
+        await close_via_trading_panel(tv, direction)
+    except Exception as e:
+        logger.warning("Failed to close on chart: %s", e)
 
     # Determine outcome
     if direction == "LONG":
@@ -180,48 +402,7 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "") -> 
             rr=result.get("rr", 0),
         )
 
-    # Clean chart drawings
-    try:
-        tv = await get_client()
-        await _clear_trade_drawings(tv, trade_id)
-    except Exception as e:
-        logger.warning("Failed to clear chart drawings: %s", e)
-
     return result
-
-
-async def _clear_trade_drawings(tv, trade_id: Optional[int] = None) -> None:
-    """Remove trade-related drawings from the chart using tracked shape IDs."""
-    # Remove by tracked IDs (reliable)
-    if trade_id and trade_id in _trade_shape_ids:
-        ids = _trade_shape_ids.pop(trade_id)
-        for shape_id in ids:
-            js = f"""
-            (function() {{
-              try {{
-                var chart = window.TradingViewApi._activeChartWidgetWV.value();
-                chart.removeEntity('{shape_id}');
-                return true;
-              }} catch(e) {{ return false; }}
-            }})()
-            """
-            await tv.evaluate(js)
-        return
-
-    # Fallback: remove all tracked shape IDs
-    for tid, ids in list(_trade_shape_ids.items()):
-        for shape_id in ids:
-            js = f"""
-            (function() {{
-              try {{
-                var chart = window.TradingViewApi._activeChartWidgetWV.value();
-                chart.removeEntity('{shape_id}');
-                return true;
-              }} catch(e) {{ return false; }}
-            }})()
-            """
-            await tv.evaluate(js)
-    _trade_shape_ids.clear()
 
 
 async def monitor_trades() -> None:
@@ -272,7 +453,7 @@ async def monitor_trades() -> None:
             await close_position(trade_id, price, "Stop loss hit")
             continue
 
-        # Check T1 hit (close 50%, move stop to breakeven)
+        # Check T1 hit (move stop to breakeven)
         if not order["t1_hit"]:
             t1_hit = (direction == "LONG" and price >= t1) or \
                      (direction == "SHORT" and price <= t1)
@@ -280,11 +461,6 @@ async def monitor_trades() -> None:
                 order["t1_hit"] = True
                 order["stop"] = entry  # Move to breakeven
                 logger.info("T1 hit for trade %d — stop moved to breakeven %.2f", trade_id, entry)
-                # Update chart
-                try:
-                    await _draw_hline(tv, entry, "BE Stop", "#FF9800", 1, trade_id)
-                except Exception:
-                    pass
 
         # Check T2 hit
         t2_hit = (direction == "LONG" and price >= t2) or \
