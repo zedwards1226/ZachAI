@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 from config import (
     MAX_BET, MAX_DAILY_TRADES, MAX_DAILY_LOSS, MAX_CAPITAL_AT_RISK,
-    MAX_CONSECUTIVE_LOSSES, MIN_EDGE, TRADE_WINDOW_START_HOUR,
+    MAX_CONSECUTIVE_LOSSES, MIN_EDGE, MIN_PRICE_CENTS, TRADE_WINDOW_START_HOUR,
     TRADE_WINDOW_END_HOUR, TIMEZONE, STARTING_CAPITAL
 )
 from database import get_guardrail_state, get_summary
@@ -80,8 +80,18 @@ def check_capital_at_risk(state: dict, new_stake: float, capital: float) -> tupl
 
 
 def check_edge(edge: float) -> tuple[bool, str]:
-    if abs(edge) < MIN_EDGE:
-        return False, f"Edge {abs(edge)*100:.1f}% below minimum {MIN_EDGE*100:.0f}%"
+    if edge < MIN_EDGE:
+        return False, f"Edge {edge*100:.1f}% below minimum {MIN_EDGE*100:.0f}%"
+    return True, "ok"
+
+
+def check_price_cents(price_cents: int) -> tuple[bool, str]:
+    """Reject penny contracts — no real liquidity below MIN_PRICE_CENTS on either side."""
+    no_price = 100 - price_cents
+    if min(price_cents, no_price) < MIN_PRICE_CENTS:
+        return False, (
+            f"Price {price_cents}¢/{no_price}¢ below {MIN_PRICE_CENTS}¢ floor"
+        )
     return True, "ok"
 
 
@@ -99,12 +109,13 @@ def check_halt(state: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
-def all_checks(edge: float, stake: float, capital: float,
+def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
                paper: bool = True) -> tuple[bool, list[str]]:
     """
     Run all guardrail checks.
     Returns (all_passed: bool, failed_reasons: list[str])
     Paper mode bypasses trade window and halt checks.
+    edge must be the absolute edge for the chosen side (always >= 0).
     """
     state   = get_guardrail_state()
     reasons = []
@@ -112,6 +123,7 @@ def all_checks(edge: float, stake: float, capital: float,
     checks = [
         check_trade_window(),     # always checked; bypassed by override or in-window
         check_halt(state),
+        check_price_cents(price_cents),
         check_edge(edge),
         check_bet_size(stake),
         check_daily_trades(state),
