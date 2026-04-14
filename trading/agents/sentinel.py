@@ -368,37 +368,62 @@ def _is_upcoming(time_str: str, now: datetime) -> bool:
     return 0 <= minutes_until <= 15
 
 
+# ─── Official 2026 Calendar (BLS + Federal Reserve) ──────────
+# These are the EXACT dates — no guessing. Updated once per year.
+
+_CPI_2026 = {
+    (1, 13), (2, 11), (3, 11), (4, 10), (5, 12), (6, 10),
+    (7, 14), (8, 12), (9, 11), (10, 14), (11, 10), (12, 10),
+}
+
+_NFP_2026 = {
+    (1, 9), (2, 6), (3, 6), (4, 3), (5, 8), (6, 5),
+    (7, 2), (8, 7), (9, 4), (10, 2), (11, 6), (12, 4),
+}
+
+# FOMC statement day (day 2 of meeting, 2:00 PM ET)
+_FOMC_2026 = {
+    (1, 28), (3, 18), (4, 29), (6, 17), (7, 29), (9, 16), (10, 28), (12, 9),
+}
+
+
 def _get_static_events(now: datetime) -> list[dict]:
-    """Return known recurring high-impact events as fallback."""
-    weekday = now.weekday()  # 0=Monday
-    day = now.day
+    """Return known high-impact events from the official 2026 calendar.
+
+    Uses hard-coded BLS/Fed dates — NOT guesswork. This is the fallback
+    when Forex Factory returns 403 (which happens frequently).
+    """
     month = now.month
+    day = now.day
+    weekday = now.weekday()  # 0=Monday
 
     events = []
 
-    # FOMC: 8 times per year, usually Wednesday
-    # NFP: first Friday of month
-    # CPI: ~12th of each month
-
-    if weekday == 4 and day <= 7:
+    if (month, day) in _CPI_2026:
         events.append({
             "time": "8:30am",
-            "event": "Non-Farm Payrolls (NFP)",
+            "event": "CPI — Consumer Price Index",
             "impact": "HIGH",
             "within_session_window": True,
         })
 
-    # CPI: typically 2nd Tuesday or Wednesday of month (10th-15th range)
-    # Only flag as HIGH when ForexFactory is unavailable AND it's a Tue/Wed in range
-    if 10 <= day <= 15 and weekday in (1, 2):  # Tuesday or Wednesday only
+    if (month, day) in _NFP_2026:
         events.append({
             "time": "8:30am",
-            "event": "CPI (estimated — verify manually)",
+            "event": "NFP — Non-Farm Payrolls",
             "impact": "HIGH",
             "within_session_window": True,
         })
 
-    # Thursday jobless claims
+    if (month, day) in _FOMC_2026:
+        events.append({
+            "time": "2:00pm",
+            "event": "FOMC Statement + Rate Decision",
+            "impact": "HIGH",
+            "within_session_window": True,
+        })
+
+    # Thursday jobless claims (recurring, lower impact)
     if weekday == 3:
         events.append({
             "time": "8:30am",

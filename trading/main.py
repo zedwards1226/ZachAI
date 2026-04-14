@@ -6,8 +6,10 @@ Starts all agents via APScheduler. Manages state folder and logging.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 import logging.handlers
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +22,42 @@ from agents import journal
 
 logger = logging.getLogger("orb")
 ET = pytz.timezone(TIMEZONE)
+
+# ─── Single-instance guard ─────────────────────────────────────
+PID_FILE = STATE_DIR / "orb.pid"
+
+
+def _acquire_pid_lock() -> None:
+    """Ensure only one main.py runs at a time. Kill stale instances."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    if PID_FILE.exists():
+        old_pid = PID_FILE.read_text().strip()
+        try:
+            old_pid = int(old_pid)
+            # Check if process is actually running
+            os.kill(old_pid, 0)  # signal 0 = check existence
+            # Process exists — kill it so we take over with latest code
+            logger.warning("Killing stale ORB instance PID %d", old_pid)
+            os.kill(old_pid, 9)
+            import time
+            time.sleep(1)
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            pass  # Process already dead or PID invalid
+
+    PID_FILE.write_text(str(os.getpid()))
+    atexit.register(_release_pid_lock)
+
+
+def _release_pid_lock() -> None:
+    """Clean up PID file on exit."""
+    try:
+        if PID_FILE.exists():
+            stored = PID_FILE.read_text().strip()
+            if stored == str(os.getpid()):
+                PID_FILE.unlink()
+    except Exception:
+        pass
 
 
 def setup_logging() -> None:
@@ -134,8 +172,12 @@ async def run_weekly_report():
 async def main():
     """Main entry point — initialize and start the scheduler."""
     setup_logging()
+
+    # Kill any stale instance before starting
+    _acquire_pid_lock()
+
     logger.info("=" * 60)
-    logger.info("ORB Multi-Agent Trading System starting")
+    logger.info("ORB Multi-Agent Trading System starting (PID %d)", os.getpid())
     logger.info("Timezone: %s", TIMEZONE)
     logger.info("=" * 60)
 
