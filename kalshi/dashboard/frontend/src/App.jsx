@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { ShieldAlert, Activity, Target, Layers, Database } from 'lucide-react'
+import { ShieldAlert, Activity, Target, Layers, Database, Zap } from 'lucide-react'
 
 import Header           from './components/Header'
 import EquityChart      from './components/EquityChart'
@@ -78,6 +78,7 @@ export default function App() {
   const [countdown, setCountdown] = useState(SCAN_PERIOD)
   const [pingMs,    setPingMs]    = useState(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('trading')
 
   // Local fallback log
   const [localLog, setLocalLog] = useState([
@@ -251,7 +252,7 @@ export default function App() {
       <div className="flex-1 min-h-0 overflow-hidden terminal-grid">
 
         {/* ── LEFT COLUMN: Signals + Calibration + Guardrails ── */}
-        <div className="flex flex-col gap-3 p-3 overflow-y-auto min-h-0 border-r" style={{ borderColor: '#2a2a3a' }}>
+        <div className={`flex flex-col gap-3 p-3 overflow-y-auto min-h-0 border-r ${activeTab !== 'signals' ? 'hidden md:flex' : 'flex'}`} style={{ borderColor: '#2a2a3a' }}>
 
           {/* Signals */}
           <div className="card p-3 flex flex-col" style={{ minHeight: 260 }}>
@@ -287,7 +288,7 @@ export default function App() {
         </div>
 
         {/* ── CENTER COLUMN: Positions + Equity Chart + Trades ── */}
-        <div className="flex flex-col gap-3 p-3 min-h-0 overflow-y-auto">
+        <div className={`flex flex-col gap-3 p-3 min-h-0 overflow-y-auto ${activeTab !== 'trading' ? 'hidden md:flex' : 'flex'}`}>
 
           {/* Live Positions */}
           <div className="card flex flex-col shrink-0" style={{ minHeight: 200, maxHeight: 360 }}>
@@ -339,7 +340,7 @@ export default function App() {
         </div>
 
         {/* ── RIGHT COLUMN: Decision Log ── */}
-        <div className="flex flex-col p-3 min-h-0 overflow-hidden border-l" style={{ borderColor: '#2a2a3a' }}>
+        <div className={`flex flex-col p-3 min-h-0 overflow-hidden border-l ${activeTab !== 'log' ? 'hidden md:flex' : 'flex'}`} style={{ borderColor: '#2a2a3a' }}>
           <div className="card p-3 flex flex-col flex-1 min-h-0">
             <div className="flex items-center justify-between mb-2 shrink-0">
               <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
@@ -357,9 +358,54 @@ export default function App() {
         </div>
       </div>
 
+      {/* Mobile bottom tab bar */}
+      <div
+        className="md:hidden flex items-center border-t shrink-0"
+        style={{ borderColor: '#2a2a3a', background: '#0f0f14' }}
+      >
+        {[
+          { id: 'signals', label: 'SIGNALS',  Icon: Activity },
+          { id: 'trading', label: 'TRADING',  Icon: Target   },
+          { id: 'log',     label: 'LOG',       Icon: Layers   },
+        ].map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className="flex-1 flex flex-col items-center gap-0.5 py-2.5"
+            style={{
+              color: activeTab === id ? '#818cf8' : '#475569',
+              background: 'none',
+              border: 'none',
+              borderTop: activeTab === id ? '2px solid #818cf8' : '2px solid transparent',
+              cursor: 'pointer',
+            }}
+          >
+            <Icon size={16} />
+            <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.06em' }}>{label}</span>
+          </button>
+        ))}
+        <button
+          onClick={runScan}
+          disabled={scanning}
+          className="flex flex-col items-center gap-0.5 py-2.5 px-4"
+          style={{
+            color: scanning ? '#475569' : '#26de81',
+            background: 'none',
+            border: 'none',
+            borderTop: '2px solid transparent',
+            cursor: scanning ? 'not-allowed' : 'pointer',
+          }}
+        >
+          <Zap size={16} />
+          <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.06em' }}>
+            {scanning ? '...' : `${String(countdown).padStart(2,'0')}s`}
+          </span>
+        </button>
+      </div>
+
       {/* Footer */}
       <footer
-        className="flex items-center justify-between px-4 py-1.5 border-t shrink-0 text-[10px] text-text-muted"
+        className="hidden md:flex items-center justify-between px-4 py-1.5 border-t shrink-0 text-[10px] text-text-muted"
         style={{ borderColor: '#2a2a3a', background: '#0f0f14' }}
       >
         <span>WeatherAlpha Trading Terminal | Kalshi Weather Markets | Paper Mode</span>

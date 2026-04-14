@@ -3,13 +3,16 @@ import { motion, AnimatePresence } from 'framer-motion'
 import * as ScrollArea from '@radix-ui/react-scroll-area'
 
 const TYPE_CONFIG = {
-  scan:    { color: '#818cf8', label: 'SCAN'  },
-  trade:   { color: '#26de81', label: 'TRADE' },
-  block:   { color: '#ff5e7d', label: 'BLOCK' },
-  skip:    { color: '#fbbf24', label: 'SKIP'  },
-  error:   { color: '#ff5e7d', label: 'ERROR' },
-  system:  { color: '#475569', label: 'SYS'   },
-  connect: { color: '#38bdf8', label: 'CONN'  },
+  scan:              { color: '#818cf8', label: 'SCAN'  },
+  trade:             { color: '#26de81', label: 'TRADE' },
+  traded:            { color: '#26de81', label: 'TRADE' },
+  block:             { color: '#ff5e7d', label: 'BLOCK' },
+  blocked:           { color: '#ff5e7d', label: 'BLOCK' },
+  skip:              { color: '#fbbf24', label: 'SKIP'  },
+  skipped_duplicate: { color: '#fbbf24', label: 'SKIP'  },
+  error:             { color: '#ff5e7d', label: 'ERROR' },
+  system:            { color: '#475569', label: 'SYS'   },
+  connect:           { color: '#38bdf8', label: 'CONN'  },
 }
 
 function TypeBadge({ type }) {

@@ -175,17 +175,17 @@ def scan_and_trade() -> list[dict]:
         # 9a. Skip if already have an open position OR any trade placed today for this market
         if has_open_trade_for_market(best["ticker"]):
             log.info("Skipping %s %s — already have open position", city_code, best["ticker"])
-            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate", "reason": "open position"})
             insert_signal(**_sig, reason_skipped="duplicate open position")
             continue
         if has_trade_for_market_today(best["ticker"]):
             log.info("Skipping %s %s — already traded this market today", city_code, best["ticker"])
-            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate", "reason": "already traded today"})
             insert_signal(**_sig, reason_skipped="already traded today")
             continue
         if has_open_trade_for_city(city_code):
             log.info("Skipping %s %s — already have open trade for this city", city_code, best["ticker"])
-            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+            actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate", "reason": "city has open trade"})
             insert_signal(**_sig, reason_skipped="city already has open trade")
             continue
 
@@ -227,7 +227,7 @@ def scan_and_trade() -> list[dict]:
             # DB-level duplicate guard fired
             if trade_id == -1:
                 log.warning("DB blocked duplicate for %s %s", city_code, best["ticker"])
-                actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate"})
+                actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate", "reason": "DB duplicate guard"})
                 insert_signal(**_sig, reason_skipped="DB unique constraint blocked duplicate")
                 continue
 

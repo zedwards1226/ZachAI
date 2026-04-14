@@ -129,6 +129,9 @@ def scan():
                     if isinstance(reasons, list):
                         reasons = "; ".join(reasons)
                     msg = f"{city}: blocked — {reasons}"
+                elif atype == "skipped_duplicate":
+                    reason = action.get("reason", "already in position")
+                    msg = f"{city}: skipped — {reason}"
                 elif atype == "error":
                     msg = f"{city}: error — {action.get('error','unknown')}"
                 else:
