@@ -239,22 +239,35 @@ async def _fetch_economic_calendar() -> list[dict]:
 
 
 async def _fetch_truth_social() -> tuple[list[dict], str]:
-    """Fetch recent posts from Truth Social @realDonaldTrump."""
+    """Fetch recent posts from Truth Social @realDonaldTrump.
+
+    Priority order:
+    1. RSS feed (server-rendered XML — works even when SPA/API is blocked)
+    2. JSON API (fast when available)
+    3. HTML scrape (last resort — rarely works due to SPA)
+    """
     global _api_blocked_until
     posts = []
     now = datetime.now(ET)
 
     try:
         http = _get_http()
-        api_ok = _api_blocked_until is None or now >= _api_blocked_until
 
+        # 1. Financial news RSS (Reuters/AP/CNBC/Yahoo) — always try first.
+        #    Truth Social serves a JS SPA for all routes so direct scraping
+        #    never works. News RSS picks up Trump statements within minutes.
+        rss_posts = await _fetch_truth_rss(http, now)
+        if rss_posts:
+            return rss_posts, "NEWS_RSS"
+
+        # 2. JSON API (if not currently backed off due to 403)
+        api_ok = _api_blocked_until is None or now >= _api_blocked_until
         if api_ok:
-            # Try Truth Social API endpoint (public timeline)
             url = "https://truthsocial.com/api/v1/accounts/107780257626128497/statuses?limit=20"
             resp = await http.get(url, headers={"Accept": "application/json"})
 
             if resp.status_code == 200:
-                _api_blocked_until = None  # reset block
+                _api_blocked_until = None
                 data = resp.json()
                 for item in data:
                     text = _strip_html(item.get("content", ""))
@@ -275,26 +288,100 @@ async def _fetch_truth_social() -> tuple[list[dict], str]:
                         "age_minutes": round(age_min),
                     })
 
-                return posts, "OK"
+                return posts, "API"
 
-            # 403 or other block — cache for 20 minutes, skip to scrape
             logger.info("Truth Social API returned %d, backing off 20 min", resp.status_code)
             _api_blocked_until = now + timedelta(minutes=20)
 
-        # Scrape the public profile page
+        # 3. HTML scrape (SPA — rarely yields posts)
         resp2 = await http.get("https://truthsocial.com/@realDonaldTrump")
         if resp2.status_code == 200:
-            # Mastodon SPAs embed initial state as JSON in a <script> tag
             scraped = _parse_truth_html(resp2.text, now)
             if scraped:
                 return scraped, "SCRAPED"
-            # Profile page returned 200 but no parseable posts (SPA not yet rendered)
             return [], "SCRAPED_EMPTY"
 
     except Exception as e:
         logger.warning("Failed to fetch Truth Social: %s", e)
 
     return posts, "UNAVAILABLE"
+
+
+async def _fetch_truth_rss(http: httpx.AsyncClient, now: datetime) -> list[dict]:
+    """Fetch market-moving news from free financial RSS feeds.
+
+    Truth Social's site serves a JS SPA for all routes (including .rss),
+    so direct scraping never yields posts. Instead we pull from Reuters,
+    AP, and Yahoo Finance — they pick up Trump statements within minutes
+    and require no API key.
+    """
+    RSS_FEEDS = [
+        ("https://finance.yahoo.com/rss/topstories", "Yahoo Finance"),
+        ("https://www.cnbc.com/id/100003114/device/rss/rss.html", "CNBC"),
+        ("https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "NYT Business"),
+        ("https://feeds.marketwatch.com/marketwatch/topstories/", "MarketWatch"),
+    ]
+
+    posts: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for feed_url, source in RSS_FEEDS:
+        try:
+            resp = await http.get(
+                feed_url,
+                headers={"Accept": "application/rss+xml, application/xml, text/xml"},
+            )
+            if resp.status_code != 200:
+                logger.debug("%s RSS returned %d", source, resp.status_code)
+                continue
+
+            soup = BeautifulSoup(resp.text, "xml")
+            items = soup.find_all("item")
+            if not items:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                items = soup.find_all("item")
+
+            for item in items[:30]:
+                title_el = item.find("title")
+                desc_el = item.find("description")
+                title = _strip_html(title_el.get_text() if title_el else "")
+                desc = _strip_html(desc_el.get_text() if desc_el else "")
+                text = f"{title}. {desc}".strip(". ") if desc else title
+                if not title:
+                    continue
+
+                pub_el = item.find("pubDate")
+                pub_str = pub_el.get_text(strip=True) if pub_el else ""
+                post_time = _parse_rfc2822(pub_str, now)
+                age_min = (now - post_time).total_seconds() / 60 if post_time else 0
+
+                if age_min > 720:
+                    continue
+
+                link_el = item.find("link") or item.find("guid")
+                post_id = link_el.get_text(strip=True) if link_el else f"{source}_{len(posts)}"
+
+                if post_id in seen_ids:
+                    continue
+                seen_ids.add(post_id)
+
+                impact = _classify_truth_impact(text, news_rss=True)
+                posts.append({
+                    "id": post_id,
+                    "source": source,
+                    "time": post_time.isoformat() if post_time else now.isoformat(),
+                    "text": f"[{source}] {text[:250]}",
+                    "impact": impact,
+                    "keywords_matched": _matched_keywords(text),
+                    "age_minutes": round(age_min),
+                })
+
+        except Exception as e:
+            logger.warning("%s RSS fetch failed: %s", source, e)
+
+    # Sort by recency
+    posts.sort(key=lambda p: p.get("age_minutes", 999))
+    return posts
 
 
 def _parse_truth_html(html: str, now: datetime) -> list[dict]:
@@ -381,10 +468,27 @@ def _parse_truth_html(html: str, now: datetime) -> list[dict]:
 
 # ─── Helpers ────────────────────────────────────────────────────
 
-def _classify_truth_impact(text: str) -> str:
-    """Classify a Truth Social post as HIGH_IMPACT or LOW_IMPACT."""
+# Keywords that indicate BREAKING/URGENT events from news RSS headlines.
+# Must be specific enough that a normal financial headline won't trigger them.
+_NEWS_RSS_URGENT_KEYWORDS = [
+    "trump announces", "trump signs", "executive order", "trump declares",
+    "trump imposes", "new tariff", "tariff hike", "trade war", "sanctions",
+    "fed cuts", "fed raises", "rate cut", "rate hike", "rate decision",
+    "emergency declaration", "market halt", "circuit breaker", "flash crash",
+    "bank run", "bank failure", "debt ceiling", "default", "shutdown",
+    "recession confirmed", "gdp contraction",
+]
+
+
+def _classify_truth_impact(text: str, news_rss: bool = False) -> str:
+    """Classify a post as HIGH_IMPACT or LOW_IMPACT.
+
+    news_rss=True uses a stricter keyword list so routine financial
+    headlines don't permanently trip the truth_block flag.
+    """
     text_lower = text.lower()
-    for keyword in TRUTH_HIGH_IMPACT_KEYWORDS:
+    keywords = _NEWS_RSS_URGENT_KEYWORDS if news_rss else TRUTH_HIGH_IMPACT_KEYWORDS
+    for keyword in keywords:
         if keyword in text_lower:
             return "HIGH_IMPACT"
     return "LOW_IMPACT"
@@ -399,6 +503,18 @@ def _matched_keywords(text: str) -> list[str]:
 def _strip_html(html: str) -> str:
     """Strip HTML tags from content."""
     return re.sub(r"<[^>]+>", "", html).strip()
+
+
+def _parse_rfc2822(rfc_str: str, fallback: datetime) -> Optional[datetime]:
+    """Parse RFC 2822 date from RSS pubDate (e.g. 'Mon, 14 Apr 2026 08:30:00 +0000')."""
+    if not rfc_str:
+        return fallback
+    from email.utils import parsedate_to_datetime
+    try:
+        dt = parsedate_to_datetime(rfc_str)
+        return dt.astimezone(ET)
+    except Exception:
+        return fallback
 
 
 def _parse_iso_time(iso_str: str) -> Optional[datetime]:
