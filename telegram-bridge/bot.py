@@ -44,6 +44,9 @@ pending_approvals: dict[str, dict] = {}
 # task_id → {prompt, status, output}
 active_tasks: dict[str, dict] = {}
 
+# chat_id → Claude Code session_id (enables multi-turn memory within a bot session)
+chat_sessions: dict[int, str] = {}
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -252,9 +255,15 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
     typing_task = asyncio.create_task(_keep_typing())
 
     try:
+        # Build command — resume prior session if one exists for this chat
+        cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd", "-p", "--output-format", "json"]
+        prior_session = chat_sessions.get(chat_id)
+        if prior_session:
+            cmd += ["--resume", prior_session]
+        cmd.append(prompt)
+
         proc = await asyncio.create_subprocess_exec(
-            r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
-            "-p", "--output-format", "json", prompt,
+            *cmd,
             stdout = asyncio.subprocess.PIPE,
             stderr = asyncio.subprocess.PIPE,
             cwd    = "C:\\ZachAI",
@@ -264,15 +273,35 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
         stdout_bytes, _ = await proc.communicate()
         rc = proc.returncode
 
+        # If resume failed (bad/expired session), retry fresh
+        if rc != 0 and prior_session:
+            log.warning("Session %s resume failed (rc=%d), starting fresh", prior_session, rc)
+            chat_sessions.pop(chat_id, None)
+            fresh_cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
+                         "-p", "--output-format", "json", prompt]
+            proc2 = await asyncio.create_subprocess_exec(
+                *fresh_cmd,
+                stdout = asyncio.subprocess.PIPE,
+                stderr = asyncio.subprocess.PIPE,
+                cwd    = "C:\\ZachAI",
+            )
+            stdout_bytes, _ = await proc2.communicate()
+            rc = proc2.returncode
+
         typing_active = False
         typing_task.cancel()
 
         # Extract clean text from JSON — strips all tool use / status lines
+        # Also capture session_id for multi-turn continuity
         raw_out = stdout_bytes.decode(errors="replace").strip()
         final = raw_out
         try:
             data = json.loads(raw_out)
             final = data.get("result") or data.get("message") or raw_out
+            # Store session_id so next message continues this conversation
+            new_session = data.get("session_id")
+            if new_session:
+                chat_sessions[chat_id] = new_session
         except Exception:
             pass
 
@@ -322,6 +351,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "*Commands*\n\n"
         "/claude `<prompt>` — Run Claude Code task\n"
+        "/new — Reset conversation (start fresh context)\n"
         "/tasks — List running tasks\n"
         "/run `<cmd>` — Shell command\n"
         "/status — Bot info\n"
@@ -400,6 +430,17 @@ async def cmd_chatid(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         f"Chat ID: `{update.effective_chat.id}`", parse_mode="Markdown"
     )
 
+async def cmd_new(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear conversation session — next message starts a fresh context."""
+    if not is_authorized(update):
+        return
+    chat_id = update.effective_chat.id
+    removed = chat_sessions.pop(chat_id, None)
+    if removed:
+        await update.message.reply_text("Conversation reset. Next message starts fresh.")
+    else:
+        await update.message.reply_text("No active session to reset.")
+
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     config = load_config()
     if "chat_id" not in config:
@@ -450,6 +491,7 @@ def main() -> None:
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("ping",   cmd_ping))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
+    app.add_handler(CommandHandler("new",    cmd_new))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
