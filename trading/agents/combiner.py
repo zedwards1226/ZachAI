@@ -38,23 +38,29 @@ _first_break_failed: bool = False
 _trades_today: int = 0
 _session_date: Optional[str] = None
 _signals: list[dict] = []
+# Tracks whether the current breakout event has already been acted on.
+# Prevents re-scoring / re-executing the same breakout every 15s poll while
+# price stays outside the ORB range. Reset whenever price returns inside.
+_breakout_processed: bool = False
 
 
 def _reset_session():
     """Reset session state for a new day."""
     global _orb, _first_break_direction, _first_break_failed
-    global _trades_today, _session_date, _signals
+    global _trades_today, _session_date, _signals, _breakout_processed
     _orb = None
     _first_break_direction = None
     _first_break_failed = False
     _trades_today = 0
     _session_date = datetime.now(ET).strftime("%Y-%m-%d")
     _signals = []
+    _breakout_processed = False
 
 
 async def poll() -> Optional[dict]:
     """Called every 15 seconds during session. Handles ORB capture and breakout detection."""
     global _orb, _first_break_direction, _first_break_failed, _trades_today, _session_date
+    global _breakout_processed
 
     now = datetime.now(ET)
     today = now.strftime("%Y-%m-%d")
@@ -130,6 +136,15 @@ async def poll() -> Optional[dict]:
         if _first_break_direction is not None and not _first_break_failed:
             _first_break_failed = True
             logger.info("First break FAILED (double break setup forming)")
+        # Price returned inside range → this breakout event is over.
+        # Clear the processed flag so a future break can fire again.
+        _breakout_processed = False
+        return None
+
+    # If we already acted on this breakout event, don't re-score every 15s.
+    # A new decision only happens after price returns inside the range and
+    # breaks out again (which resets _breakout_processed above).
+    if _breakout_processed:
         return None
 
     # --- Double break detection ---
@@ -150,6 +165,7 @@ async def poll() -> Optional[dict]:
         logger.info("Hard block: %s", block_reason)
         await telegram.notify_hard_block(block_reason)
         _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break)
+        _breakout_processed = True
         return None
 
     # --- Determine trade size ---
@@ -166,6 +182,7 @@ async def poll() -> Optional[dict]:
         logger.info("Trade skipped: %s (%s)", breakout_direction.value, reason)
         await telegram.notify_skip(breakout_direction.value, score, reason)
         _log_signal(breakout_direction, price, breakdown, size, is_second_break)
+        _breakout_processed = True
         return None
 
     # --- Phase 4: Calculate stop/target ---
@@ -242,6 +259,7 @@ async def poll() -> Optional[dict]:
         logger.error("Failed to place chart order: %s", e)
 
     _trades_today += 1
+    _breakout_processed = True
     _log_signal(breakout_direction, price, breakdown, size, is_second_break)
 
     logger.info("TRADE EXECUTED: %s score=%d size=%s entry=%.2f stop=%.2f t1=%.2f t2=%.2f",
@@ -375,14 +393,14 @@ def _check_hard_blocks(states: dict, orb: ORBRange) -> Optional[str]:
             if any(kw in event_name for kw in ("CPI", "NFP", "NON-FARM", "FOMC", "FED")):
                 return f"High-impact news day: {event.get('event')} — no ORB trades"
 
-    # ORB range outside ATR band
-    atr = structure.get("atr_14", 0)
-    if atr and orb.range > 0:
-        ratio = orb.range / atr
-        if ratio < ORB_ATR_MIN_PCT:
-            return f"ORB range too narrow ({ratio:.0%} of ATR, min {ORB_ATR_MIN_PCT:.0%})"
-        if ratio > ORB_ATR_MAX_PCT:
-            return f"ORB range too wide ({ratio:.0%} of ATR, max {ORB_ATR_MAX_PCT:.0%})"
+    # ORB range ATR filter — disabled (informational only, does not block trades)
+    # atr = structure.get("atr_14", 0)
+    # if atr and orb.range > 0:
+    #     ratio = orb.range / atr
+    #     if ratio < ORB_ATR_MIN_PCT:
+    #         return f"ORB range too narrow ({ratio:.0%} of ATR, min {ORB_ATR_MIN_PCT:.0%})"
+    #     if ratio > ORB_ATR_MAX_PCT:
+    #         return f"ORB range too wide ({ratio:.0%} of ATR, max {ORB_ATR_MAX_PCT:.0%})"
 
     return None
 

@@ -11,7 +11,7 @@ STATE_DIR = BASE_DIR / "state"
 LOG_DIR = BASE_DIR / "logs"
 JOURNAL_DB = BASE_DIR / "journal.db"
 
-# Telegram
+# Telegram — ORB Alerts bot (dedicated bot for all trading notifications)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 

@@ -256,6 +256,28 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 - Paper mode: ON (NEVER change without explicit approval)
 - Cities: NYC, CHI, MIA, LAX, MEM, DEN
 
+## ORB TRADING SYSTEM STATUS
+- Main controller: C:\ZachAI\trading\main.py (APScheduler, PID lock, auto-start via ORBAgents.vbs)
+- PID lock: trading/state/orb.pid — only ONE instance runs at a time
+- VBS auto-start: scripts/ORBAgents.vbs → git pull → python main.py
+- Telegram bot: C:\ZachAI\telegram-bridge\bot.py (auto-start via Jarvis_Bot.vbs)
+- Paper mode: ON (NEVER change without explicit approval)
+- Agents schedule (all ET):
+  - sentinel: 8:00 AM initial + every 60s poll
+  - structure: 8:45 AM (pulls daily levels, VIX, ATR)
+  - briefing: 8:50 AM (sends Telegram morning report)
+  - sweep: every 15s during 9:00-11:00 (closed bars only, batched alerts)
+  - combiner: every 15s during 9:30-15:00 (ORB scoring + trade execution)
+  - trade_monitor: every 30s (stop/TP reconciliation, time exits)
+  - memory: 6:00 PM daily
+- Order placement: single CDP evaluate() call, ~750ms place / ~375ms close
+- Economic calendar: hard-coded 2026 BLS/Fed dates (CPI/NFP/FOMC) — no scraper dependency
+
+## 2026 HIGH-IMPACT CALENDAR (official BLS + Fed dates)
+- CPI (8:30 AM): Jan 13, Feb 11, Mar 11, Apr 10, May 12, Jun 10, Jul 14, Aug 12, Sep 11, Oct 14, Nov 10, Dec 10
+- NFP (8:30 AM): Jan 9, Feb 6, Mar 6, Apr 3, May 8, Jun 5, Jul 2, Aug 7, Sep 4, Oct 2, Nov 6, Dec 4
+- FOMC (2:00 PM): Jan 28, Mar 18, Apr 29, Jun 17, Jul 29, Sep 16, Oct 28, Dec 9
+
 ## AGENT STACK
 - SCOUT — scans internet 24/7, daily pitch report to Telegram
 - ARCHITECT — designs approved business ideas
@@ -289,16 +311,21 @@ C:\ZachAI\
 │   ├── dashboard\ (React frontend + Flask proxy :3001)
 │   └── keys\ (gitignored — private keys)
 ├── trading\
+│   ├── main.py (ORB multi-agent controller — APScheduler, auto-start via ORBAgents.vbs)
 │   ├── paper_trader.py (Flask :8766 — receives TradingView webhooks)
 │   ├── paper_trades.json (trade log — auto-managed)
 │   ├── CloudflareTunnel.vbs (source copy)
-│   └── .env (Telegram bot token — gitignored)
+│   ├── agents\ (structure, sentinel, sweep, combiner, briefing, memory, journal)
+│   ├── services\ (telegram.py, tv_client.py, tv_trader.py, state_manager.py)
+│   └── .env (Telegram bot token + chat ID — gitignored)
 ├── tradingview-mcp\ (78-tool TradingView MCP server)
 ├── telegram-bridge\
-│   ├── bot.py (retired approval bot)
-│   └── chat_bot.py (retired — replaced by Claude Channels)
+│   ├── bot.py (ACTIVE — Jarvis Telegram bot: /claude, /run, /tasks, approvals)
+│   └── chat_bot.py (retired — replaced by bot.py)
 ├── scripts\ (VBS + bat startup scripts — source copies only)
-│   ├── start_claude_channel.vbs (Jarvis — Claude Channels)
+│   ├── Jarvis_Bot.vbs (starts telegram-bridge/bot.py — ACTIVE)
+│   ├── ORBAgents.vbs (starts trading/main.py — ACTIVE)
+│   ├── start_claude_channel.vbs (Claude Channels — retired, kept for reference)
 │   ├── WeatherAlpha_Bot.vbs
 │   ├── WeatherAlpha_Dashboard.vbs
 │   └── WeatherAlpha_Tunnel.bat
@@ -317,3 +344,18 @@ C:\ZachAI\
 Build autonomous digital companies with zero/minimal overhead.
 One prompt = one new company.
 Every company runs itself after launch.
+
+## PROTECTION RULES
+Never create git worktrees. Always work directly in C:\ZachAI
+Never modify telegram-bridge/bot.py without explicit approval. Show diff first and wait for confirmation.
+Before any changes run git status and read the actual file. Never assume config values from memory.
+
+## ANTI-HALLUCINATION RULES
+- NEVER assume file contents — always read the file before editing or referencing it
+- NEVER fabricate tool output, API responses, or command results
+- If a tool or MCP is unavailable or errors, STOP and report the exact error — do not simulate or substitute results
+- Never claim a task is complete without showing actual output or proof
+- If a file does not exist, say so — do not invent its contents
+- When current state is unknown, run ls or cat to verify — never assume
+- If you don't know something, say so — never guess or fill in gaps with plausible-sounding info
+- Broken MCPs (memory, sequentialthinking, playwright, filesystem, fetch) — if any of these are invoked and fail, flag it immediately and stop

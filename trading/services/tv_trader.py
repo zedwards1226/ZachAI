@@ -309,8 +309,15 @@ async def close_via_trading_panel(tv, direction: str) -> bool:
         return False
 
 
-async def close_position(trade_id: int, exit_price: float, reason: str = "") -> dict:
-    """Close a paper trade position."""
+async def close_position(trade_id: int, exit_price: float, reason: str = "",
+                         outcome: Optional[str] = None,
+                         skip_chart_close: bool = False) -> dict:
+    """Close a paper trade position.
+
+    skip_chart_close=True means the TV bracket already closed the position
+    (TP/SL auto-fill) and we just need to reconcile journal state. Sending a
+    market order in that case would OPEN a fresh opposite position.
+    """
     order = _active_orders.pop(trade_id, None)
     if not order:
         logger.warning("No active order for trade %d", trade_id)
@@ -319,25 +326,27 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "") -> 
     direction = order["direction"]
     entry = order["entry"]
 
-    # Close on TradingView chart
-    try:
-        tv = await get_client()
-        await close_via_trading_panel(tv, direction)
-    except Exception as e:
-        logger.warning("Failed to close on chart: %s", e)
+    # Close on TradingView chart (only if TV didn't already auto-close)
+    if not skip_chart_close:
+        try:
+            tv = await get_client()
+            await close_via_trading_panel(tv, direction)
+        except Exception as e:
+            logger.warning("Failed to close on chart: %s", e)
 
     # Determine outcome
-    if direction == "LONG":
-        pts = exit_price - entry
-    else:
-        pts = entry - exit_price
+    if outcome is None:
+        if direction == "LONG":
+            pts = exit_price - entry
+        else:
+            pts = entry - exit_price
 
-    if pts > 0:
-        outcome = "WIN"
-    elif pts < 0:
-        outcome = "LOSS"
-    else:
-        outcome = "SCRATCH"
+        if pts > 0:
+            outcome = "WIN"
+        elif pts < 0:
+            outcome = "LOSS"
+        else:
+            outcome = "SCRATCH"
 
     # Log to journal
     result = journal.log_trade_close(trade_id, exit_price, outcome, reason)
@@ -360,8 +369,9 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "") -> 
 async def monitor_trades() -> None:
     """Trade monitor — runs every 30 seconds to manage open positions.
 
-    Checks: stop hit, target hit, time exit, session close.
-    Moves stop to breakeven after T1 hit. Closes all at 3 PM ET.
+    TV's bracket handles stop-loss and T1 take-profit auto-closes. This
+    monitor reconciles TV's auto-closes into the journal, and sends
+    explicit market closes only for session-end and time-based exits.
     """
     if not _active_orders:
         return
@@ -378,48 +388,44 @@ async def monitor_trades() -> None:
         entry = order["entry"]
         stop = order["stop"]
         t1 = order["target_1"]
-        t2 = order["target_2"]
         opened_at = datetime.fromisoformat(order["opened_at"])
 
-        # Check 3 PM hard close
+        # Check 3 PM hard close — TV bracket stays open, we explicitly close
         close_time = now.replace(hour=HARD_CLOSE_HOUR, minute=HARD_CLOSE_MINUTE, second=0)
         if now >= close_time:
             logger.info("3 PM hard close for trade %d", trade_id)
             await close_position(trade_id, price, "3 PM session close")
             continue
 
-        # Check 2-hour time exit
+        # Check 2-hour time exit — TV bracket stays open, we explicitly close
         minutes_held = (now - opened_at).total_seconds() / 60
         if minutes_held >= MAX_HOLD_MINUTES:
             logger.info("2-hour time exit for trade %d (held %.0f min)", trade_id, minutes_held)
             await close_position(trade_id, price, "2-hour time exit")
             continue
 
-        # Check stop hit
+        # Stop hit — TV bracket auto-closed the position at the stop. Reconcile
+        # without sending a market order (which would open an opposite position).
         if direction == "LONG" and price <= stop:
-            logger.info("Stop hit for trade %d: price %.2f <= stop %.2f", trade_id, price, stop)
-            await close_position(trade_id, price, "Stop loss hit")
+            logger.info("Stop hit for trade %d: price %.2f <= stop %.2f (TV auto-closed)",
+                        trade_id, price, stop)
+            await close_position(trade_id, stop, "Stop loss hit",
+                                 outcome="LOSS", skip_chart_close=True)
             continue
-        elif direction == "SHORT" and price >= stop:
-            logger.info("Stop hit for trade %d: price %.2f >= stop %.2f", trade_id, price, stop)
-            await close_position(trade_id, price, "Stop loss hit")
+        if direction == "SHORT" and price >= stop:
+            logger.info("Stop hit for trade %d: price %.2f >= stop %.2f (TV auto-closed)",
+                        trade_id, price, stop)
+            await close_position(trade_id, stop, "Stop loss hit",
+                                 outcome="LOSS", skip_chart_close=True)
             continue
 
-        # Check T1 hit (move stop to breakeven)
-        if not order["t1_hit"]:
-            t1_hit = (direction == "LONG" and price >= t1) or \
-                     (direction == "SHORT" and price <= t1)
-            if t1_hit:
-                order["t1_hit"] = True
-                order["stop"] = entry  # Move to breakeven
-                logger.info("T1 hit for trade %d — stop moved to breakeven %.2f", trade_id, entry)
-
-        # Check T2 hit
-        t2_hit = (direction == "LONG" and price >= t2) or \
-                 (direction == "SHORT" and price <= t2)
-        if t2_hit:
-            logger.info("T2 hit for trade %d", trade_id)
-            await close_position(trade_id, price, "Target 2 hit")
+        # T1 hit — TV bracket auto-closed at T1. Reconcile. No market order.
+        t1_hit = (direction == "LONG" and price >= t1) or \
+                 (direction == "SHORT" and price <= t1)
+        if t1_hit:
+            logger.info("T1 hit for trade %d at %.2f (TV auto-closed)", trade_id, t1)
+            await close_position(trade_id, t1, "T1 target hit",
+                                 outcome="WIN", skip_chart_close=True)
             continue
 
 

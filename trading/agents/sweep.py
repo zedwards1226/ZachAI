@@ -4,6 +4,9 @@ Runs continuously every 15 seconds during 9:00-11:00 AM ET.
 Detects equal highs/lows (liquidity pools) on the 5-min chart.
 Classifies pool takeouts as SWEEP_CONFIRMED or GENUINE_BREAK.
 Writes output to state/sweep.json.
+
+Detection only runs once per newly CLOSED 5-min bar. The currently forming bar
+is excluded so intrabar wicks do not fire repeat sweeps every poll.
 """
 from __future__ import annotations
 
@@ -30,23 +33,29 @@ MIN_POOL_BARS = 2
 SWEEP_REVERSAL_CANDLES = 2
 # Minimum wick percentage for stop hunt detection
 STOP_HUNT_WICK_PCT = 0.60
+# Swept levels stay locked out this long so pools aren't re-detected at the same level
+SWEPT_LEVEL_LOCKOUT_SEC = 30 * 60  # 30 minutes
 
 # Session state
 _known_pools: list[dict] = []
 _sweeps: list[dict] = []
+_swept_levels: list[dict] = []  # {level, pool_type, time_epoch}
 _session_date: Optional[str] = None
+_last_processed_bar_time: Optional[int] = None
 
 
 def _reset_session():
-    global _known_pools, _sweeps, _session_date
+    global _known_pools, _sweeps, _swept_levels, _session_date, _last_processed_bar_time
     _known_pools = []
     _sweeps = []
+    _swept_levels = []
     _session_date = datetime.now(ET).strftime("%Y-%m-%d")
+    _last_processed_bar_time = None
 
 
 async def poll() -> Optional[dict]:
-    """Called every 15 seconds. Detects liquidity pools and sweeps."""
-    global _session_date
+    """Called every 15 seconds. Runs detection only on newly closed 5-min bars."""
+    global _session_date, _last_processed_bar_time
 
     now = datetime.now(ET)
     today = now.strftime("%Y-%m-%d")
@@ -66,18 +75,35 @@ async def poll() -> Optional[dict]:
 
     tv = await get_client()
 
-    # Get recent 5-min bars
-    bars = await tv.get_ohlcv(count=30)
-    if len(bars) < 10:
+    # Pull one extra bar — the last one from TV is the currently forming bar,
+    # which we exclude from detection to stop intrabar false positives.
+    raw_bars = await tv.get_ohlcv(count=32)
+    if len(raw_bars) < 11:
         return None
+
+    bars = raw_bars[:-1]  # closed bars only
+    latest_closed = bars[-1]
+    latest_bar_time = latest_closed.get("time")
+
+    # Skip if we've already processed this closed bar (poll cadence is 15s,
+    # bars close every 5 min — without this guard we fire ~20x per bar)
+    if latest_bar_time is not None and latest_bar_time == _last_processed_bar_time:
+        return None
+    _last_processed_bar_time = latest_bar_time
+
+    # Prune stale lockouts
+    _prune_swept_levels(now.timestamp())
 
     # --- Step 1: Detect equal highs/lows (liquidity pools) ---
     new_pools = _detect_equal_levels(bars)
     for pool in new_pools:
-        if not _pool_already_known(pool):
-            _known_pools.append(pool)
-            logger.info("New liquidity pool: %s at %.2f (%d bars)",
-                        pool["pool_type"], pool["level"], pool["bar_count"])
+        if _pool_already_known(pool):
+            continue
+        if _level_recently_swept(pool["level"], pool["pool_type"]):
+            continue
+        _known_pools.append(pool)
+        logger.info("New liquidity pool: %s at %.2f (%d bars)",
+                    pool["pool_type"], pool["level"], pool["bar_count"])
 
     # --- Step 2: Check if any pool was taken out ---
     latest = bars[-1]
@@ -87,14 +113,27 @@ async def poll() -> Optional[dict]:
     new_sweeps = []
     for pool in list(_known_pools):
         sweep_result = _check_pool_takeout(pool, latest, prev, prev2)
-        if sweep_result:
-            _sweeps.append(sweep_result)
-            new_sweeps.append(sweep_result)
-            _known_pools.remove(pool)
+        if not sweep_result:
+            continue
 
-            logger.info("SWEEP: %s %s at %.2f — %s",
-                        sweep_result["sweep_type"], sweep_result["direction"],
-                        sweep_result["level"], sweep_result.get("detail", ""))
+        # Always remove the pool once it has been acted on — whether we log it
+        # or suppress it as a duplicate — so it doesn't re-fire next bar.
+        _known_pools.remove(pool)
+
+        if _sweep_already_logged(sweep_result):
+            continue
+
+        _sweeps.append(sweep_result)
+        new_sweeps.append(sweep_result)
+        _swept_levels.append({
+            "level": sweep_result["level"],
+            "pool_type": pool["pool_type"],
+            "time_epoch": now.timestamp(),
+        })
+
+        logger.info("SWEEP: %s %s at %.2f — %s",
+                    sweep_result["sweep_type"], sweep_result["direction"],
+                    sweep_result["level"], sweep_result.get("detail", ""))
 
     # Batch sweep notifications — send ONE summary instead of spamming per-level
     if new_sweeps:
@@ -117,10 +156,15 @@ async def poll() -> Optional[dict]:
             sweep_type=f"{summary_type}: {'; '.join(parts)}",
         )
 
-    # --- Step 3: Detect stop hunt wicks ---
+    # --- Step 3: Detect stop hunt wicks (closed bar only) ---
     wick_sweep = _detect_stop_hunt_wick(bars)
     if wick_sweep and not _sweep_already_logged(wick_sweep):
         _sweeps.append(wick_sweep)
+        _swept_levels.append({
+            "level": wick_sweep["level"],
+            "pool_type": wick_sweep["pool_type"],
+            "time_epoch": now.timestamp(),
+        })
         logger.info("Stop hunt wick: %s at %.2f", wick_sweep["direction"], wick_sweep["level"])
 
     # --- Step 4: Determine sweep bias ---
@@ -136,6 +180,20 @@ async def poll() -> Optional[dict]:
     }
     write_state("sweep", data)
     return data
+
+
+def _prune_swept_levels(now_epoch: float) -> None:
+    """Drop lockouts older than SWEPT_LEVEL_LOCKOUT_SEC."""
+    cutoff = now_epoch - SWEPT_LEVEL_LOCKOUT_SEC
+    _swept_levels[:] = [s for s in _swept_levels if s["time_epoch"] >= cutoff]
+
+
+def _level_recently_swept(level: float, pool_type: str) -> bool:
+    """True if a matching level was swept within the lockout window."""
+    for s in _swept_levels:
+        if s["pool_type"] == pool_type and abs(s["level"] - level) <= EQUAL_LEVEL_TOLERANCE:
+            return True
+    return False
 
 
 def _detect_equal_levels(bars: list[dict]) -> list[dict]:

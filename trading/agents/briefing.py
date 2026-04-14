@@ -134,7 +134,15 @@ async def run() -> bool:
         truth_posts = sentinel.get("truth_posts", [])
         high_posts = [p for p in truth_posts if p.get("impact") == "HIGH_IMPACT"]
         if high_posts:
-            lines.append(f"  ⚡ {len(high_posts)} high-impact Truth Social post(s)")
+            lines.append(f"  ⚡ {len(high_posts)} high-impact news item(s):")
+            for p in high_posts[:3]:
+                lines.append(f"    • {p['text'][:120]}")
+        elif truth_posts:
+            lines.append(f"  📰 {len(truth_posts)} news items (no high-impact triggers)")
+
+        truth_status = sentinel.get("truth_status", "")
+        if truth_status == "UNAVAILABLE":
+            lines.append("  ⚠️ News feed unavailable")
 
     lines.append("")
 

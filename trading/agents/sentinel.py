@@ -7,6 +7,7 @@ Writes output to state/sentinel.json.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -28,6 +29,10 @@ ET = pytz.timezone(TIMEZONE)
 
 _http: Optional[httpx.AsyncClient] = None
 _last_truth_ids: set[str] = set()
+
+# Cache 403 state so we don't hammer a blocked endpoint every 60 seconds.
+# After a 403 we skip the API for 20 minutes and go straight to scrape.
+_api_blocked_until: Optional[datetime] = None
 
 
 def _get_http() -> httpx.AsyncClient:
@@ -132,22 +137,20 @@ async def poll() -> Optional[dict]:
                 _last_truth_ids.add(post_id)
                 logger.warning("NEW high-impact Truth Social post: %s", post["text"][:100])
 
-    # Update news_block based on time proximity to events
-    news_block = current.get("news_block", False)
+    # Recompute news_block based on any upcoming high-impact event within 15
+    # min. If nothing is imminent, clear the block (otherwise a stale block
+    # from hours ago could linger for the whole session).
+    news_block = False
     for event in current.get("economic_events", []):
-        if event["impact"] == "HIGH":
-            event_time = _parse_event_time(event.get("time", ""))
-            if event_time:
-                minutes_until = (event_time - now).total_seconds() / 60
-                if 0 <= minutes_until <= 15:
-                    news_block = True
-                elif minutes_until < -15:
-                    # Event passed more than 15 min ago, clear block
-                    if not any(
-                        e["impact"] == "HIGH" and _is_upcoming(e.get("time"), now)
-                        for e in current.get("economic_events", [])
-                    ):
-                        news_block = False
+        if event["impact"] != "HIGH":
+            continue
+        event_time = _parse_event_time(event.get("time", ""))
+        if not event_time:
+            continue
+        minutes_until = (event_time - now).total_seconds() / 60
+        if 0 <= minutes_until <= 15:
+            news_block = True
+            break
 
     # Update state
     current["truth_block"] = truth_block
@@ -236,62 +239,67 @@ async def _fetch_economic_calendar() -> list[dict]:
 
 
 async def _fetch_truth_social() -> tuple[list[dict], str]:
-    """Fetch recent posts from Truth Social @realDonaldTrump."""
+    """Fetch recent posts from Truth Social @realDonaldTrump.
+
+    Priority order:
+    1. RSS feed (server-rendered XML — works even when SPA/API is blocked)
+    2. JSON API (fast when available)
+    3. HTML scrape (last resort — rarely works due to SPA)
+    """
+    global _api_blocked_until
     posts = []
     now = datetime.now(ET)
 
     try:
         http = _get_http()
 
-        # Try Truth Social API endpoint (public timeline)
-        url = "https://truthsocial.com/api/v1/accounts/107780257626128497/statuses?limit=20"
-        resp = await http.get(url, headers={"Accept": "application/json"})
+        # 1. Financial news RSS (Reuters/AP/CNBC/Yahoo) — always try first.
+        #    Truth Social serves a JS SPA for all routes so direct scraping
+        #    never works. News RSS picks up Trump statements within minutes.
+        rss_posts = await _fetch_truth_rss(http, now)
+        if rss_posts:
+            return rss_posts, "NEWS_RSS"
 
-        if resp.status_code == 200:
-            data = resp.json()
-            for item in data:
-                text = _strip_html(item.get("content", ""))
-                created = item.get("created_at", "")
-                post_time = _parse_iso_time(created)
-                age_min = (now - post_time).total_seconds() / 60 if post_time else 999
+        # 2. JSON API (if not currently backed off due to 403)
+        api_ok = _api_blocked_until is None or now >= _api_blocked_until
+        if api_ok:
+            url = "https://truthsocial.com/api/v1/accounts/107780257626128497/statuses?limit=20"
+            resp = await http.get(url, headers={"Accept": "application/json"})
 
-                # Only look at last 12 hours
-                if age_min > 720:
-                    continue
+            if resp.status_code == 200:
+                _api_blocked_until = None
+                data = resp.json()
+                for item in data:
+                    text = _strip_html(item.get("content", ""))
+                    created = item.get("created_at", "")
+                    post_time = _parse_iso_time(created)
+                    age_min = (now - post_time).total_seconds() / 60 if post_time else 999
 
-                impact = _classify_truth_impact(text)
-                posts.append({
-                    "id": item.get("id", ""),
-                    "time": created,
-                    "text": text[:300],
-                    "impact": impact,
-                    "keywords_matched": _matched_keywords(text),
-                    "age_minutes": round(age_min),
-                })
+                    if age_min > 720:
+                        continue
 
-            return posts, "OK"
+                    impact = _classify_truth_impact(text)
+                    posts.append({
+                        "id": item.get("id", ""),
+                        "time": created,
+                        "text": text[:300],
+                        "impact": impact,
+                        "keywords_matched": _matched_keywords(text),
+                        "age_minutes": round(age_min),
+                    })
 
-        # Fallback: try scraping the public profile page
-        logger.info("Truth Social API returned %d, trying profile page", resp.status_code)
+                return posts, "API"
+
+            logger.info("Truth Social API returned %d, backing off 20 min", resp.status_code)
+            _api_blocked_until = now + timedelta(minutes=20)
+
+        # 3. HTML scrape (SPA — rarely yields posts)
         resp2 = await http.get("https://truthsocial.com/@realDonaldTrump")
         if resp2.status_code == 200:
-            soup = BeautifulSoup(resp2.text, "html.parser")
-            # Look for status content in the HTML
-            status_els = soup.select("[class*='status-content'], [class*='status__content']")
-            for i, el in enumerate(status_els[:20]):
-                text = el.get_text(strip=True)
-                if not text:
-                    continue
-                impact = _classify_truth_impact(text)
-                posts.append({
-                    "id": f"scraped_{i}",
-                    "time": now.isoformat(),
-                    "text": text[:300],
-                    "impact": impact,
-                    "keywords_matched": _matched_keywords(text),
-                    "age_minutes": 0,  # Unknown age from scrape
-                })
-            return posts, "SCRAPED"
+            scraped = _parse_truth_html(resp2.text, now)
+            if scraped:
+                return scraped, "SCRAPED"
+            return [], "SCRAPED_EMPTY"
 
     except Exception as e:
         logger.warning("Failed to fetch Truth Social: %s", e)
@@ -299,12 +307,188 @@ async def _fetch_truth_social() -> tuple[list[dict], str]:
     return posts, "UNAVAILABLE"
 
 
+async def _fetch_truth_rss(http: httpx.AsyncClient, now: datetime) -> list[dict]:
+    """Fetch market-moving news from free financial RSS feeds.
+
+    Truth Social's site serves a JS SPA for all routes (including .rss),
+    so direct scraping never yields posts. Instead we pull from Reuters,
+    AP, and Yahoo Finance — they pick up Trump statements within minutes
+    and require no API key.
+    """
+    RSS_FEEDS = [
+        ("https://finance.yahoo.com/rss/topstories", "Yahoo Finance"),
+        ("https://www.cnbc.com/id/100003114/device/rss/rss.html", "CNBC"),
+        ("https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "NYT Business"),
+        ("https://feeds.marketwatch.com/marketwatch/topstories/", "MarketWatch"),
+    ]
+
+    posts: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for feed_url, source in RSS_FEEDS:
+        try:
+            resp = await http.get(
+                feed_url,
+                headers={"Accept": "application/rss+xml, application/xml, text/xml"},
+            )
+            if resp.status_code != 200:
+                logger.debug("%s RSS returned %d", source, resp.status_code)
+                continue
+
+            soup = BeautifulSoup(resp.text, "xml")
+            items = soup.find_all("item")
+            if not items:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                items = soup.find_all("item")
+
+            for item in items[:30]:
+                title_el = item.find("title")
+                desc_el = item.find("description")
+                title = _strip_html(title_el.get_text() if title_el else "")
+                desc = _strip_html(desc_el.get_text() if desc_el else "")
+                text = f"{title}. {desc}".strip(". ") if desc else title
+                if not title:
+                    continue
+
+                pub_el = item.find("pubDate")
+                pub_str = pub_el.get_text(strip=True) if pub_el else ""
+                post_time = _parse_rfc2822(pub_str, now)
+                age_min = (now - post_time).total_seconds() / 60 if post_time else 0
+
+                if age_min > 720:
+                    continue
+
+                link_el = item.find("link") or item.find("guid")
+                post_id = link_el.get_text(strip=True) if link_el else f"{source}_{len(posts)}"
+
+                if post_id in seen_ids:
+                    continue
+                seen_ids.add(post_id)
+
+                impact = _classify_truth_impact(text, news_rss=True)
+                posts.append({
+                    "id": post_id,
+                    "source": source,
+                    "time": post_time.isoformat() if post_time else now.isoformat(),
+                    "text": f"[{source}] {text[:250]}",
+                    "impact": impact,
+                    "keywords_matched": _matched_keywords(text),
+                    "age_minutes": round(age_min),
+                })
+
+        except Exception as e:
+            logger.warning("%s RSS fetch failed: %s", source, e)
+
+    # Sort by recency
+    posts.sort(key=lambda p: p.get("age_minutes", 999))
+    return posts
+
+
+def _parse_truth_html(html: str, now: datetime) -> list[dict]:
+    """Extract posts from Truth Social HTML.
+
+    Truth Social (Mastodon fork) sometimes embeds JSON-LD or inline
+    <script> state. Try those first, then fall back to CSS selectors.
+    """
+    posts: list[dict] = []
+
+    # 1. Try JSON-LD (application/ld+json)
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                text = item.get("articleBody") or item.get("text") or ""
+                if not text:
+                    continue
+                created = item.get("datePublished", now.isoformat())
+                post_time = _parse_iso_time(created)
+                age_min = (now - post_time).total_seconds() / 60 if post_time else 0
+                impact = _classify_truth_impact(text)
+                posts.append({
+                    "id": item.get("url", f"ld_{len(posts)}"),
+                    "time": created,
+                    "text": text[:300],
+                    "impact": impact,
+                    "keywords_matched": _matched_keywords(text),
+                    "age_minutes": round(age_min),
+                })
+        except Exception:
+            pass
+
+    if posts:
+        return posts
+
+    # 2. Try inline __INITIAL_STATE__ or similar JS blobs
+    for script in soup.find_all("script"):
+        src = script.string or ""
+        if "statuses" not in src and "content" not in src:
+            continue
+        # Look for JSON arrays containing {content: "...", created_at: "..."}
+        matches = re.findall(r'\{"id":"(\d+)","content":"(.*?)","created_at":"([^"]+)"', src)
+        for m_id, m_content, m_created in matches[:20]:
+            text = _strip_html(m_content.replace("\\u003c", "<").replace("\\u003e", ">"))
+            if not text:
+                continue
+            post_time = _parse_iso_time(m_created)
+            age_min = (now - post_time).total_seconds() / 60 if post_time else 0
+            impact = _classify_truth_impact(text)
+            posts.append({
+                "id": m_id,
+                "time": m_created,
+                "text": text[:300],
+                "impact": impact,
+                "keywords_matched": _matched_keywords(text),
+                "age_minutes": round(age_min),
+            })
+        if posts:
+            return posts
+
+    # 3. CSS selectors as last resort (works only if SSR content present)
+    status_els = soup.select(
+        "[class*='status-content'], [class*='status__content'], article p"
+    )
+    for i, el in enumerate(status_els[:20]):
+        text = el.get_text(strip=True)
+        if len(text) < 10:
+            continue
+        impact = _classify_truth_impact(text)
+        posts.append({
+            "id": f"scraped_{i}",
+            "time": now.isoformat(),
+            "text": text[:300],
+            "impact": impact,
+            "keywords_matched": _matched_keywords(text),
+            "age_minutes": 0,
+        })
+
+    return posts
+
+
 # ─── Helpers ────────────────────────────────────────────────────
 
-def _classify_truth_impact(text: str) -> str:
-    """Classify a Truth Social post as HIGH_IMPACT or LOW_IMPACT."""
+# Keywords that indicate BREAKING/URGENT events from news RSS headlines.
+# Must be specific enough that a normal financial headline won't trigger them.
+_NEWS_RSS_URGENT_KEYWORDS = [
+    "trump announces", "trump signs", "executive order", "trump declares",
+    "trump imposes", "new tariff", "tariff hike", "trade war", "sanctions",
+    "fed cuts", "fed raises", "rate cut", "rate hike", "rate decision",
+    "emergency declaration", "market halt", "circuit breaker", "flash crash",
+    "bank run", "bank failure", "debt ceiling", "default", "shutdown",
+    "recession confirmed", "gdp contraction",
+]
+
+
+def _classify_truth_impact(text: str, news_rss: bool = False) -> str:
+    """Classify a post as HIGH_IMPACT or LOW_IMPACT.
+
+    news_rss=True uses a stricter keyword list so routine financial
+    headlines don't permanently trip the truth_block flag.
+    """
     text_lower = text.lower()
-    for keyword in TRUTH_HIGH_IMPACT_KEYWORDS:
+    keywords = _NEWS_RSS_URGENT_KEYWORDS if news_rss else TRUTH_HIGH_IMPACT_KEYWORDS
+    for keyword in keywords:
         if keyword in text_lower:
             return "HIGH_IMPACT"
     return "LOW_IMPACT"
@@ -319,6 +503,18 @@ def _matched_keywords(text: str) -> list[str]:
 def _strip_html(html: str) -> str:
     """Strip HTML tags from content."""
     return re.sub(r"<[^>]+>", "", html).strip()
+
+
+def _parse_rfc2822(rfc_str: str, fallback: datetime) -> Optional[datetime]:
+    """Parse RFC 2822 date from RSS pubDate (e.g. 'Mon, 14 Apr 2026 08:30:00 +0000')."""
+    if not rfc_str:
+        return fallback
+    from email.utils import parsedate_to_datetime
+    try:
+        dt = parsedate_to_datetime(rfc_str)
+        return dt.astimezone(ET)
+    except Exception:
+        return fallback
 
 
 def _parse_iso_time(iso_str: str) -> Optional[datetime]:
@@ -370,37 +566,62 @@ def _is_upcoming(time_str: str, now: datetime) -> bool:
     return 0 <= minutes_until <= 15
 
 
+# ─── Official 2026 Calendar (BLS + Federal Reserve) ──────────
+# These are the EXACT dates — no guessing. Updated once per year.
+
+_CPI_2026 = {
+    (1, 13), (2, 11), (3, 11), (4, 10), (5, 12), (6, 10),
+    (7, 14), (8, 12), (9, 11), (10, 14), (11, 10), (12, 10),
+}
+
+_NFP_2026 = {
+    (1, 9), (2, 6), (3, 6), (4, 3), (5, 8), (6, 5),
+    (7, 2), (8, 7), (9, 4), (10, 2), (11, 6), (12, 4),
+}
+
+# FOMC statement day (day 2 of meeting, 2:00 PM ET)
+_FOMC_2026 = {
+    (1, 28), (3, 18), (4, 29), (6, 17), (7, 29), (9, 16), (10, 28), (12, 9),
+}
+
+
 def _get_static_events(now: datetime) -> list[dict]:
-    """Return known recurring high-impact events as fallback."""
-    weekday = now.weekday()  # 0=Monday
-    day = now.day
+    """Return known high-impact events from the official 2026 calendar.
+
+    Uses hard-coded BLS/Fed dates — NOT guesswork. This is the fallback
+    when Forex Factory returns 403 (which happens frequently).
+    """
     month = now.month
+    day = now.day
+    weekday = now.weekday()  # 0=Monday
 
     events = []
 
-    # FOMC: 8 times per year, usually Wednesday
-    # NFP: first Friday of month
-    # CPI: ~12th of each month
-
-    if weekday == 4 and day <= 7:
+    if (month, day) in _CPI_2026:
         events.append({
             "time": "8:30am",
-            "event": "Non-Farm Payrolls (NFP)",
+            "event": "CPI — Consumer Price Index",
             "impact": "HIGH",
             "within_session_window": True,
         })
 
-    # CPI: typically 2nd Tuesday or Wednesday of month (10th-15th range)
-    # Only flag as HIGH when ForexFactory is unavailable AND it's a Tue/Wed in range
-    if 10 <= day <= 15 and weekday in (1, 2):  # Tuesday or Wednesday only
+    if (month, day) in _NFP_2026:
         events.append({
             "time": "8:30am",
-            "event": "CPI (estimated — verify manually)",
+            "event": "NFP — Non-Farm Payrolls",
             "impact": "HIGH",
             "within_session_window": True,
         })
 
-    # Thursday jobless claims
+    if (month, day) in _FOMC_2026:
+        events.append({
+            "time": "2:00pm",
+            "event": "FOMC Statement + Rate Decision",
+            "impact": "HIGH",
+            "within_session_window": True,
+        })
+
+    # Thursday jobless claims (recurring, lower impact)
     if weekday == 3:
         events.append({
             "time": "8:30am",

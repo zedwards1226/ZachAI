@@ -15,6 +15,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes,
@@ -42,6 +43,9 @@ pending_approvals: dict[str, dict] = {}
 
 # task_id → {prompt, status, output}
 active_tasks: dict[str, dict] = {}
+
+# chat_id → Claude Code session_id (enables multi-turn memory within a bot session)
+chat_sessions: dict[int, str] = {}
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -239,64 +243,68 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
                 start_time=_now(), output="")
     active_tasks[task_id] = {"prompt": prompt, "status": "running", "output": ""}
 
-    await _bot_app.bot.send_message(
-        chat_id    = chat_id,
-        text       = f"*Task started* `[{task_id}]`\n\n_{prompt}_",
-        parse_mode = "Markdown",
-    )
-
-    output_lines: list[str] = []
-    last_sent_at  = asyncio.get_event_loop().time()
-    last_sent_idx = 0
-
-    async def send_progress():
-        nonlocal last_sent_idx, last_sent_at
-        chunk = output_lines[last_sent_idx:]
-        if not chunk:
-            return
-        text = "".join(chunk)[-3500:]
-        await _bot_app.bot.send_message(
-            chat_id    = chat_id,
-            text       = f"*Progress* `[{task_id}]`\n```\n{text}\n```",
-            parse_mode = "Markdown",
-        )
-        last_sent_idx = len(output_lines)
-        last_sent_at  = asyncio.get_event_loop().time()
+    # Keep Telegram "typing..." indicator alive while Claude runs
+    typing_active = True
+    async def _keep_typing():
+        while typing_active:
+            try:
+                await _bot_app.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            await asyncio.sleep(4)
+    typing_task = asyncio.create_task(_keep_typing())
 
     try:
+        # Build command — resume prior session if one exists for this chat
+        cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd", "-p", "--output-format", "json"]
+        prior_session = chat_sessions.get(chat_id)
+        if prior_session:
+            cmd += ["--resume", prior_session]
+        cmd.append(prompt)
+
         proc = await asyncio.create_subprocess_exec(
-            r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
-            "-p", prompt,
+            *cmd,
             stdout = asyncio.subprocess.PIPE,
-            stderr = asyncio.subprocess.STDOUT,
+            stderr = asyncio.subprocess.PIPE,
             cwd    = "C:\\ZachAI",
         )
         active_tasks[task_id]["process"] = proc
 
-        while True:
-            try:
-                raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
-            except (asyncio.TimeoutError, TimeoutError):
-                if asyncio.get_event_loop().time() - last_sent_at >= PROGRESS_SECS:
-                    await send_progress()
-                continue
-
-            if not raw:
-                break
-
-            line = raw.decode(errors="replace")
-            output_lines.append(line)
-            tail = "".join(output_lines[-50:])
-            active_tasks[task_id]["output"] = tail
-            upsert_task(task_id, output=tail, status="running")
-
-            if asyncio.get_event_loop().time() - last_sent_at >= PROGRESS_SECS:
-                await send_progress()
-
-        await proc.wait()
+        stdout_bytes, _ = await proc.communicate()
         rc = proc.returncode
 
-        final = "".join(output_lines).strip()
+        # If resume failed (bad/expired session), retry fresh
+        if rc != 0 and prior_session:
+            log.warning("Session %s resume failed (rc=%d), starting fresh", prior_session, rc)
+            chat_sessions.pop(chat_id, None)
+            fresh_cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
+                         "-p", "--output-format", "json", prompt]
+            proc2 = await asyncio.create_subprocess_exec(
+                *fresh_cmd,
+                stdout = asyncio.subprocess.PIPE,
+                stderr = asyncio.subprocess.PIPE,
+                cwd    = "C:\\ZachAI",
+            )
+            stdout_bytes, _ = await proc2.communicate()
+            rc = proc2.returncode
+
+        typing_active = False
+        typing_task.cancel()
+
+        # Extract clean text from JSON — strips all tool use / status lines
+        # Also capture session_id for multi-turn continuity
+        raw_out = stdout_bytes.decode(errors="replace").strip()
+        final = raw_out
+        try:
+            data = json.loads(raw_out)
+            final = data.get("result") or data.get("message") or raw_out
+            # Store session_id so next message continues this conversation
+            new_session = data.get("session_id")
+            if new_session:
+                chat_sessions[chat_id] = new_session
+        except Exception:
+            pass
+
         if len(final) > 3800:
             final = "…" + final[-3800:]
 
@@ -306,21 +314,18 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
 
         await _bot_app.bot.send_message(
             chat_id    = chat_id,
-            text       = (
-                f"*Task {status}* `[{task_id}]`  exit={rc}\n\n"
-                f"```\n{final[-3500:] or '(no output)'}\n```"
-            ),
-            parse_mode = "Markdown",
+            text       = final[-3500:] or "(no output)",
         )
 
     except Exception as exc:
+        typing_active = False
+        typing_task.cancel()
         log.exception("Claude task error: %s", exc)
         upsert_task(task_id, status="failed")
         active_tasks.pop(task_id, None)
         await _bot_app.bot.send_message(
-            chat_id    = chat_id,
-            text       = f"*Task failed* `[{task_id}]`\nError: {exc}",
-            parse_mode = "Markdown",
+            chat_id = chat_id,
+            text    = f"Error: {exc}",
         )
 
 # ── Command handlers ──────────────────────────────────────────────────────────
@@ -346,6 +351,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "*Commands*\n\n"
         "/claude `<prompt>` — Run Claude Code task\n"
+        "/new — Reset conversation (start fresh context)\n"
         "/tasks — List running tasks\n"
         "/run `<cmd>` — Shell command\n"
         "/status — Bot info\n"
@@ -424,6 +430,17 @@ async def cmd_chatid(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         f"Chat ID: `{update.effective_chat.id}`", parse_mode="Markdown"
     )
 
+async def cmd_new(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear conversation session — next message starts a fresh context."""
+    if not is_authorized(update):
+        return
+    chat_id = update.effective_chat.id
+    removed = chat_sessions.pop(chat_id, None)
+    if removed:
+        await update.message.reply_text("Conversation reset. Next message starts fresh.")
+    else:
+        await update.message.reply_text("No active session to reset.")
+
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     config = load_config()
     if "chat_id" not in config:
@@ -474,6 +491,7 @@ def main() -> None:
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("ping",   cmd_ping))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
+    app.add_handler(CommandHandler("new",    cmd_new))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

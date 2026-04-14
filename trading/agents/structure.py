@@ -153,11 +153,13 @@ async def run() -> dict:
         logger.error("Structure agent error: %s", e, exc_info=True)
         return _write_error(str(e))
     finally:
-        # Restore to 5-min chart for ORB monitoring
+        # Restore original symbol + 5-min chart for ORB monitoring
         try:
+            if original_symbol:
+                await tv.set_symbol(original_symbol)
             await tv.set_timeframe("5")
-        except Exception:
-            pass
+        except Exception as restore_err:
+            logger.warning("Failed to restore chart state: %s", restore_err)
 
 
 def _calculate_atr(bars: list[dict], period: int) -> float:

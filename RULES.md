@@ -33,3 +33,13 @@
 - Never push credentials, API keys, or .pem files to GitHub
 - Always verify .gitignore protects keys/ and .env files before pushing
 - Rotate any key that accidentally gets exposed immediately
+
+## ANTI-HALLUCINATION RULES
+- NEVER assume file contents — always read the file before editing or referencing it
+- NEVER fabricate tool output, API responses, or command results
+- If a tool or MCP is unavailable or errors, STOP and report the exact error — do not simulate or substitute results
+- Never claim a task is complete without showing actual output or proof
+- If a file does not exist, say so — do not invent its contents
+- When current state is unknown, run ls or cat to verify — never assume
+- If you don't know something, say so — never guess or fill in gaps with plausible-sounding info
+- Broken MCPs (memory, sequentialthinking, playwright, filesystem, fetch) — if any of these are invoked and fail, flag it immediately and stop
