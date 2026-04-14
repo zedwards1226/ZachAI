@@ -7,6 +7,7 @@ Writes output to state/sentinel.json.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -28,6 +29,10 @@ ET = pytz.timezone(TIMEZONE)
 
 _http: Optional[httpx.AsyncClient] = None
 _last_truth_ids: set[str] = set()
+
+# Cache 403 state so we don't hammer a blocked endpoint every 60 seconds.
+# After a 403 we skip the API for 20 minutes and go straight to scrape.
+_api_blocked_until: Optional[datetime] = None
 
 
 def _get_http() -> httpx.AsyncClient:
@@ -235,66 +240,143 @@ async def _fetch_economic_calendar() -> list[dict]:
 
 async def _fetch_truth_social() -> tuple[list[dict], str]:
     """Fetch recent posts from Truth Social @realDonaldTrump."""
+    global _api_blocked_until
     posts = []
     now = datetime.now(ET)
 
     try:
         http = _get_http()
+        api_ok = _api_blocked_until is None or now >= _api_blocked_until
 
-        # Try Truth Social API endpoint (public timeline)
-        url = "https://truthsocial.com/api/v1/accounts/107780257626128497/statuses?limit=20"
-        resp = await http.get(url, headers={"Accept": "application/json"})
+        if api_ok:
+            # Try Truth Social API endpoint (public timeline)
+            url = "https://truthsocial.com/api/v1/accounts/107780257626128497/statuses?limit=20"
+            resp = await http.get(url, headers={"Accept": "application/json"})
 
-        if resp.status_code == 200:
-            data = resp.json()
-            for item in data:
-                text = _strip_html(item.get("content", ""))
-                created = item.get("created_at", "")
-                post_time = _parse_iso_time(created)
-                age_min = (now - post_time).total_seconds() / 60 if post_time else 999
+            if resp.status_code == 200:
+                _api_blocked_until = None  # reset block
+                data = resp.json()
+                for item in data:
+                    text = _strip_html(item.get("content", ""))
+                    created = item.get("created_at", "")
+                    post_time = _parse_iso_time(created)
+                    age_min = (now - post_time).total_seconds() / 60 if post_time else 999
 
-                # Only look at last 12 hours
-                if age_min > 720:
+                    if age_min > 720:
+                        continue
+
+                    impact = _classify_truth_impact(text)
+                    posts.append({
+                        "id": item.get("id", ""),
+                        "time": created,
+                        "text": text[:300],
+                        "impact": impact,
+                        "keywords_matched": _matched_keywords(text),
+                        "age_minutes": round(age_min),
+                    })
+
+                return posts, "OK"
+
+            # 403 or other block — cache for 20 minutes, skip to scrape
+            logger.info("Truth Social API returned %d, backing off 20 min", resp.status_code)
+            _api_blocked_until = now + timedelta(minutes=20)
+
+        # Scrape the public profile page
+        resp2 = await http.get("https://truthsocial.com/@realDonaldTrump")
+        if resp2.status_code == 200:
+            # Mastodon SPAs embed initial state as JSON in a <script> tag
+            scraped = _parse_truth_html(resp2.text, now)
+            if scraped:
+                return scraped, "SCRAPED"
+            # Profile page returned 200 but no parseable posts (SPA not yet rendered)
+            return [], "SCRAPED_EMPTY"
+
+    except Exception as e:
+        logger.warning("Failed to fetch Truth Social: %s", e)
+
+    return posts, "UNAVAILABLE"
+
+
+def _parse_truth_html(html: str, now: datetime) -> list[dict]:
+    """Extract posts from Truth Social HTML.
+
+    Truth Social (Mastodon fork) sometimes embeds JSON-LD or inline
+    <script> state. Try those first, then fall back to CSS selectors.
+    """
+    posts: list[dict] = []
+
+    # 1. Try JSON-LD (application/ld+json)
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                text = item.get("articleBody") or item.get("text") or ""
+                if not text:
                     continue
-
+                created = item.get("datePublished", now.isoformat())
+                post_time = _parse_iso_time(created)
+                age_min = (now - post_time).total_seconds() / 60 if post_time else 0
                 impact = _classify_truth_impact(text)
                 posts.append({
-                    "id": item.get("id", ""),
+                    "id": item.get("url", f"ld_{len(posts)}"),
                     "time": created,
                     "text": text[:300],
                     "impact": impact,
                     "keywords_matched": _matched_keywords(text),
                     "age_minutes": round(age_min),
                 })
+        except Exception:
+            pass
 
-            return posts, "OK"
+    if posts:
+        return posts
 
-        # Fallback: try scraping the public profile page
-        logger.info("Truth Social API returned %d, trying profile page", resp.status_code)
-        resp2 = await http.get("https://truthsocial.com/@realDonaldTrump")
-        if resp2.status_code == 200:
-            soup = BeautifulSoup(resp2.text, "html.parser")
-            # Look for status content in the HTML
-            status_els = soup.select("[class*='status-content'], [class*='status__content']")
-            for i, el in enumerate(status_els[:20]):
-                text = el.get_text(strip=True)
-                if not text:
-                    continue
-                impact = _classify_truth_impact(text)
-                posts.append({
-                    "id": f"scraped_{i}",
-                    "time": now.isoformat(),
-                    "text": text[:300],
-                    "impact": impact,
-                    "keywords_matched": _matched_keywords(text),
-                    "age_minutes": 0,  # Unknown age from scrape
-                })
-            return posts, "SCRAPED"
+    # 2. Try inline __INITIAL_STATE__ or similar JS blobs
+    for script in soup.find_all("script"):
+        src = script.string or ""
+        if "statuses" not in src and "content" not in src:
+            continue
+        # Look for JSON arrays containing {content: "...", created_at: "..."}
+        matches = re.findall(r'\{"id":"(\d+)","content":"(.*?)","created_at":"([^"]+)"', src)
+        for m_id, m_content, m_created in matches[:20]:
+            text = _strip_html(m_content.replace("\\u003c", "<").replace("\\u003e", ">"))
+            if not text:
+                continue
+            post_time = _parse_iso_time(m_created)
+            age_min = (now - post_time).total_seconds() / 60 if post_time else 0
+            impact = _classify_truth_impact(text)
+            posts.append({
+                "id": m_id,
+                "time": m_created,
+                "text": text[:300],
+                "impact": impact,
+                "keywords_matched": _matched_keywords(text),
+                "age_minutes": round(age_min),
+            })
+        if posts:
+            return posts
 
-    except Exception as e:
-        logger.warning("Failed to fetch Truth Social: %s", e)
+    # 3. CSS selectors as last resort (works only if SSR content present)
+    status_els = soup.select(
+        "[class*='status-content'], [class*='status__content'], article p"
+    )
+    for i, el in enumerate(status_els[:20]):
+        text = el.get_text(strip=True)
+        if len(text) < 10:
+            continue
+        impact = _classify_truth_impact(text)
+        posts.append({
+            "id": f"scraped_{i}",
+            "time": now.isoformat(),
+            "text": text[:300],
+            "impact": impact,
+            "keywords_matched": _matched_keywords(text),
+            "age_minutes": 0,
+        })
 
-    return posts, "UNAVAILABLE"
+    return posts
 
 
 # ─── Helpers ────────────────────────────────────────────────────
