@@ -1,16 +1,18 @@
 Set WshShell = CreateObject("WScript.Shell")
 Set objWMI = GetObject("winmgmts:\\.\root\cimv2")
 
-' Kill any existing app.py instance before launching fresh
+' Check if app.py is already running
+Dim isRunning
+isRunning = False
+
 Set colProcs = objWMI.ExecQuery("SELECT * FROM Win32_Process WHERE Name='pythonw.exe'")
 For Each proc In colProcs
     If InStr(LCase(proc.CommandLine), "app.py") > 0 Then
-        proc.Terminate()
+        isRunning = True
     End If
 Next
 
-' Short pause to let old process die
-WScript.Sleep 2000
-
-' Launch fresh instance silently
-WshShell.Run "pythonw.exe C:\ZachAI\kalshi\bots\app.py", 0, False
+' Only launch if not already running — preserves healthy state
+If Not isRunning Then
+    WshShell.Run "pythonw.exe C:\ZachAI\kalshi\bots\app.py", 0, False
+End If
