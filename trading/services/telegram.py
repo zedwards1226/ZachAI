@@ -1,4 +1,8 @@
-"""Async Telegram notification service for ORB Trading System."""
+"""Async Telegram notification service for ORB Trading System.
+
+All trading notifications go to the dedicated ORB Alerts bot.
+Jarvis bot (telegram-bridge/bot.py) is separate — commands only.
+"""
 from __future__ import annotations
 
 import logging
@@ -21,7 +25,7 @@ def _get_client() -> httpx.AsyncClient:
 
 
 async def send(text: str, parse_mode: str = "HTML") -> bool:
-    """Send a Telegram message. Returns True on success."""
+    """Send a Telegram message to the ORB Alerts chat."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("Telegram credentials not configured")
         return False
@@ -52,7 +56,6 @@ async def notify_trade_entry(direction: str, score: int, size: str,
                              entry: float, stop: float, t1: float, t2: float,
                              breakdown: dict) -> bool:
     """Send trade entry notification with full score breakdown."""
-    # Build top 3 positive and negative factors
     positives = []
     negatives = []
     for key, val in breakdown.items():
