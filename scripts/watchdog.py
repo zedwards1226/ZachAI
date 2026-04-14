@@ -33,6 +33,20 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
+# ── Config — read capital from .env so it stays in sync ───────────────────────
+def _load_starting_capital() -> float:
+    env_path = Path(r"C:\ZachAI\kalshi\.env")
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("STARTING_CAPITAL="):
+                try:
+                    return float(line.split("=", 1)[1].strip())
+                except ValueError:
+                    pass
+    return 85.0  # fallback
+
+STARTING_CAPITAL = _load_starting_capital()
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BOT_SCRIPT = r"C:\ZachAI\kalshi\bots\app.py"
 MONITOR_SCRIPT = r"C:\ZachAI\kalshi\bots\monitor.py"
@@ -404,7 +418,7 @@ def check_guardrail_sync():
         if synced_something:
             now = datetime.now().strftime("%H:%M:%S")
             summary = _db_get_summary()
-            capital = 80.0 + summary["total_pnl_usd"]
+            capital = STARTING_CAPITAL + summary["total_pnl_usd"]
             risk_pct = (actual_risk / capital * 100) if capital > 0 else 0
             detail_str = "\n".join(f"  • {d}" for d in details)
             tg_alert("guardrail_sync",
@@ -422,7 +436,7 @@ def check_capital_at_risk():
     """Verify capital at risk is under 40% limit."""
     try:
         summary = _db_get_summary()
-        capital = 80.0 + summary["total_pnl_usd"]
+        capital = STARTING_CAPITAL + summary["total_pnl_usd"]
         risk = summary["open_risk_usd"]
         if capital <= 0:
             return
@@ -558,7 +572,7 @@ def build_startup_message() -> str:
     try:
         summary = _db_get_summary()
         open_trades = _db_get_open_trades()
-        capital = 80.0 + summary["total_pnl_usd"]
+        capital = STARTING_CAPITAL + summary["total_pnl_usd"]
         risk = summary["open_risk_usd"]
         risk_pct = (risk / capital * 100) if capital > 0 else 0
         cities = ", ".join(sorted(set(t["city"] for t in open_trades)))
