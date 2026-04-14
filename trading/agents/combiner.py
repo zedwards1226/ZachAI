@@ -393,14 +393,14 @@ def _check_hard_blocks(states: dict, orb: ORBRange) -> Optional[str]:
             if any(kw in event_name for kw in ("CPI", "NFP", "NON-FARM", "FOMC", "FED")):
                 return f"High-impact news day: {event.get('event')} — no ORB trades"
 
-    # ORB range outside ATR band
-    atr = structure.get("atr_14", 0)
-    if atr and orb.range > 0:
-        ratio = orb.range / atr
-        if ratio < ORB_ATR_MIN_PCT:
-            return f"ORB range too narrow ({ratio:.0%} of ATR, min {ORB_ATR_MIN_PCT:.0%})"
-        if ratio > ORB_ATR_MAX_PCT:
-            return f"ORB range too wide ({ratio:.0%} of ATR, max {ORB_ATR_MAX_PCT:.0%})"
+    # ORB range ATR filter — disabled (informational only, does not block trades)
+    # atr = structure.get("atr_14", 0)
+    # if atr and orb.range > 0:
+    #     ratio = orb.range / atr
+    #     if ratio < ORB_ATR_MIN_PCT:
+    #         return f"ORB range too narrow ({ratio:.0%} of ATR, min {ORB_ATR_MIN_PCT:.0%})"
+    #     if ratio > ORB_ATR_MAX_PCT:
+    #         return f"ORB range too wide ({ratio:.0%} of ATR, max {ORB_ATR_MAX_PCT:.0%})"
 
     return None
 
