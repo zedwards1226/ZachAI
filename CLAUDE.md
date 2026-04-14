@@ -331,4 +331,8 @@ C:\ZachAI\
 Build autonomous digital companies with zero/minimal overhead.
 One prompt = one new company.
 Every company runs itself after launch.
-n## PROTECTION RULESnNever create git worktrees. Always work directly in C:\ZachAInNever modify telegram-bridge/bot.py without explicit approval. Show diff first and wait for confirmation.nBefore any changes run git status and read the actual file. Never assume config values from memory.
+
+## PROTECTION RULES
+Never create git worktrees. Always work directly in C:\ZachAI
+Never modify telegram-bridge/bot.py without explicit approval. Show diff first and wait for confirmation.
+Before any changes run git status and read the actual file. Never assume config values from memory.
