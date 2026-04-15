@@ -56,8 +56,9 @@ TradingView "NQ ORB Strategy" (Pine Script, MNQ1! 15m chart, entity WLAawi)
 ## TELEGRAM
 | File | Purpose |
 |------|---------|
-| `telegram-bridge/chat_bot.py` | Telegram chat bot |
+| `telegram-bridge/bot.py` | Jarvis Telegram bot (/claude, /run, /tasks, approvals) |
 | `telegram-bridge/config.json` | Chat ID config (gitignored) |
+| `telegram-bridge/hooks/` | Notification hooks |
 
 ---
 
