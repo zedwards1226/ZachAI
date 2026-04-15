@@ -406,21 +406,10 @@ def _score_trade(direction: Direction, is_second_break: bool,
             b.prior_day_direction = 1
             b.details["prior_day"] = "Prior day closed in trade direction"
 
-    # +1/-3: News/Truth blocks
-    news_block = sentinel.get("news_block", False)
-    truth_block = sentinel.get("truth_block", False)
-
-    if not news_block:
-        b.no_news_block = 1
-    else:
-        b.news_block = -3
-        b.details["news_block"] = sentinel.get("block_reason", "News block active")
-
-    if not truth_block:
-        b.no_truth_block = 1
-    else:
-        b.truth_block = -3
-        b.details["truth_block"] = "High-impact Truth Social post"
+    # News/Truth scoring removed — headlines are informational only now.
+    # Sentinel still forwards high-impact headlines to Telegram for awareness.
+    b.no_news_block = 1
+    b.no_truth_block = 1
 
     b.compute_total()
     return b
