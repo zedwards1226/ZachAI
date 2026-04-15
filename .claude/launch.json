@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "weatheralpha-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["serve.py"],
+      "cwd": "kalshi/dashboard/backend",
+      "port": 3001
+    }
+  ]
+}
