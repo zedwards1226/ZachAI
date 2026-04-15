@@ -45,6 +45,9 @@ def init_db() -> None:
             status       TEXT    NOT NULL DEFAULT 'open',  -- open/won/lost/cancelled
             pnl_usd      REAL,
             resolved_at  TEXT,
+            floor_f      REAL,              -- between-market floor temp
+            cap_f        REAL,              -- between-market cap temp
+            strike_type  TEXT,              -- 'greater' or 'between'
             notes        TEXT
         );
 
@@ -140,11 +143,26 @@ def init_db() -> None:
             ON trades (market_id) WHERE status = 'open';
         """)
 
+        # Migrate: add columns if they don't exist (safe for existing DBs)
+        try:
+            conn.execute("ALTER TABLE trades ADD COLUMN floor_f REAL")
+        except Exception:
+            pass  # column already exists
+        try:
+            conn.execute("ALTER TABLE trades ADD COLUMN cap_f REAL")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE trades ADD COLUMN strike_type TEXT")
+        except Exception:
+            pass
+
 
 # ── Trades ────────────────────────────────────────────────────────────────────
 
 def insert_trade(city, market_id, side, contracts, price_cents,
-                 edge, kelly_frac, stake_usd, paper=True, notes="") -> int:
+                 edge, kelly_frac, stake_usd, paper=True,
+                 floor_f=None, cap_f=None, strike_type=None, notes="") -> int:
     """Insert a trade. Returns row id, or -1 if blocked by unique constraint (duplicate)."""
     import sqlite3
     try:
@@ -152,10 +170,11 @@ def insert_trade(city, market_id, side, contracts, price_cents,
             cur = conn.execute(
                 """INSERT INTO trades
                    (timestamp, city, market_id, side, contracts, price_cents,
-                    edge, kelly_frac, stake_usd, paper, notes)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    edge, kelly_frac, stake_usd, paper, floor_f, cap_f, strike_type, notes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (datetime.utcnow().isoformat(), city, market_id, side, contracts,
-                 price_cents, edge, kelly_frac, stake_usd, int(paper), notes)
+                 price_cents, edge, kelly_frac, stake_usd, int(paper),
+                 floor_f, cap_f, strike_type, notes)
             )
             return cur.lastrowid
     except sqlite3.IntegrityError:

@@ -53,5 +53,6 @@ FLASK_PORT = int(os.getenv("PORT", "5000"))
 FLASK_HOST = "0.0.0.0"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "weatheralpha.db")
 
-# Forecast uncertainty (std dev in °F — Open-Meteo day-ahead typical accuracy)
-FORECAST_SIGMA_F = 3.5
+# Ensemble model config (replaces old FORECAST_SIGMA_F = 3.5 normal distribution)
+# Probability is now computed by counting GFS ensemble members, not Gaussian CDF.
+# FORECAST_SIGMA_F is no longer used.

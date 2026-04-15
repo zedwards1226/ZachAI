@@ -380,7 +380,8 @@ def server_error(e):
 
 def create_app():
     init_db()
-    start_scheduler()
+    # NOTE: scheduler is started in __main__ only — not here.
+    # Starting it here AND in __main__ causes every job to fire twice.
     return app
 
 

@@ -158,10 +158,11 @@ def check_guardrails():
         else:
             clear_alert("daily_loss_warning")
 
-        # Capital at risk check
+        # Capital at risk check — use dynamic capital from config
         car = data.get("capital_at_risk_usd", 0)
-        if car > 80 * 0.40:  # MAX_CAPITAL_AT_RISK = 40% of $80
-            alert("high_risk", f"Capital at risk: ${car:.2f} (over 40% limit)")
+        max_car = data.get("max_capital_at_risk", 40)  # from guardrail_status()
+        if car > max_car:
+            alert("high_risk", f"Capital at risk: ${car:.2f} (over ${max_car:.2f} limit)")
         else:
             clear_alert("high_risk")
     except Exception as e:
