@@ -5,6 +5,7 @@ Jarvis bot (telegram-bridge/bot.py) is separate — commands only.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -24,8 +25,8 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
-async def send(text: str, parse_mode: str = "HTML") -> bool:
-    """Send a Telegram message to the ORB Alerts chat."""
+async def send(text: str, parse_mode: str = "HTML", max_retries: int = 3) -> bool:
+    """Send a Telegram message with exponential backoff retry."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("Telegram credentials not configured")
         return False
@@ -36,15 +37,30 @@ async def send(text: str, parse_mode: str = "HTML") -> bool:
         "text": text,
         "parse_mode": parse_mode,
     }
-    try:
-        resp = await _get_client().post(url, json=payload)
-        if resp.status_code != 200:
-            logger.error("Telegram send failed: %d %s", resp.status_code, resp.text[:200])
-            return False
-        return True
-    except Exception as e:
-        logger.error("Telegram send error: %s", e)
-        return False
+
+    delay = 1.0
+    for attempt in range(max_retries):
+        try:
+            resp = await _get_client().post(url, json=payload)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code == 429:  # Rate limited
+                retry_after = int(resp.headers.get("Retry-After", delay))
+                logger.warning("Telegram rate limited, retrying in %ds", retry_after)
+                await asyncio.sleep(retry_after)
+                delay = retry_after * 2
+                continue
+            logger.error("Telegram send failed (attempt %d/%d): %d %s",
+                         attempt + 1, max_retries, resp.status_code, resp.text[:200])
+        except Exception as e:
+            logger.error("Telegram send error (attempt %d/%d): %s",
+                         attempt + 1, max_retries, e)
+
+        if attempt < max_retries - 1:
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30)
+
+    return False
 
 
 async def notify_briefing(text: str) -> bool:
@@ -159,3 +175,11 @@ async def notify_strategy_review(rolling_wr: float, weeks: int) -> bool:
         f"Consider re-evaluating parameters."
     )
     return await send(msg)
+
+
+async def close() -> None:
+    """Close the httpx client on shutdown."""
+    global _client
+    if _client and not _client.is_closed:
+        await _client.aclose()
+        _client = None

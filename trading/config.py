@@ -1,5 +1,6 @@
 """Configuration for ORB Multi-Agent Trading System."""
 import os
+from datetime import datetime as _datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -36,9 +37,9 @@ ORB_ATR_MIN_PCT = 0.30
 ORB_ATR_MAX_PCT = 0.60
 ATR_LOOKBACK_DAYS = 14
 
-# Scoring Thresholds (research-calibrated)
-SCORE_FULL_SIZE = 7
-SCORE_HALF_SIZE = 5
+# Scoring Thresholds (adjusted +1 to account for 2pt MNQ slippage erosion)
+SCORE_FULL_SIZE = 8
+SCORE_HALF_SIZE = 6
 MAX_TRADES_PER_SESSION = 3
 
 # Stop/Target (Finding 2: extension-based, 7x Sharpe improvement)
@@ -81,3 +82,47 @@ TRUTH_HIGH_IMPACT_KEYWORDS = [
 
 # Timezone
 TIMEZONE = "America/New_York"
+
+# US Market Holidays (CME: MNQ closed these days)
+MARKET_HOLIDAYS = {
+    # 2026
+    "2026-01-01",  # New Year's Day
+    "2026-01-19",  # MLK Day
+    "2026-02-16",  # Presidents Day
+    "2026-04-03",  # Good Friday
+    "2026-05-25",  # Memorial Day
+    "2026-06-19",  # Juneteenth
+    "2026-07-03",  # Independence Day (observed)
+    "2026-09-07",  # Labor Day
+    "2026-11-26",  # Thanksgiving
+    "2026-12-25",  # Christmas
+    # 2027 — add when CME publishes schedule
+}
+
+# Half days — market closes at 1:00 PM ET instead of 3:00 PM
+HALF_DAYS = {
+    "2026-11-27",  # Day after Thanksgiving
+    "2026-12-24",  # Christmas Eve
+}
+HALF_DAY_CLOSE_HOUR = 13
+HALF_DAY_CLOSE_MINUTE = 0
+
+
+def is_trading_day(dt=None) -> bool:
+    """Return True if dt is a regular market day (not weekend, not holiday)."""
+    import pytz
+    if dt is None:
+        dt = _datetime.now(pytz.timezone(TIMEZONE))
+    if dt.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    return dt.strftime("%Y-%m-%d") not in MARKET_HOLIDAYS
+
+
+def get_hard_close_time(dt=None) -> tuple:
+    """Return (hour, minute) for today's hard close. 1 PM on half days, 3 PM otherwise."""
+    import pytz
+    if dt is None:
+        dt = _datetime.now(pytz.timezone(TIMEZONE))
+    if dt.strftime("%Y-%m-%d") in HALF_DAYS:
+        return (HALF_DAY_CLOSE_HOUR, HALF_DAY_CLOSE_MINUTE)
+    return (HARD_CLOSE_HOUR, HARD_CLOSE_MINUTE)

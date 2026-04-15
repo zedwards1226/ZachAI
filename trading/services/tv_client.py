@@ -33,6 +33,14 @@ async def get_client() -> "TVClient":
         return _client
 
 
+async def disconnect() -> None:
+    """Disconnect the singleton TVClient on shutdown."""
+    global _client
+    if _client and _client.connected:
+        await _client.disconnect()
+        _client = None
+
+
 class TVClient:
     """CDP WebSocket client for TradingView Desktop."""
 

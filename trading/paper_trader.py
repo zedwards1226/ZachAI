@@ -34,6 +34,27 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Webhook authentication — set WEBHOOK_SECRET in .env to enable
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+
+
+@app.before_request
+def _check_webhook_auth():
+    """Reject unauthorized POST /alert requests if WEBHOOK_SECRET is set."""
+    if request.path == "/alert" and request.method == "POST" and WEBHOOK_SECRET:
+        # Accept secret from JSON body or header
+        body_secret = ""
+        try:
+            body = request.get_json(silent=True) or {}
+            body_secret = body.get("secret", "")
+        except Exception:
+            pass
+        header_secret = request.headers.get("X-Webhook-Secret", "")
+        if body_secret != WEBHOOK_SECRET and header_secret != WEBHOOK_SECRET:
+            log.warning("Unauthorized webhook attempt from %s", request.remote_addr)
+            return jsonify({"error": "unauthorized"}), 401
+
+
 # ── state ──────────────────────────────────────────────────────────────────────
 
 def load_trades() -> dict:

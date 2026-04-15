@@ -23,7 +23,7 @@ from config import (
 from models import (
     Direction, TradeSize, CandleDirection, ScoreBreakdown, ORBRange, Signal,
 )
-from services.state_manager import read_all_states, write_state
+from services.state_manager import read_all_states, read_state, write_state
 from services.tv_client import get_client
 from services import telegram
 from agents import journal
@@ -42,6 +42,50 @@ _signals: list[dict] = []
 # Prevents re-scoring / re-executing the same breakout every 15s poll while
 # price stays outside the ORB range. Reset whenever price returns inside.
 _breakout_processed: bool = False
+
+
+def _persist_session() -> None:
+    """Write combiner session state to disk for crash recovery."""
+    write_state("combiner_session", {
+        "session_date": _session_date,
+        "orb": _orb.model_dump() if _orb else None,
+        "first_break_direction": _first_break_direction.value if _first_break_direction else None,
+        "first_break_failed": _first_break_failed,
+        "trades_today": _trades_today,
+        "breakout_processed": _breakout_processed,
+        "signals": _signals,
+    })
+
+
+def _try_restore_session() -> bool:
+    """Restore combiner session from disk if same calendar day. Returns True if restored."""
+    global _orb, _first_break_direction, _first_break_failed
+    global _trades_today, _session_date, _signals, _breakout_processed
+
+    data = read_state("combiner_session")
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    if not data or data.get("session_date") != today:
+        return False
+
+    try:
+        orb_data = data.get("orb")
+        if orb_data:
+            _orb = ORBRange(**orb_data)
+
+        fbd = data.get("first_break_direction")
+        _first_break_direction = Direction(fbd) if fbd else None
+        _first_break_failed = data.get("first_break_failed", False)
+        _trades_today = data.get("trades_today", 0)
+        _breakout_processed = data.get("breakout_processed", False)
+        _signals = data.get("signals", [])
+        _session_date = today
+
+        logger.info("Restored combiner session: ORB=%s, trades=%d, breakout_processed=%s",
+                     _orb, _trades_today, _breakout_processed)
+        return True
+    except Exception as e:
+        logger.warning("Failed to restore combiner session: %s — resetting", e)
+        return False
 
 
 def _reset_session():
@@ -65,9 +109,10 @@ async def poll() -> Optional[dict]:
     now = datetime.now(ET)
     today = now.strftime("%Y-%m-%d")
 
-    # Reset on new day
+    # Reset on new day (or restore from disk if same-day restart)
     if _session_date != today:
-        _reset_session()
+        if not _try_restore_session():
+            _reset_session()
 
     # Check session window
     session_start = now.replace(hour=ORB_START_HOUR, minute=ORB_START_MINUTE, second=0)
@@ -114,6 +159,7 @@ async def poll() -> Optional[dict]:
         )
         logger.info("ORB captured: H=%.2f L=%.2f range=%.2f dir=%s",
                      orb_high, orb_low, orb_range, candle_dir.value)
+        _persist_session()
 
     if _orb is None:
         return None  # Still in ORB formation window
@@ -136,6 +182,7 @@ async def poll() -> Optional[dict]:
         if _first_break_direction is not None and not _first_break_failed:
             _first_break_failed = True
             logger.info("First break FAILED (double break setup forming)")
+            _persist_session()
         # Price returned inside range → this breakout event is over.
         # Clear the processed flag so a future break can fire again.
         _breakout_processed = False
@@ -166,6 +213,7 @@ async def poll() -> Optional[dict]:
         await telegram.notify_hard_block(block_reason)
         _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break)
         _breakout_processed = True
+        _persist_session()
         return None
 
     # --- Determine trade size ---
@@ -183,6 +231,7 @@ async def poll() -> Optional[dict]:
         await telegram.notify_skip(breakout_direction.value, score, reason)
         _log_signal(breakout_direction, price, breakdown, size, is_second_break)
         _breakout_processed = True
+        _persist_session()
         return None
 
     # --- Phase 4: Calculate stop/target ---
@@ -261,6 +310,7 @@ async def poll() -> Optional[dict]:
     _trades_today += 1
     _breakout_processed = True
     _log_signal(breakout_direction, price, breakdown, size, is_second_break)
+    _persist_session()
 
     logger.info("TRADE EXECUTED: %s score=%d size=%s entry=%.2f stop=%.2f t1=%.2f t2=%.2f",
                 breakout_direction.value, score, size.value, price, stop, target_1, target_2)

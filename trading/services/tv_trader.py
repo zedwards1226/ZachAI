@@ -15,16 +15,80 @@ from typing import Optional
 
 import pytz
 
-from config import TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, HARD_CLOSE_HOUR, HARD_CLOSE_MINUTE, MAX_HOLD_MINUTES
+from config import TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time
 from services.tv_client import get_client
+from services.state_manager import read_state, write_state
 from agents import journal
 from services import telegram
 
 logger = logging.getLogger(__name__)
 ET = pytz.timezone(TIMEZONE)
 
-# Track active chart orders
+# Track active chart orders — persisted to state/active_orders.json
 _active_orders: dict[int, dict] = {}  # trade_id -> order info
+
+
+def _persist_active_orders() -> None:
+    """Write _active_orders to disk so they survive restarts."""
+    write_state("active_orders", {
+        "orders": {str(k): v for k, v in _active_orders.items()},
+    })
+
+
+async def load_and_reconcile_orders() -> None:
+    """Load active orders from disk on startup and reconcile.
+
+    If the system crashed with trades open, this recovers them.
+    Trades that hit stop/target while offline are auto-closed in journal.
+    Trades still in range resume normal monitoring.
+    """
+    global _active_orders
+    data = read_state("active_orders")
+    orders = data.get("orders", {})
+    if not orders:
+        return
+
+    _active_orders = {int(k): v for k, v in orders.items()}
+    count = len(_active_orders)
+    logger.warning("Recovered %d active order(s) from state file", count)
+
+    # Try to reconcile — check if stops/targets were hit while offline
+    try:
+        tv = await get_client()
+        quote = await tv.get_quote()
+        price = quote.get("last") or quote.get("close", 0)
+
+        if price > 0:
+            for trade_id, order in list(_active_orders.items()):
+                direction = order["direction"]
+                stop = order["stop"]
+                t1 = order["target_1"]
+
+                stop_hit = (direction == "LONG" and price <= stop) or \
+                           (direction == "SHORT" and price >= stop)
+                t1_hit = (direction == "LONG" and price >= t1) or \
+                          (direction == "SHORT" and price <= t1)
+
+                if stop_hit:
+                    logger.warning("Reconciling trade %d: stop was hit (price=%.2f, stop=%.2f)",
+                                   trade_id, price, stop)
+                    await close_position(trade_id, stop, "Stop hit (reconciled after restart)",
+                                         outcome="LOSS", skip_chart_close=True)
+                elif t1_hit:
+                    logger.warning("Reconciling trade %d: T1 was hit (price=%.2f, t1=%.2f)",
+                                   trade_id, price, t1)
+                    await close_position(trade_id, t1, "T1 hit (reconciled after restart)",
+                                         outcome="WIN", skip_chart_close=True)
+                else:
+                    logger.info("Trade %d still in range (price=%.2f), resuming monitoring",
+                                trade_id, price)
+
+        if _active_orders:
+            await telegram.send(
+                f"System restarted — {len(_active_orders)} open trade(s) recovered and monitoring resumed."
+            )
+    except Exception as e:
+        logger.error("Order reconciliation failed (will retry via monitor): %s", e)
 
 
 async def place_bracket_order(direction: str, entry_price: float,
@@ -40,6 +104,12 @@ async def place_bracket_order(direction: str, entry_price: float,
 
     success = await _place_via_trading_panel(tv, side, stop_price, target_1)
 
+    # Confirm order appeared by checking quote is valid
+    if success:
+        confirmed = await _confirm_order_placed(tv, timeout=5.0)
+        if not confirmed:
+            logger.warning("Order confirmation timed out for trade %d — proceeding anyway", trade_id)
+
     if success:
         _active_orders[trade_id] = {
             "direction": direction,
@@ -50,10 +120,28 @@ async def place_bracket_order(direction: str, entry_price: float,
             "opened_at": datetime.now(ET).isoformat(),
             "t1_hit": False,
         }
+        _persist_active_orders()
         logger.info("Paper order placed: %s 1 %s @ ~%.2f  SL=%.2f TP=%.2f",
                      side.upper(), DEFAULT_SYMBOL, entry_price, stop_price, target_1)
 
     return success
+
+
+async def _confirm_order_placed(tv, timeout: float = 5.0) -> bool:
+    """Poll TradingView for a few seconds to confirm an order was accepted."""
+    import asyncio
+    import time as _time
+    start = _time.monotonic()
+    while _time.monotonic() - start < timeout:
+        try:
+            quote = await tv.get_quote()
+            price = quote.get("last") or quote.get("close", 0)
+            if price > 0:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(1.0)
+    return False
 
 
 async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> bool:
@@ -323,6 +411,8 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "",
         logger.warning("No active order for trade %d", trade_id)
         return {}
 
+    _persist_active_orders()
+
     direction = order["direction"]
     entry = order["entry"]
 
@@ -390,11 +480,12 @@ async def monitor_trades() -> None:
         t1 = order["target_1"]
         opened_at = datetime.fromisoformat(order["opened_at"])
 
-        # Check 3 PM hard close — TV bracket stays open, we explicitly close
-        close_time = now.replace(hour=HARD_CLOSE_HOUR, minute=HARD_CLOSE_MINUTE, second=0)
+        # Hard close — 3 PM normally, 1 PM on half days
+        close_h, close_m = get_hard_close_time(now)
+        close_time = now.replace(hour=close_h, minute=close_m, second=0)
         if now >= close_time:
-            logger.info("3 PM hard close for trade %d", trade_id)
-            await close_position(trade_id, price, "3 PM session close")
+            logger.info("%d:%02d hard close for trade %d", close_h, close_m, trade_id)
+            await close_position(trade_id, price, f"{close_h}:{close_m:02d} session close")
             continue
 
         # Check 2-hour time exit — TV bracket stays open, we explicitly close

@@ -17,8 +17,10 @@ from pathlib import Path
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import TIMEZONE, LOG_DIR, STATE_DIR
+from config import TIMEZONE, LOG_DIR, STATE_DIR, is_trading_day
 from agents import journal
+from services import telegram
+from services.tv_client import get_client
 
 logger = logging.getLogger("orb")
 ET = pytz.timezone(TIMEZONE)
@@ -128,6 +130,8 @@ async def run_sentinel_initial():
 
 async def run_sentinel_poll():
     try:
+        if not is_trading_day():
+            return
         from agents.sentinel import poll
         await poll()
     except ImportError:
@@ -138,6 +142,8 @@ async def run_sentinel_poll():
 
 async def run_sweep_poll():
     try:
+        if not is_trading_day():
+            return
         from agents.sweep import poll
         await poll()
     except ImportError:
@@ -148,6 +154,8 @@ async def run_sweep_poll():
 
 async def run_combiner_poll():
     try:
+        if not is_trading_day():
+            return
         from agents.combiner import poll
         await poll()
     except Exception as e:
@@ -156,6 +164,8 @@ async def run_combiner_poll():
 
 async def run_trade_monitor():
     try:
+        if not is_trading_day():
+            return
         from services.tv_trader import monitor_trades
         await monitor_trades()
     except Exception as e:
@@ -167,6 +177,26 @@ async def run_weekly_report():
         await journal.weekly_report()
     except Exception as e:
         logger.error("Weekly report failed: %s", e, exc_info=True)
+
+
+async def run_journal_backup():
+    """Daily backup of journal.db — keeps last 30 days."""
+    try:
+        import shutil
+        from config import JOURNAL_DB
+        backup_dir = STATE_DIR / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        today = datetime.now(ET).strftime("%Y-%m-%d")
+        backup_path = backup_dir / f"journal_{today}.db"
+        if not backup_path.exists() and JOURNAL_DB.exists():
+            shutil.copy2(str(JOURNAL_DB), str(backup_path))
+            logger.info("Journal backed up to %s", backup_path)
+            # Clean up backups older than 30 days
+            backups = sorted(backup_dir.glob("journal_*.db"))
+            for old_backup in backups[:-30]:
+                old_backup.unlink()
+    except Exception as e:
+        logger.error("Journal backup failed: %s", e)
 
 
 async def main():
@@ -185,12 +215,20 @@ async def main():
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     journal.init_db()
 
+    # Recover any active orders from a previous crash
+    from services.tv_trader import load_and_reconcile_orders
+    await load_and_reconcile_orders()
+
     # Create scheduler
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
     # ─── Scheduled Agents ───
 
-    # Memory: 6:00 PM ET daily
+    # Memory: 7:30 AM ET (pre-market refresh — catches overnight gaps before briefing)
+    scheduler.add_job(run_memory, "cron", hour=7, minute=30,
+                      id="memory_morning", name="Memory Agent (Morning)")
+
+    # Memory: 6:00 PM ET daily (primary end-of-day analysis)
     scheduler.add_job(run_memory, "cron", hour=18, minute=0,
                       id="memory", name="Memory Agent")
 
@@ -235,6 +273,10 @@ async def main():
                       hour=7, minute=0,
                       id="journal_weekly", name="Weekly Report")
 
+    # Daily journal backup: 6:00 AM ET
+    scheduler.add_job(run_journal_backup, "cron", hour=6, minute=0,
+                      id="journal_backup", name="Journal Backup")
+
     scheduler.start()
     logger.info("Scheduler started with %d jobs", len(scheduler.get_jobs()))
     for job in scheduler.get_jobs():
@@ -245,8 +287,51 @@ async def main():
         while True:
             await asyncio.sleep(1)
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Shutting down...")
-        scheduler.shutdown()
+        await _graceful_shutdown(scheduler)
+
+
+async def _graceful_shutdown(scheduler) -> None:
+    """Graceful shutdown — close trades, disconnect services, stop scheduler."""
+    logger.info("Graceful shutdown initiated...")
+
+    # 1. Stop scheduler (prevent new trades)
+    scheduler.shutdown(wait=False)
+
+    # 2. Close all active trades at current price
+    from services.tv_trader import get_active_orders, close_position
+    active = get_active_orders()
+    if active:
+        try:
+            tv = await get_client()
+            quote = await tv.get_quote()
+            price = quote.get("last") or quote.get("close", 0)
+            if price > 0:
+                for trade_id in list(active.keys()):
+                    try:
+                        await close_position(trade_id, price, "System shutdown")
+                    except Exception as e:
+                        logger.error("Failed to close trade %d: %s", trade_id, e)
+                logger.info("Closed %d active trade(s) on shutdown", len(active))
+                await telegram.send(
+                    f"System shutting down — {len(active)} trade(s) closed at {price:.2f}"
+                )
+        except Exception as e:
+            logger.error("Failed to close trades on shutdown: %s", e)
+
+    # 3. Disconnect CDP
+    try:
+        from services.tv_client import disconnect
+        await disconnect()
+    except Exception:
+        pass
+
+    # 4. Close Telegram httpx client
+    try:
+        await telegram.close()
+    except Exception:
+        pass
+
+    logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":

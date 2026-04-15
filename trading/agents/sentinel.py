@@ -568,36 +568,52 @@ def _is_upcoming(time_str: str, now: datetime) -> bool:
 
 # ─── Official 2026 Calendar (BLS + Federal Reserve) ──────────
 # These are the EXACT dates — no guessing. Updated once per year.
+# Year-keyed dicts so the system works across year boundaries.
 
-_CPI_2026 = {
-    (1, 13), (2, 11), (3, 11), (4, 10), (5, 12), (6, 10),
-    (7, 14), (8, 12), (9, 11), (10, 14), (11, 10), (12, 10),
+_CPI = {
+    2026: {(1, 13), (2, 11), (3, 11), (4, 10), (5, 12), (6, 10),
+           (7, 14), (8, 12), (9, 11), (10, 14), (11, 10), (12, 10)},
+    # 2027: update when BLS publishes schedule (~October 2026)
+    2027: set(),
 }
 
-_NFP_2026 = {
-    (1, 9), (2, 6), (3, 6), (4, 3), (5, 8), (6, 5),
-    (7, 2), (8, 7), (9, 4), (10, 2), (11, 6), (12, 4),
+_NFP = {
+    2026: {(1, 9), (2, 6), (3, 6), (4, 3), (5, 8), (6, 5),
+           (7, 2), (8, 7), (9, 4), (10, 2), (11, 6), (12, 4)},
+    # 2027: update when BLS publishes schedule (~October 2026)
+    2027: set(),
 }
 
 # FOMC statement day (day 2 of meeting, 2:00 PM ET)
-_FOMC_2026 = {
-    (1, 28), (3, 18), (4, 29), (6, 17), (7, 29), (9, 16), (10, 28), (12, 9),
+_FOMC = {
+    2026: {(1, 28), (3, 18), (4, 29), (6, 17), (7, 29), (9, 16), (10, 28), (12, 9)},
+    # 2027: update when Fed publishes schedule
+    2027: set(),
 }
 
 
 def _get_static_events(now: datetime) -> list[dict]:
-    """Return known high-impact events from the official 2026 calendar.
+    """Return known high-impact events from the official BLS/Fed calendar.
 
-    Uses hard-coded BLS/Fed dates — NOT guesswork. This is the fallback
+    Uses hard-coded dates — NOT guesswork. This is the fallback
     when Forex Factory returns 403 (which happens frequently).
+    Year-aware: looks up dates by now.year.
     """
+    year = now.year
     month = now.month
     day = now.day
     weekday = now.weekday()  # 0=Monday
 
+    cpi_dates = _CPI.get(year, set())
+    nfp_dates = _NFP.get(year, set())
+    fomc_dates = _FOMC.get(year, set())
+
+    if not cpi_dates and not nfp_dates and not fomc_dates:
+        logger.error("No static economic calendar for year %d! Update sentinel.py", year)
+
     events = []
 
-    if (month, day) in _CPI_2026:
+    if (month, day) in cpi_dates:
         events.append({
             "time": "8:30am",
             "event": "CPI — Consumer Price Index",
@@ -605,7 +621,7 @@ def _get_static_events(now: datetime) -> list[dict]:
             "within_session_window": True,
         })
 
-    if (month, day) in _NFP_2026:
+    if (month, day) in nfp_dates:
         events.append({
             "time": "8:30am",
             "event": "NFP — Non-Farm Payrolls",
@@ -613,7 +629,7 @@ def _get_static_events(now: datetime) -> list[dict]:
             "within_session_window": True,
         })
 
-    if (month, day) in _FOMC_2026:
+    if (month, day) in fomc_dates:
         events.append({
             "time": "2:00pm",
             "event": "FOMC Statement + Rate Decision",
