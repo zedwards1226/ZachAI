@@ -199,7 +199,12 @@ def scan_and_trade() -> list[dict]:
             continue
 
         # 9b. Guardrail checks
-        passed, reasons = all_checks(best["abs_edge"], stake, capital, price_cents, paper=PAPER_MODE)
+        passed, reasons = all_checks(
+            best["abs_edge"], stake, capital, price_cents, paper=PAPER_MODE,
+            our_prob_yes=best["our_prob"],
+            yes_price_cents=best["yes_price_cents"],
+            ensemble_spread_f=forecast.get("ensemble_spread"),
+        )
         if not passed:
             log.info("Trade blocked [%s %s]: %s", city_code, best["ticker"], "; ".join(reasons))
             actions.append({

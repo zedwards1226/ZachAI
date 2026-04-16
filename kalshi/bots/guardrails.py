@@ -103,6 +103,32 @@ def check_bet_size(stake: float) -> tuple[bool, str]:
     return True, "ok"
 
 
+def check_market_disagreement(our_prob_yes: float, yes_price_cents: int) -> tuple[bool, str]:
+    """
+    Skip only when the MARKET prices YES much higher than our model (gap > 30c).
+    This blocks NO bets where the market is telling us temps are rising faster than GFS shows.
+    When our model is MORE bullish than the market, that's our edge — don't block it.
+    """
+    kalshi_implied = yes_price_cents / 100.0
+    gap = kalshi_implied - our_prob_yes  # positive = market thinks YES more likely than we do
+    if gap > 0.30:
+        return False, (
+            f"Market more bullish than model: model={our_prob_yes*100:.0f}¢ "
+            f"vs Kalshi={yes_price_cents}¢ (gap={gap*100:.0f}¢ > 30¢) — market pricing in higher temps"
+        )
+    return True, "ok"
+
+
+def check_ensemble_spread(spread_f: float) -> tuple[bool, str]:
+    """
+    Skip if GFS ensemble members are too spread out (>12°F).
+    Wide spread = GFS is uncertain = no reliable edge.
+    """
+    if spread_f > 12.0:
+        return False, f"Ensemble spread too wide ({spread_f:.1f}°F > 12°F) — GFS uncertain"
+    return True, "ok"
+
+
 def check_halt(state: dict) -> tuple[bool, str]:
     if state.get("halted"):
         return False, f"Trading halted: {state.get('halt_reason', 'unknown')}"
@@ -110,7 +136,9 @@ def check_halt(state: dict) -> tuple[bool, str]:
 
 
 def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
-               paper: bool = True) -> tuple[bool, list[str]]:
+               paper: bool = True, our_prob_yes: float | None = None,
+               yes_price_cents: int | None = None,
+               ensemble_spread_f: float | None = None) -> tuple[bool, list[str]]:
     """
     Run all guardrail checks.
     Returns (all_passed: bool, failed_reasons: list[str])
@@ -131,6 +159,11 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
         check_consecutive_losses(state),
         check_capital_at_risk(state, stake, capital),
     ]
+
+    if our_prob_yes is not None and yes_price_cents is not None:
+        checks.append(check_market_disagreement(our_prob_yes, yes_price_cents))
+    if ensemble_spread_f is not None:
+        checks.append(check_ensemble_spread(ensemble_spread_f))
 
     # Paper mode: skip window check unless override is explicitly OFF (default: allow anytime)
     if paper and not _window_override:
