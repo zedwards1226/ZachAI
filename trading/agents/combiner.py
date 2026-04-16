@@ -165,12 +165,14 @@ async def poll() -> Optional[dict]:
         return None  # Still in ORB formation window
 
     # --- Phase 2: Breakout Watch ---
-    quote = await tv.get_quote()
-    price = quote.get("last") or quote.get("close", 0)
-    if price == 0:
+    # Use most recent CLOSED 5-min bar for breakout confirmation (not live tick).
+    # Prevents false breakouts from intrabar wicks.
+    bars = await tv.get_ohlcv(count=2)
+    if not bars:
         return None
+    last_closed = bars[-2] if len(bars) >= 2 else bars[-1]
+    price = last_closed["close"]
 
-    # Check for breakout (candle close beyond ORB range)
     breakout_direction = None
     if price > _orb.high:
         breakout_direction = Direction.LONG
