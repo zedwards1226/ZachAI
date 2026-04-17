@@ -5,14 +5,11 @@ Monitors ORB stack every 60s and auto-recovers:
   - paper_trader.py (http://localhost:8766/status)
   - TradingView CDP (http://localhost:9222/json)
   - Jarvis Telegram bot (process scan)
-  - Cloudflare tunnels (ping tunnel URLs if present in .env)
 
 Actions:
   - Restart ORB main.py via scripts/ORBAgents.vbs when dead
   - Restart paper_trader when unreachable
   - Telegram alerts on state change (with 1-hour cooldown per key)
-  - Optional Healthchecks.io ping (env HEALTHCHECK_ORB_URL)
-  - Optional Twilio SMS on critical failures (env TWILIO_* + ALERT_PHONE)
 """
 from __future__ import annotations
 
@@ -42,7 +39,7 @@ PAPER_TRADER_URL = "http://localhost:8766/status"
 CDP_URL = "http://localhost:9222/json/version"
 CHECK_EVERY = 60  # seconds
 
-# ─── Load Telegram + optional alerting from trading/.env ──────────────────
+# ─── Load Telegram from trading/.env ──────────────────────────────────────
 def _load_env() -> dict:
     env = {}
     env_path = TRADING_DIR / ".env"
@@ -52,20 +49,13 @@ def _load_env() -> dict:
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip()
-    for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-              "HEALTHCHECK_ORB_URL", "TWILIO_ACCOUNT_SID",
-              "TWILIO_AUTH_TOKEN", "TWILIO_FROM", "ALERT_PHONE"):
+    for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
         env[k] = os.environ.get(k, env.get(k, ""))
     return env
 
 CFG = _load_env()
 BOT_TOKEN = CFG.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = CFG.get("TELEGRAM_CHAT_ID", "")
-HEALTHCHECK_URL = CFG.get("HEALTHCHECK_ORB_URL", "")
-TW_SID = CFG.get("TWILIO_ACCOUNT_SID", "")
-TW_TOKEN = CFG.get("TWILIO_AUTH_TOKEN", "")
-TW_FROM = CFG.get("TWILIO_FROM", "")
-ALERT_PHONE = CFG.get("ALERT_PHONE", "")
 
 # ─── Logging ──────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -97,7 +87,7 @@ def _clear_cooldown(key: str) -> None:
     _last_alert.pop(key, None)
 
 
-# ─── Notification fanout ──────────────────────────────────────────────────
+# ─── Notification ─────────────────────────────────────────────────────────
 def tg(msg: str) -> None:
     if not BOT_TOKEN or not CHAT_ID:
         return
@@ -111,37 +101,10 @@ def tg(msg: str) -> None:
         log.warning("Telegram send failed: %s", e)
 
 
-def sms(msg: str) -> None:
-    if not (TW_SID and TW_TOKEN and TW_FROM and ALERT_PHONE):
-        return
-    try:
-        requests.post(
-            f"https://api.twilio.com/2010-04-01/Accounts/{TW_SID}/Messages.json",
-            auth=(TW_SID, TW_TOKEN),
-            data={"From": TW_FROM, "To": ALERT_PHONE, "Body": msg[:160]},
-            timeout=10,
-        )
-    except Exception as e:
-        log.warning("Twilio SMS failed: %s", e)
-
-
-def ping_healthcheck(suffix: str = "") -> None:
-    """Ping Healthchecks.io — suffix '/fail' marks failure, empty = success."""
-    if not HEALTHCHECK_URL:
-        return
-    try:
-        requests.get(f"{HEALTHCHECK_URL}{suffix}", timeout=10)
-    except Exception:
-        pass
-
-
-def alert(key: str, msg: str, critical: bool = False) -> None:
-    """Send Telegram + optional SMS with cooldown."""
+def alert(key: str, msg: str) -> None:
     if _cooldown_ok(key):
         log.warning(msg)
         tg(msg)
-        if critical:
-            sms(msg.replace("<b>", "").replace("</b>", ""))
 
 
 def resolved(key: str, msg: str) -> None:
@@ -218,7 +181,7 @@ def check_orb_main() -> bool:
         log.warning("ORB PID file missing — starting main.py")
         alert("orb_dead",
               f"⚠️ <b>ORB main.py not running</b>\n🔧 Starting via ORBAgents.vbs\n"
-              f"⏰ {datetime.now().strftime('%H:%M:%S')}", critical=True)
+              f"⏰ {datetime.now().strftime('%H:%M:%S')}")
         if _start_vbs(ORB_VBS):
             time.sleep(10)
             if ORB_PID_FILE.exists():
@@ -229,7 +192,7 @@ def check_orb_main() -> bool:
     try:
         pid = int(ORB_PID_FILE.read_text().strip())
     except (ValueError, OSError):
-        alert("orb_pid_bad", "⚠️ <b>ORB PID file corrupt</b>", critical=True)
+        alert("orb_pid_bad", "⚠️ <b>ORB PID file corrupt</b>")
         return False
 
     if _pid_alive(pid):
@@ -239,8 +202,7 @@ def check_orb_main() -> bool:
     log.warning("ORB PID %d is dead — restarting", pid)
     alert("orb_dead",
           f"🚨 <b>CRITICAL:</b> ORB main.py crashed (PID {pid})\n"
-          f"🔧 Restarting via ORBAgents.vbs\n⏰ {datetime.now().strftime('%H:%M:%S')}",
-          critical=True)
+          f"🔧 Restarting via ORBAgents.vbs\n⏰ {datetime.now().strftime('%H:%M:%S')}")
     try:
         ORB_PID_FILE.unlink()
     except OSError:
@@ -251,8 +213,7 @@ def check_orb_main() -> bool:
             resolved("orb_dead", "✅ <b>ORB main.py recovered</b>")
             return True
     alert("orb_fail",
-          "🚨 <b>ORB RESTART FAILED</b> — manual intervention needed",
-          critical=True)
+          "🚨 <b>ORB RESTART FAILED</b> — manual intervention needed")
     return False
 
 
@@ -280,7 +241,7 @@ def check_paper_trader() -> bool:
         except Exception:
             pass
     alert("paper_fail",
-          "🚨 <b>paper_trader restart FAILED</b>", critical=True)
+          "🚨 <b>paper_trader restart FAILED</b>")
     return False
 
 
@@ -296,7 +257,7 @@ def check_cdp() -> bool:
     alert("cdp_down",
           f"⚠️ <b>TradingView CDP down</b> (:9222)\n"
           f"Trading paused — relaunch TradingView with --remote-debugging-port=9222\n"
-          f"⏰ {datetime.now().strftime('%H:%M:%S')}", critical=True)
+          f"⏰ {datetime.now().strftime('%H:%M:%S')}")
     return False
 
 
@@ -321,22 +282,10 @@ def run_cycle() -> None:
         "cdp":          check_cdp(),
         "jarvis_bot":   check_jarvis_bot(),
     }
-    if all(results.values()):
-        ping_healthcheck()  # success ping
-    else:
+    if not all(results.values()):
         failed = [k for k, v in results.items() if not v]
         log.warning("Failed checks: %s", failed)
-        ping_healthcheck("/fail")
     log.info("Cycle complete: %s", results)
-
-
-def startup_banner() -> str:
-    lines = ["🟢 <b>ORB Watchdog Started</b>", ""]
-    lines.append(f"Checking every {CHECK_EVERY}s")
-    lines.append(f"Healthchecks.io: {'configured' if HEALTHCHECK_URL else 'not set'}")
-    lines.append(f"Twilio SMS: {'configured' if (TW_SID and ALERT_PHONE) else 'not set'}")
-    lines.append(f"⏰ {datetime.now().strftime('%H:%M:%S')}")
-    return "\n".join(lines)
 
 
 def main() -> None:
@@ -347,7 +296,8 @@ def main() -> None:
     log.info("Check interval: %ds", CHECK_EVERY)
     log.info("=" * 55)
 
-    tg(startup_banner())
+    tg(f"🟢 <b>ORB Watchdog Started</b>\nChecking every {CHECK_EVERY}s\n"
+       f"⏰ {datetime.now().strftime('%H:%M:%S')}")
 
     while True:
         try:
