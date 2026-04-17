@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --jarvis-cyan: #00d4ff;
+  --jarvis-amber: #ffb74d;
+  --jarvis-dark: #0a0e1a;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: radial-gradient(ellipse at center, #111827 0%, #030712 100%);
+  color: #e5f3ff;
+  font-family: Consolas, Menlo, monospace;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button {
+  font-family: inherit;
+}

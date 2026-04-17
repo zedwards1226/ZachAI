@@ -1,0 +1,11 @@
+.env
+backend/token.json
+backend/machines.json
+backend/static/
+backend/__pycache__/
+backend/*.log
+frontend/node_modules/
+frontend/dist/
+*.pyc
+*.log
+.DS_Store
