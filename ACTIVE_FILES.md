@@ -1,6 +1,6 @@
 # ACTIVE FILES MANIFEST
 # Every running file must be listed here. If it's not listed, it shouldn't exist.
-# Updated: 2026-04-10
+# Updated: 2026-04-17
 
 ## TRADING PIPELINE (MNQ ORB Strategy)
 
@@ -71,6 +71,17 @@ TradingView "NQ ORB Strategy" (Pine Script, MNQ1! 15m chart, entity WLAawi)
 | `backup.bat` | Auto git push |
 | `cloudflared.exe` | Cloudflare tunnel binary |
 | `.gitignore` | Protects keys, .env, logs |
+
+## WATCHDOGS & RELIABILITY (added 2026-04-17)
+| File | Purpose |
+|------|---------|
+| `scripts/orb_watchdog.py` | Monitors ORB stack (main.py, paper_trader, CDP, Jarvis bot) — auto-restart + Telegram/SMS alerts |
+| `scripts/ORBWatchdog.vbs` | Auto-start for orb_watchdog.py (add to Startup folder) |
+| `scripts/watchdog.py` | WeatherAlpha watchdog (existing) |
+| `scripts/WeatherAlpha_Watchdog.vbs` | Auto-start for WeatherAlpha watchdog |
+| `trading/agents/preflight.py` | 7:00 AM ET stack verification (CDP, paper_trader, disk, calendar) |
+| `trading/services/healthchecks.py` | Healthchecks.io ping wrapper — reads HEALTHCHECK_ORB_URL from .env |
+| `trading/services/sms.py` | Twilio SMS backup — reads TWILIO_* + ALERT_PHONE from .env |
 
 ---
 

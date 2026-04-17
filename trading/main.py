@@ -179,6 +179,25 @@ async def run_weekly_report():
         logger.error("Weekly report failed: %s", e, exc_info=True)
 
 
+async def run_heartbeat():
+    """Ping Healthchecks.io every 5 min so silent failures get paged."""
+    try:
+        from services.healthchecks import ping
+        await ping()
+    except Exception as e:
+        logger.debug("Heartbeat failed: %s", e)
+
+
+async def run_preflight():
+    try:
+        if not is_trading_day():
+            return
+        from agents.preflight import run
+        await run()
+    except Exception as e:
+        logger.error("Preflight failed: %s", e, exc_info=True)
+
+
 async def run_journal_backup():
     """Daily backup of journal.db — keeps last 30 days."""
     try:
@@ -232,6 +251,10 @@ async def main():
     scheduler.add_job(run_memory, "cron", hour=18, minute=0,
                       id="memory", name="Memory Agent")
 
+    # Morning preflight: 7:00 AM ET (verify stack before open)
+    scheduler.add_job(run_preflight, "cron", hour=7, minute=0,
+                      id="preflight", name="Morning Preflight")
+
     # Sentinel initial: 8:00 AM ET
     scheduler.add_job(run_sentinel_initial, "cron", hour=8, minute=0,
                       id="sentinel_initial", name="Sentinel Initial")
@@ -276,6 +299,11 @@ async def main():
     # Daily journal backup: 6:00 AM ET
     scheduler.add_job(run_journal_backup, "cron", hour=6, minute=0,
                       id="journal_backup", name="Journal Backup")
+
+    # Healthchecks.io heartbeat: every 5 min
+    scheduler.add_job(run_heartbeat, "interval", minutes=5,
+                      id="heartbeat", name="Healthcheck Heartbeat",
+                      max_instances=1, coalesce=True)
 
     scheduler.start()
     logger.info("Scheduler started with %d jobs", len(scheduler.get_jobs()))

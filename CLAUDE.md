@@ -250,8 +250,7 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 ## WEATHERALPHA STATUS
 - Bot API: http://localhost:5000 (Flask, PID auto-started via KalshiBot.vbs)
 - Dashboard: http://localhost:3001 (serve.py, auto-started via WeatherAlphaDashboard.vbs)
-- Tunnel: localhost.run SSH → https://*.lhr.live (auto-started via WeatherAlphaTunnel.vbs)
-- SSH key: C:\Users\zedwa\.ssh\localhost_run_key
+- Tunnel: Cloudflare trycloudflare via cloudflared.exe (auto-started via WeatherAlpha_Tunnel.vbs)
 - Kalshi keys: C:\ZachAI\kalshi\keys\ (gitignored)
 - Paper mode: ON (NEVER change without explicit approval)
 - Cities: NYC, CHI, MIA, LAX, MEM, DEN
@@ -323,10 +322,13 @@ C:\ZachAI\
 ├── scripts\ (VBS + bat startup scripts — source copies only)
 │   ├── Jarvis_Bot.vbs (starts telegram-bridge/bot.py — ACTIVE)
 │   ├── ORBAgents.vbs (starts trading/main.py — ACTIVE)
-│   ├── start_claude_channel.vbs (Claude Channels — retired, kept for reference)
+│   ├── ORBWatchdog.vbs (starts orb_watchdog.py — ACTIVE)
+│   ├── orb_watchdog.py (monitors ORB stack, auto-restart + Telegram/SMS alerts)
+│   ├── watchdog.py (WeatherAlpha watchdog — ACTIVE via WeatherAlpha_Watchdog.vbs)
 │   ├── WeatherAlpha_Bot.vbs
 │   ├── WeatherAlpha_Dashboard.vbs
-│   └── WeatherAlpha_Tunnel.bat
+│   ├── WeatherAlpha_Tunnel.vbs (Cloudflare tunnel for :3001)
+│   └── WeatherAlpha_Watchdog.vbs
 ├── plugins\
 │   └── awesome-claude-code-toolkit\ (135 agents/skills reference)
 ├── agents\ (future autonomous agents)
