@@ -2,7 +2,6 @@
 
 Runs at 7:00 AM ET. Verifies the full stack is ready before the 9:30 open:
   - TradingView CDP reachable
-  - paper_trader.py alive
   - CDP symbol locked to DEFAULT_SYMBOL
   - Today's high-impact economic events (CPI/NFP/FOMC)
   - Disk space on C:
@@ -18,7 +17,6 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-import httpx
 import pytz
 
 from config import DEFAULT_SYMBOL, JOURNAL_DB, TIMEZONE
@@ -37,17 +35,6 @@ NFP_DATES = {"2026-01-09", "2026-02-06", "2026-03-06", "2026-04-03", "2026-05-08
              "2026-11-06", "2026-12-04"}
 FOMC_DATES = {"2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29",
               "2026-09-16", "2026-10-28", "2026-12-09"}
-
-
-async def _check_paper_trader() -> tuple[bool, str]:
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get("http://localhost:8766/status")
-            if r.status_code in (200, 401):
-                return True, "paper_trader :8766 alive"
-    except Exception as e:
-        return False, f"paper_trader unreachable: {e}"
-    return False, "paper_trader returned non-OK"
 
 
 async def _check_cdp_and_symbol() -> tuple[bool, str]:
@@ -112,12 +99,10 @@ async def run() -> None:
     calendar_ok, calendar_msg = _check_calendar()
     disk_ok, disk_msg = _check_disk()
     journal_ok, journal_msg = _check_journal_db()
-    paper_ok, paper_msg = await _check_paper_trader()
     cdp_ok, cdp_msg = await _check_cdp_and_symbol()
     quote_ok, quote_msg = await _check_quote()
 
     checks = [
-        ("paper_trader", paper_ok, paper_msg),
         ("CDP/symbol", cdp_ok, cdp_msg),
         ("quote pull", quote_ok, quote_msg),
         ("calendar", calendar_ok, calendar_msg),

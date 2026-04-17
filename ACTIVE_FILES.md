@@ -2,35 +2,37 @@
 # Every running file must be listed here. If it's not listed, it shouldn't exist.
 # Updated: 2026-04-17
 
-## TRADING PIPELINE (MNQ ORB Strategy)
+## TRADING PIPELINE (MNQ ORB Strategy — direct CDP)
 
 ### Signal Flow
 ```
-TradingView "NQ ORB Strategy" (Pine Script, MNQ1! 15m chart, entity WLAawi)
-  -> Alert ID 4426604329 (strategy type, 15m, webhook enabled)
-  -> Cloudflare Tunnel (clocks-jason-trend-using.trycloudflare.com/alert)
-  -> paper_trader.py (:8766/alert)
-  -> Telegram notification
+trading/main.py (APScheduler)
+  -> agents/sentinel + sweep + combiner score ORB setup
+  -> services/tv_trader.place_bracket_order
+  -> CDP evaluate() clicks Buy/Sell on TradingView chart (paper account)
+  -> Telegram entry/exit alerts via services/telegram
 ```
 
 ### Files
-| File | Purpose | Port | Auto-start |
-|------|---------|------|------------|
-| `trading/paper_trader.py` | Webhook receiver, trade logger, Telegram alerts | :8766 | Startup/PaperTrader.vbs |
-| `trading/paper_trades.json` | Trade log (auto-managed by paper_trader.py) | — | — |
-| `trading/.env` | Telegram bot token (gitignored) | — | — |
-| `trading/CloudflareTunnel.vbs` | Source copy of tunnel launcher | — | — |
+| File | Purpose | Auto-start |
+|------|---------|------------|
+| `trading/main.py` | ORB multi-agent controller (APScheduler, PID lock) | Startup/ORBAgents.vbs |
+| `trading/agents/` | sentinel, sweep, combiner, briefing, structure, memory, journal, preflight | — |
+| `trading/services/tv_client.py` | CDP WebSocket client (auto-reconnect) | — |
+| `trading/services/tv_trader.py` | Places bracket orders via CDP evaluate() | — |
+| `trading/services/telegram.py` | Telegram alert sender | — |
+| `trading/services/state_manager.py` | Per-agent JSON state + file locks | — |
+| `trading/.env` | Telegram bot token + chat ID (gitignored) | — |
 
 ### Windows Startup Scripts (C:\Users\zedwa\AppData\...\Startup\)
 | Script | Launches |
 |--------|----------|
-| PaperTrader.vbs | `pythonw paper_trader.py` |
-| CloudflareTunnel.vbs | `cloudflared.exe tunnel --url http://localhost:8766` |
-| TradingView.vbs | TradingView with CDP port 9222 |
+| ORBAgents.vbs | git pull + `python trading/main.py` |
+| TradingView.vbs | TradingView Desktop with `--remote-debugging-port=9222` |
+| Jarvis_Bot.vbs | `python telegram-bridge/bot.py` |
 
 ### Pine Script (lives ONLY in TradingView editor — NO local files)
-- "NQ ORB Strategy" — entity WLAawi on MNQ1! 15m chart
-- Settings: R:R=2.0, Both directions, EMA/VWAP/ADX filters off, calc_on_every_tick=true
+- "NQ ORB Strategy" — entity WLAawi on MNQ1! 5m chart
 
 ---
 
@@ -69,17 +71,16 @@ TradingView "NQ ORB Strategy" (Pine Script, MNQ1! 15m chart, entity WLAawi)
 | `ACTIVE_FILES.md` | This manifest — update on every file create/delete |
 | `RULES.md` | Operating rules |
 | `backup.bat` | Auto git push |
-| `cloudflared.exe` | Cloudflare tunnel binary |
 | `.gitignore` | Protects keys, .env, logs |
 
-## WATCHDOGS & RELIABILITY (added 2026-04-17)
+## WATCHDOGS & RELIABILITY
 | File | Purpose |
 |------|---------|
-| `scripts/orb_watchdog.py` | Monitors ORB stack (main.py, paper_trader, CDP, Jarvis bot) — auto-restart + Telegram alerts |
-| `scripts/ORBWatchdog.vbs` | Auto-start for orb_watchdog.py (add to Startup folder) |
-| `scripts/watchdog.py` | WeatherAlpha watchdog (existing) |
+| `scripts/orb_watchdog.py` | Monitors ORB stack (main.py PID, CDP :9222, Jarvis bot) — auto-restart + Telegram alerts |
+| `scripts/ORBWatchdog.vbs` | Auto-start for orb_watchdog.py |
+| `scripts/watchdog.py` | WeatherAlpha watchdog |
 | `scripts/WeatherAlpha_Watchdog.vbs` | Auto-start for WeatherAlpha watchdog |
-| `trading/agents/preflight.py` | 7:00 AM ET stack verification (CDP, paper_trader, disk, calendar) |
+| `trading/agents/preflight.py` | 7:00 AM ET stack verification (CDP, disk, calendar, journal) |
 
 ---
 
@@ -90,8 +91,13 @@ TradingView "NQ ORB Strategy" (Pine Script, MNQ1! 15m chart, entity WLAawi)
 | `trading/orb_bot.log` | 2026-04-10 | Log for deleted bot |
 | `trading/ORBBot.vbs` | 2026-04-10 | Launcher for deleted bot |
 | `trading/tunnel_watcher.py` | 2026-04-10 | Old localhost.run watcher — replaced by Cloudflare tunnel |
-| `trading/tunnel.log` | 2026-04-10 | Old tunnel log |
-| `trading/strategies/mnq_orb_5m.pine` | 2026-04-10 | Old 5m Pine Script — live strategy is 15m in TradingView editor |
+| `trading/strategies/mnq_orb_5m.pine` | 2026-04-10 | Old 5m Pine Script — live strategy is 5m in TradingView editor |
 | `tradingview-mcp-jackson/orb_executor.py` | 2026-04-10 | CDP polling approach — replaced by webhook alert pipeline |
-| `scripts/PaperTrader.vbs` | 2026-04-10 | Old version with localhost.run SSH tunnel |
 | `Startup/ORBBot.vbs` | 2026-04-10 | Auto-start of deleted bot |
+| `trading/paper_trader.py` | 2026-04-17 | Webhook receiver — ORB migrated to direct CDP order placement in tv_trader.py |
+| `trading/paper_trades.json` | 2026-04-17 | Trade log for deleted paper_trader |
+| `trading/CloudflareTunnel.vbs` | 2026-04-17 | Tunnel existed only to feed paper_trader |
+| `Startup/PaperTrader.vbs` | 2026-04-17 | Auto-start of deleted paper_trader |
+| `Startup/CloudflareTunnel.vbs` | 2026-04-17 | Auto-start of deleted tunnel |
+| `trading/logs/paper_trader.log` | 2026-04-17 | Log for deleted paper_trader |
+| `logs/tunnel.log` | 2026-04-17 | Log for deleted tunnel |

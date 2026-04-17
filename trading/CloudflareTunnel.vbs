@@ -1,2 +1,0 @@
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "C:\ZachAI\cloudflared.exe tunnel --url http://localhost:8766", 0, False

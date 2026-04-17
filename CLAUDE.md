@@ -124,11 +124,8 @@ TradingView captures keys globally even when dialogs are open:
 | Webhook URL input | `input.input-RUSovanF` |
 
 ### Active Pipeline Reference
-- **Cloudflare tunnel:** `https://setting-cbs-cardiovascular-moreover.trycloudflare.com/alert`
-- **paper_trader.py:** `C:\ZachAI\trading\paper_trader.py` on port 8766
-- **MNQ1! ORB alert ID:** `4426604329` (CME_MINI:MNQ1!, 15m, active, webhook enabled)
-- **Message format:** `{"action":"{{strategy.order.action}}","price":{{strategy.order.price}},"qty":{{strategy.order.contracts}},"symbol":"{{ticker}}","order_id":"{{strategy.order.id}}","position_size":{{strategy.position_size}}}`
-- **Tunnel VBS:** `C:\ZachAI\trading\CloudflareTunnel.vbs` (auto-starts on boot via Startup folder)
+- **Order placement:** ORB trades go through direct CDP via `trading/services/tv_trader.py::place_bracket_order` — NOT through TradingView alerts or webhooks. The chart must be on MNQ1! 5m with CDP :9222 reachable.
+- **Legacy webhook pipeline retired 2026-04-17:** paper_trader.py + cloudflared tunnel + TV alert ID were removed. Do not recreate.
 
 ## FILE HYGIENE RULES
 - Every project has an ACTIVE_FILES.md manifest — if a file isn't listed, it shouldn't exist
@@ -160,7 +157,7 @@ git branch -d [current-branch]
 - Fix a bug
 - End any task marked as complete
 
-**Exception:** If the task touches paper_trader.py, Kalshi credentials, or anything that affects live trading — commit and push but notify Zach before merging.
+**Exception:** If the task touches tv_trader.py, Kalshi credentials, or anything that affects live trading — commit and push but notify Zach before merging.
 
 Never leave work sitting on a branch. Master should always reflect the latest stable state.
 
@@ -309,10 +306,7 @@ C:\ZachAI\
 │   └── keys\ (gitignored — private keys)
 ├── trading\
 │   ├── main.py (ORB multi-agent controller — APScheduler, auto-start via ORBAgents.vbs)
-│   ├── paper_trader.py (Flask :8766 — receives TradingView webhooks)
-│   ├── paper_trades.json (trade log — auto-managed)
-│   ├── CloudflareTunnel.vbs (source copy)
-│   ├── agents\ (structure, sentinel, sweep, combiner, briefing, memory, journal)
+│   ├── agents\ (structure, sentinel, sweep, combiner, briefing, preflight, memory, journal)
 │   ├── services\ (telegram.py, tv_client.py, tv_trader.py, state_manager.py)
 │   └── .env (Telegram bot token + chat ID — gitignored)
 ├── tradingview-mcp\ (78-tool TradingView MCP server)

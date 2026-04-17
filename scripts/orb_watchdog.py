@@ -2,13 +2,11 @@
 
 Monitors ORB stack every 60s and auto-recovers:
   - main.py (via state/orb.pid + process liveness)
-  - paper_trader.py (http://localhost:8766/status)
   - TradingView CDP (http://localhost:9222/json)
   - Jarvis Telegram bot (process scan)
 
 Actions:
   - Restart ORB main.py via scripts/ORBAgents.vbs when dead
-  - Restart paper_trader when unreachable
   - Telegram alerts on state change (with 1-hour cooldown per key)
 """
 from __future__ import annotations
@@ -32,10 +30,8 @@ LOG_FILE = LOG_DIR / "orb_watchdog.log"
 
 ORB_PID_FILE = TRADING_DIR / "state" / "orb.pid"
 ORB_VBS = SCRIPTS_DIR / "ORBAgents.vbs"
-PAPER_TRADER_SCRIPT = TRADING_DIR / "paper_trader.py"
 
 # ─── Endpoints ────────────────────────────────────────────────────────────
-PAPER_TRADER_URL = "http://localhost:8766/status"
 CDP_URL = "http://localhost:9222/json/version"
 CHECK_EVERY = 60  # seconds
 
@@ -160,20 +156,6 @@ def _start_vbs(vbs_path: Path) -> bool:
         return False
 
 
-def _start_paper_trader() -> bool:
-    try:
-        subprocess.Popen(
-            ["pythonw", str(PAPER_TRADER_SCRIPT)],
-            cwd=str(TRADING_DIR),
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-        )
-        time.sleep(3)
-        return True
-    except Exception as e:
-        log.error("Failed to start paper_trader: %s", e)
-        return False
-
-
 # ─── Individual checks ────────────────────────────────────────────────────
 def check_orb_main() -> bool:
     """ORB main.py alive via PID file. Restart via VBS if dead."""
@@ -217,34 +199,6 @@ def check_orb_main() -> bool:
     return False
 
 
-def check_paper_trader() -> bool:
-    """paper_trader.py on :8766. Restart if unreachable."""
-    try:
-        r = requests.get(PAPER_TRADER_URL, timeout=5)
-        if r.status_code in (200, 401):  # 401 = webhook secret guard, still alive
-            _clear_cooldown("paper_down")
-            return True
-    except Exception:
-        pass
-
-    log.warning("paper_trader :8766 unreachable — restarting")
-    alert("paper_down",
-          f"⚠️ <b>paper_trader.py down</b> (:8766)\n"
-          f"🔧 Restarting\n⏰ {datetime.now().strftime('%H:%M:%S')}")
-    if _start_paper_trader():
-        time.sleep(5)
-        try:
-            r = requests.get(PAPER_TRADER_URL, timeout=5)
-            if r.status_code in (200, 401):
-                resolved("paper_down", "✅ <b>paper_trader recovered</b>")
-                return True
-        except Exception:
-            pass
-    alert("paper_fail",
-          "🚨 <b>paper_trader restart FAILED</b>")
-    return False
-
-
 def check_cdp() -> bool:
     """TradingView CDP on :9222. Can't auto-restart — needs MS Store app."""
     try:
@@ -277,10 +231,9 @@ def check_jarvis_bot() -> bool:
 def run_cycle() -> None:
     log.info("--- ORB watchdog cycle ---")
     results = {
-        "orb_main":     check_orb_main(),
-        "paper_trader": check_paper_trader(),
-        "cdp":          check_cdp(),
-        "jarvis_bot":   check_jarvis_bot(),
+        "orb_main":   check_orb_main(),
+        "cdp":        check_cdp(),
+        "jarvis_bot": check_jarvis_bot(),
     }
     if not all(results.values()):
         failed = [k for k, v in results.items() if not v]
