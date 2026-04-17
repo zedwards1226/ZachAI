@@ -288,14 +288,12 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 ## FREE APIs AVAILABLE
 - Open-Meteo (weather)
 - FRED (economic data)
-- Yahoo Finance (yfinance)
 - NewsAPI (free tier)
 - GDELT (global news)
 - Reddit API
 - Google Trends (pytrends)
 - GitHub API
 - CoinGecko (crypto)
-- eBay API (developer account)
 
 ## FOLDER STRUCTURE
 C:\ZachAI\
