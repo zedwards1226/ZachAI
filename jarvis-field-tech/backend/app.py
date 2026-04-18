@@ -16,7 +16,7 @@ load_dotenv(BASE.parent / ".env")
 
 # Lazy imports so /api/health works even if OAuth / API keys not set yet
 import drive_client
-import claude_client
+import ai_client
 import pdf_extractor
 
 STATIC_DIR = BASE / "static"
@@ -34,7 +34,7 @@ def health():
 @app.route("/api/greet")
 def greet():
     try:
-        return jsonify({"text": claude_client.greeting()})
+        return jsonify({"text": ai_client.greeting()})
     except Exception as exc:
         return jsonify({"text": f"Systems online, Zach. What are we troubleshooting? ({exc})"})
 
@@ -82,7 +82,7 @@ def ask():
             context = f"(Could not load doc: {exc})"
 
     try:
-        result = claude_client.ask(question, context=context, machine=machine, history=history)
+        result = ai_client.ask(question, context=context, machine=machine, history=history)
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

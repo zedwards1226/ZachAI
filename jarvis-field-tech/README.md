@@ -33,7 +33,7 @@ npm run build                     # outputs to ../backend/static/
 - **Backend** (`backend/app.py`): Flask on :5050 serving `/api/*` + static build
 - **Frontend** (`frontend/`): React + Vite PWA with arc-reactor HUD + Web Speech API
 - **Google Drive**: read-only OAuth, token cached in `backend/token.json`
-- **Claude**: Opus 4.7 for troubleshooting, Haiku 4.5 for doc-name lookups
+- **Gemini**: 2.0 Flash (free tier — 15 RPM, 1M tokens/day)
 
 ## Google Drive folder layout
 
@@ -56,7 +56,7 @@ Configure root folder ID in `.env` as `DRIVE_ROOT_FOLDER_ID`.
 ## Environment variables
 
 See `.env.example`. Required:
-- `ANTHROPIC_API_KEY` — Claude API key
+- `GEMINI_API_KEY` — Google Gemini API key (free — get at aistudio.google.com/apikey)
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — OAuth creds (from Google Cloud Console)
 - `DRIVE_ROOT_FOLDER_ID` — ID of your `Machine Docs` folder (from Drive URL)
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — optional, for error notifications

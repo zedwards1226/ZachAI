@@ -7,6 +7,7 @@ import MachineList from './components/MachineList.jsx'
 import PDFViewer from './components/PDFViewer.jsx'
 import { useSpeech } from './hooks/useSpeech.js'
 import { api, apiPost } from './hooks/useApi.js'
+import { findDoc, looksLikeOpenCommand } from './lib/docMatch.js'
 
 export default function App() {
   const speech = useSpeech()
@@ -38,6 +39,21 @@ export default function App() {
   const send = async (question) => {
     const history = messages.slice(-6)
     setMessages((m) => [...m, { role: 'user', content: question }])
+
+    // Intent: "open/show/pull up <drawing name>" → match a doc and display it
+    if (looksLikeOpenCommand(question)) {
+      const match = findDoc(question, machines)
+      if (match) {
+        const doc = { ...match.doc, machine: match.machine, _open: true }
+        setMachineName(match.machine)
+        setActiveDoc(doc)
+        const reply = `Pulling up ${match.doc.name} for ${match.machine}.`
+        setMessages((m) => [...m, { role: 'assistant', content: reply }])
+        speech.speak(reply)
+        return
+      }
+    }
+
     try {
       const r = await apiPost('/ask', {
         question,

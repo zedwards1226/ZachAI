@@ -13,7 +13,7 @@ Files NOT in this list should not exist. Follow ZachAI file hygiene rules.
 ## backend/
 - `app.py` — Flask server, port 5050, serves /api/* + static build
 - `drive_client.py` — Google Drive OAuth + folder listing + file download
-- `claude_client.py` — Claude API wrapper (Opus 4.7 + Haiku 4.5 routing)
+- `ai_client.py` — Gemini API wrapper (free tier — 2.0 Flash model)
 - `pdf_extractor.py` — PDF text extraction for Claude context
 - `machines.json` — auto-generated folder cache (gitignored)
 - `token.json` — OAuth token cache (gitignored)
@@ -35,6 +35,7 @@ Files NOT in this list should not exist. Follow ZachAI file hygiene rules.
 - `src/components/MachineList.jsx` — machine picker
 - `src/hooks/useSpeech.js` — Web Speech API TTS + STT
 - `src/hooks/useApi.js` — fetch wrapper
+- `src/lib/docMatch.js` — fuzzy-match voice/text → Drive doc for "open X" intent
 
 ## Startup scripts (live in C:\ZachAI\scripts\, referenced here)
 - `JarvisFieldTech.vbs` — starts `pythonw backend/app.py`
