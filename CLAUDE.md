@@ -244,8 +244,8 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 - Rotate any key that accidentally gets exposed immediately
 
 ## ACTIVE COMPANIES
-1. PrecisionFittedParts — eBay F150 dropship (building)
-2. WeatherAlpha — Kalshi weather trading bot (live, paper mode)
+1. WeatherAlpha — Kalshi weather trading bot (live, paper mode)
+2. ORB Trading System — NQ/MNQ futures scalp via TradingView webhooks (live, paper mode)
 
 ## WEATHERALPHA STATUS
 - Bot API: http://localhost:5000 (Flask, PID auto-started via KalshiBot.vbs)
