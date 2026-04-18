@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { motion } from 'framer-motion'
-import { ShieldAlert, Activity, Target, Layers, Database, Zap } from 'lucide-react'
+import { ShieldAlert, Activity, Target, Layers, Database, Zap, TrendingUp, MapPin, FileText } from 'lucide-react'
 
 import Header           from './components/Header'
 import EquityChart      from './components/EquityChart'
@@ -10,14 +9,13 @@ import CalibrationPanel from './components/CalibrationPanel'
 import GuardrailMeters  from './components/GuardrailMeters'
 import DecisionLog      from './components/DecisionLog'
 import PositionsPanel   from './components/PositionsPanel'
+import CityBoard        from './components/CityBoard'
 
-const SCAN_PERIOD = 60 // seconds
+const SCAN_PERIOD = 60
 
-// ── Poll hook ────────────────────────────────────────────────────────────────
 function useApi(path, interval = 5000) {
   const [data, setData]   = useState(null)
   const [error, setError] = useState(false)
-
   useEffect(() => {
     let alive = true
     const go = async () => {
@@ -31,59 +29,95 @@ function useApi(path, interval = 5000) {
     const id = setInterval(() => { if (alive) go() }, interval)
     return () => { alive = false; clearInterval(id) }
   }, [path, interval])
-
   return { data, error }
 }
 
-// ── Log entry factory ─────────────────────────────────────────────────────────
 let _lid = 0
-function mkEntry(type, msg) {
-  return { id: ++_lid, ts: new Date().toISOString(), type, msg }
-}
+const mkEntry = (type, msg) => ({ id: ++_lid, ts: new Date().toISOString(), type, msg })
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-function StatCard({ label, value, color, sub }) {
+function HeroCard({ label, value, sub, color, glow, big }) {
   return (
     <div
-      className="flex flex-col gap-0.5 px-3 py-2 rounded-lg shrink-0"
-      style={{ background: '#1a1a24', border: '1px solid #2a2a3a' }}
+      className="flex flex-col px-4 py-3 rounded-xl shrink-0 relative overflow-hidden"
+      style={{
+        background: 'linear-gradient(135deg, #13131d 0%, #1a1a26 100%)',
+        border: `1px solid ${glow ? `${color}55` : '#2a2a3a'}`,
+        boxShadow: glow ? `0 0 20px ${color}22, inset 0 0 20px ${color}08` : 'none',
+        minWidth: big ? 180 : 120,
+      }}
     >
-      <div className="text-[9px] font-semibold text-text-muted" style={{ letterSpacing: '0.06em' }}>
+      <div
+        className="text-[9px] font-bold tracking-[0.12em]"
+        style={{ color: '#64748b' }}
+      >
         {label}
       </div>
-      <div className="stat-value font-bold" style={{ fontSize: 16, color: color ?? '#f8fafc' }}>
+      <div
+        className="stat-value font-bold leading-none mt-1"
+        style={{ fontSize: big ? 28 : 20, color: color ?? '#f8fafc', letterSpacing: '-0.02em' }}
+      >
         {value}
       </div>
-      {sub && <div className="text-[9px] text-text-muted">{sub}</div>}
+      {sub && (
+        <div className="text-[10px] mt-1" style={{ color: '#94a3b8' }}>
+          {sub}
+        </div>
+      )}
     </div>
   )
 }
 
-// ── Main App ──────────────────────────────────────────────────────────────────
-export default function App() {
-  // API polling
-  const { data: health       } = useApi('/api/health',            10000)
-  const { data: statusData   } = useApi('/api/status',             8000)
-  const { data: summary      } = useApi('/api/summary',            8000)
-  const { data: guardrails   } = useApi('/api/guardrails',         5000)
-  const { data: equityCurve  } = useApi('/api/equity-curve',       8000)
-  const { data: tradesData   } = useApi('/api/trades/verified',    5000)
-  const { data: signalsData  } = useApi('/api/signals',            8000)
-  const { data: calibration  } = useApi('/api/calibration',       15000)
-  const { data: logData      } = useApi('/api/decision-log',       3000)
-  const { data: posData      } = useApi('/api/positions',          5000)
+function SectionHeader({ icon: Icon, title, right, color = '#818cf8' }) {
+  return (
+    <div className="flex items-center gap-2 mb-2 shrink-0">
+      <Icon size={13} style={{ color }} />
+      <span
+        className="text-[10px] font-bold tracking-[0.12em]"
+        style={{ color: '#94a3b8' }}
+      >
+        {title}
+      </span>
+      {right && <div className="ml-auto flex items-center gap-1.5">{right}</div>}
+    </div>
+  )
+}
 
-  // UI state
+function LiveBadge() {
+  return (
+    <>
+      <div
+        className="w-1.5 h-1.5 rounded-full animate-pulse-glow"
+        style={{ background: '#26de81' }}
+      />
+      <span className="text-[9px] font-bold tracking-wider" style={{ color: '#26de81' }}>
+        LIVE
+      </span>
+    </>
+  )
+}
+
+export default function App() {
+  const { data: health      } = useApi('/api/health',            10000)
+  const { data: statusData  } = useApi('/api/status',             8000)
+  const { data: summary     } = useApi('/api/summary',            6000)
+  const { data: today       } = useApi('/api/today',              6000)
+  const { data: byCity      } = useApi('/api/by-city',            8000)
+  const { data: guardrails  } = useApi('/api/guardrails',         5000)
+  const { data: equityCurve } = useApi('/api/equity-curve',       8000)
+  const { data: tradesData  } = useApi('/api/trades/verified',    5000)
+  const { data: signalsData } = useApi('/api/signals',            8000)
+  const { data: calibration } = useApi('/api/calibration',       15000)
+  const { data: logData     } = useApi('/api/decision-log',       3000)
+  const { data: posData     } = useApi('/api/positions',          5000)
+
   const [scanning,  setScanning]  = useState(false)
   const [countdown, setCountdown] = useState(SCAN_PERIOD)
   const [pingMs,    setPingMs]    = useState(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('trading')
 
-  // Local fallback log
   const [localLog, setLocalLog] = useState([
-    mkEntry('system', 'WeatherAlpha trading terminal initialised'),
-    mkEntry('connect', 'Connecting to Kalshi API...'),
+    mkEntry('system', 'WeatherAlpha War Room online'),
   ])
   const addLog = useCallback((type, msg) => {
     setLocalLog(prev => [mkEntry(type, msg), ...prev].slice(0, 200))
@@ -92,16 +126,10 @@ export default function App() {
   const nextScanRef = useRef(Date.now() + SCAN_PERIOD * 1000)
   const scanningRef = useRef(false)
 
-  // Merge backend + local log
   const logEntries = logData?.entries
-    ? logData.entries.map((e, i) => ({
-        ...e,
-        id: e.id ?? `be-${i}`,
-        ts: e.ts ?? e.timestamp,
-      }))
+    ? logData.entries.map((e, i) => ({ ...e, id: e.id ?? `be-${i}`, ts: e.ts ?? e.timestamp }))
     : localLog
 
-  // ── Scan ──────────────────────────────────────────────────────────────────────
   const runScan = useCallback(async () => {
     if (scanningRef.current) return
     scanningRef.current = true
@@ -135,7 +163,6 @@ export default function App() {
     }
   }, [addLog])
 
-  // ── Countdown + auto-scan ────────────────────────────────────────────────────
   useEffect(() => {
     const tick = setInterval(() => {
       const secs = Math.max(0, Math.round((nextScanRef.current - Date.now()) / 1000))
@@ -148,7 +175,6 @@ export default function App() {
     return () => clearInterval(tick)
   }, [runScan])
 
-  // ── Ping ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const measure = async () => {
       const t0 = performance.now()
@@ -163,7 +189,6 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
-  // ── Log Kalshi connection changes ────────────────────────────────────────────
   const prevConnRef = useRef(null)
   useEffect(() => {
     const connected = health?.kalshi_connected
@@ -173,26 +198,33 @@ export default function App() {
     if (connected === false) addLog('error',   'Kalshi API disconnected')
   }, [health, addLog])
 
-  // ── Derived values ────────────────────────────────────────────────────────────
-  const kalshiOk       = health?.kalshi_connected === true
-  const capital        = statusData?.capital_usd ?? 80
-  const pnlUsd         = summary?.total_pnl_usd ?? 0
-  const startingCapital = capital - pnlUsd
-  const winRate   = summary?.win_rate ?? null
-  const trades    = summary?.total_trades ?? 0
-  const openRisk  = summary?.open_risk_usd ?? 0
-  const pnlPos    = pnlUsd >= 0
+  // Derived
+  const kalshiOk        = health?.kalshi_connected === true
+  const capital         = statusData?.capital_usd ?? 80
+  const lifetimePnl     = summary?.total_pnl_usd ?? 0
+  const startingCapital = capital - lifetimePnl
+  const pctGain         = startingCapital > 0 ? (lifetimePnl / startingCapital) * 100 : 0
+  const todayPnl        = today?.pnl_today_usd ?? 0
+  const winRate         = summary?.win_rate ?? null
+  const wins            = summary?.wins ?? 0
+  const losses          = summary?.losses ?? 0
+  const trades          = summary?.total_trades ?? 0
+  const openRisk        = summary?.open_risk_usd ?? 0
+  const unrealized      = posData?.total_unrealized_pnl ?? 0
+  const lifePos         = lifetimePnl >= 0
+  const todayPos        = todayPnl >= 0
+  const unrealPos       = unrealized >= 0
 
   const tradesVerified = Array.isArray(tradesData) ? tradesData : []
-  const signals = Array.isArray(signalsData) ? signalsData : []
+  const signals        = Array.isArray(signalsData) ? signalsData : []
+  const cities         = Array.isArray(byCity) ? byCity : []
 
-  // ── Render ────────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#0f0f14' }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: '#0a0a10' }}>
 
-      {/* Header */}
       <Header
-        pnlUsd={pnlUsd}
+        lifetimePnl={lifetimePnl}
+        todayPnl={todayPnl}
         kalshiOk={kalshiOk}
         pingMs={pingMs}
         countdown={countdown}
@@ -202,114 +234,110 @@ export default function App() {
         onToggleMobile={() => setMobileMenuOpen(v => !v)}
       />
 
-      {/* Stats row */}
+      {/* HERO STRIP */}
       <div
-        className="flex items-center gap-2 px-3 py-2 border-b overflow-x-auto shrink-0"
-        style={{ borderColor: '#2a2a3a', scrollbarWidth: 'none' }}
+        className="flex items-stretch gap-2 px-3 py-3 border-b overflow-x-auto shrink-0"
+        style={{ borderColor: '#2a2a3a', scrollbarWidth: 'thin' }}
       >
-        <StatCard label="CAPITAL" value={`$${capital.toFixed(2)}`} />
-        <StatCard
-          label="TOTAL P&L"
-          value={`${pnlPos ? '+' : ''}$${pnlUsd.toFixed(2)}`}
-          color={pnlPos ? '#26de81' : '#ff5e7d'}
+        <HeroCard
+          label="BANKROLL"
+          value={`$${capital.toFixed(2)}`}
+          sub={`from $${startingCapital.toFixed(0)} start`}
+          color="#f8fafc"
+          big
         />
-        {winRate != null && (
-          <StatCard
-            label="WIN RATE"
-            value={`${(winRate * 100).toFixed(0)}%`}
-            color={winRate >= 0.5 ? '#26de81' : '#fbbf24'}
-          />
-        )}
-        <StatCard
-          label="TRADES"
-          value={trades}
-          color="#94a3b8"
-          sub={`${summary?.wins ?? 0}W / ${summary?.losses ?? 0}L`}
+        <HeroCard
+          label="LIFETIME P&L"
+          value={`${lifePos ? '+' : '−'}$${Math.abs(lifetimePnl).toFixed(2)}`}
+          sub={`${pctGain >= 0 ? '+' : ''}${pctGain.toFixed(1)}% return`}
+          color={lifePos ? '#26de81' : '#ff5e7d'}
+          glow
+          big
         />
-        {openRisk > 0 && (
-          <StatCard label="OPEN RISK" value={`$${openRisk.toFixed(0)}`} color="#fbbf24" />
-        )}
-        <StatCard
-          label="KALSHI"
+        <HeroCard
+          label="TODAY"
+          value={`${todayPos ? '+' : '−'}$${Math.abs(todayPnl).toFixed(2)}`}
+          sub={today ? `${today.trades_today} new · ${today.wins_today}W/${today.losses_today}L` : '—'}
+          color={todayPnl === 0 ? '#94a3b8' : (todayPos ? '#26de81' : '#ff5e7d')}
+        />
+        <HeroCard
+          label="UNREALIZED"
+          value={`${unrealPos ? '+' : '−'}$${Math.abs(unrealized).toFixed(2)}`}
+          sub={`${posData?.positions?.length ?? 0} open · $${openRisk.toFixed(0)} at risk`}
+          color={unrealized === 0 ? '#94a3b8' : (unrealPos ? '#26de81' : '#ff5e7d')}
+        />
+        <HeroCard
+          label="WIN RATE"
+          value={winRate != null ? `${(winRate * 100).toFixed(0)}%` : '—'}
+          sub={`${wins}W / ${losses}L · ${trades} total`}
+          color={winRate == null ? '#94a3b8' : winRate >= 0.5 ? '#26de81' : '#fbbf24'}
+        />
+        <HeroCard
+          label="KALSHI FEED"
           value={kalshiOk ? 'LIVE' : 'DOWN'}
+          sub={pingMs ? `${pingMs}ms roundtrip` : 'no ping'}
           color={kalshiOk ? '#26de81' : '#ff5e7d'}
-          sub={pingMs ? `${pingMs}ms` : undefined}
+          glow={kalshiOk}
         />
-
-        {/* SQLite badge */}
-        <div
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg shrink-0 ml-auto"
-          style={{ background: '#1a1a24', border: '1px solid #2a2a3a' }}
-        >
-          <Database size={11} style={{ color: '#818cf8' }} />
-          <span className="text-[9px] font-semibold" style={{ color: '#818cf8', letterSpacing: '0.04em' }}>
-            SQLite VERIFIED
-          </span>
-        </div>
       </div>
 
-      {/* 3-column layout */}
+      {/* MAIN GRID */}
       <div className="flex-1 min-h-0 overflow-hidden terminal-grid">
 
-        {/* ── LEFT COLUMN: Signals + Calibration + Guardrails ── */}
-        <div className={`flex flex-col gap-3 p-3 overflow-y-auto min-h-0 border-r ${activeTab !== 'signals' ? 'hidden md:flex' : 'flex'}`} style={{ borderColor: '#2a2a3a' }}>
+        {/* LEFT: Cities + Signals + Guardrails */}
+        <div
+          className={`flex flex-col gap-3 p-3 overflow-y-auto min-h-0 border-r ${activeTab !== 'signals' ? 'hidden md:flex' : 'flex'}`}
+          style={{ borderColor: '#2a2a3a' }}
+        >
+          <div className="card p-3">
+            <SectionHeader icon={MapPin} title="CITY SCOREBOARD" right={<LiveBadge />} />
+            <CityBoard cities={cities} />
+          </div>
 
-          {/* Signals */}
-          <div className="card p-3 flex flex-col" style={{ minHeight: 260 }}>
-            <div className="flex items-center gap-2 mb-2">
-              <Activity size={13} style={{ color: '#818cf8' }} />
-              <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
-                SIGNALS
-              </span>
-              <span className="text-[9px] stat-value text-text-muted ml-auto">
-                {signals.filter(s => s.actionable).length} live
-              </span>
-            </div>
+          <div className="card p-3 flex flex-col" style={{ minHeight: 220 }}>
+            <SectionHeader
+              icon={Activity}
+              title="LIVE SIGNALS"
+              right={<span className="text-[10px] font-semibold" style={{ color: '#818cf8' }}>
+                {signals.filter(s => s.actionable).length} actionable
+              </span>}
+            />
             <div className="flex-1 min-h-0">
               <SignalsTable signals={signals} />
             </div>
           </div>
 
-          {/* Calibration */}
           <div className="card p-3">
-            <CalibrationPanel calibration={calibration} />
+            <SectionHeader icon={ShieldAlert} title="RISK GUARDRAILS" />
+            <GuardrailMeters guardrails={guardrails} />
           </div>
 
-          {/* Guardrails */}
           <div className="card p-3">
-            <div className="flex items-center gap-2 mb-3">
-              <ShieldAlert size={13} style={{ color: '#818cf8' }} />
-              <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
-                RISK GUARDRAILS
-              </span>
-            </div>
-            <GuardrailMeters guardrails={guardrails} />
+            <SectionHeader icon={Target} title="MODEL CALIBRATION" />
+            <CalibrationPanel calibration={calibration} />
           </div>
         </div>
 
-        {/* ── CENTER COLUMN: Positions + Equity Chart + Trades ── */}
+        {/* CENTER: Positions + Chart + Trades */}
         <div className={`flex flex-col gap-3 p-3 min-h-0 overflow-y-auto ${activeTab !== 'trading' ? 'hidden md:flex' : 'flex'}`}>
 
-          {/* Live Positions */}
-          <div className="card flex flex-col shrink-0" style={{ minHeight: 200, maxHeight: 360 }}>
-            <PositionsPanel
-              positions={posData?.positions}
-              totalUnrealizedPnl={posData?.total_unrealized_pnl}
-            />
-          </div>
-
-          {/* Equity Chart */}
-          <div className="card p-4 shrink-0" style={{ height: 240 }}>
-            <div className="flex items-center justify-between mb-2">
+          <div className="card p-4 shrink-0" style={{ height: 280 }}>
+            <div className="flex items-center justify-between mb-2 shrink-0">
               <div className="flex items-center gap-2">
-                <Layers size={13} style={{ color: '#818cf8' }} />
-                <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
+                <TrendingUp size={13} style={{ color: '#26de81' }} />
+                <span className="text-[10px] font-bold tracking-[0.12em]" style={{ color: '#94a3b8' }}>
                   EQUITY CURVE
                 </span>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="stat-value text-sm font-bold" style={{ color: pnlPos ? '#26de81' : '#ff5e7d' }}>
-                  {pnlPos ? '+' : ''}${pnlUsd.toFixed(2)}
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-semibold tracking-wider" style={{ color: '#64748b' }}>
+                  FROM ${startingCapital.toFixed(0)}
+                </span>
+                <span
+                  className="stat-value text-lg font-bold"
+                  style={{ color: lifePos ? '#26de81' : '#ff5e7d' }}
+                >
+                  {lifePos ? '+' : '−'}${Math.abs(lifetimePnl).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -318,39 +346,42 @@ export default function App() {
             </div>
           </div>
 
-          {/* Trades Table */}
+          <div className="card flex flex-col shrink-0" style={{ minHeight: 240, maxHeight: 400 }}>
+            <PositionsPanel
+              positions={posData?.positions}
+              totalUnrealizedPnl={posData?.total_unrealized_pnl}
+            />
+          </div>
+
           <div className="card p-4 shrink-0" style={{ minHeight: 200 }}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Database size={13} style={{ color: '#818cf8' }} />
-                <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
-                  TRADE LOG
-                </span>
-                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded"
-                  style={{ background: 'rgba(129,140,248,0.12)', color: '#818cf8', border: '1px solid rgba(129,140,248,0.25)' }}>
-                  SQLite Backed
-                </span>
-              </div>
-              <span className="stat-value text-[10px] text-text-muted">
-                {tradesVerified.length} records
-              </span>
-            </div>
+            <SectionHeader
+              icon={Database}
+              title="TRADE LOG"
+              right={
+                <>
+                  <span
+                    className="text-[9px] font-semibold px-1.5 py-0.5 rounded"
+                    style={{ background: 'rgba(129,140,248,0.12)', color: '#818cf8', border: '1px solid rgba(129,140,248,0.25)' }}
+                  >
+                    SQLite Verified
+                  </span>
+                  <span className="text-[9px]" style={{ color: '#64748b' }}>
+                    {tradesVerified.length} records
+                  </span>
+                </>
+              }
+            />
             <TradesTable trades={tradesVerified} />
           </div>
         </div>
 
-        {/* ── RIGHT COLUMN: Decision Log ── */}
-        <div className={`flex flex-col p-3 min-h-0 overflow-hidden border-l ${activeTab !== 'log' ? 'hidden md:flex' : 'flex'}`} style={{ borderColor: '#2a2a3a' }}>
+        {/* RIGHT: Decision Log */}
+        <div
+          className={`flex flex-col p-3 min-h-0 overflow-hidden border-l ${activeTab !== 'log' ? 'hidden md:flex' : 'flex'}`}
+          style={{ borderColor: '#2a2a3a' }}
+        >
           <div className="card p-3 flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between mb-2 shrink-0">
-              <span className="text-[10px] font-semibold text-text-muted" style={{ letterSpacing: '0.08em' }}>
-                DECISION LOG
-              </span>
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full animate-pulse-glow" style={{ background: '#26de81' }} />
-                <span className="text-[10px] font-medium" style={{ color: '#26de81' }}>LIVE</span>
-              </div>
-            </div>
+            <SectionHeader icon={FileText} title="DECISION FEED" right={<LiveBadge />} />
             <div className="flex-1 min-h-0">
               <DecisionLog entries={logEntries} />
             </div>
@@ -361,12 +392,12 @@ export default function App() {
       {/* Mobile bottom tab bar */}
       <div
         className="md:hidden flex items-center border-t shrink-0"
-        style={{ borderColor: '#2a2a3a', background: '#0f0f14' }}
+        style={{ borderColor: '#2a2a3a', background: '#0a0a10' }}
       >
         {[
-          { id: 'signals', label: 'SIGNALS',  Icon: Activity },
-          { id: 'trading', label: 'TRADING',  Icon: Target   },
-          { id: 'log',     label: 'LOG',       Icon: Layers   },
+          { id: 'signals', label: 'CITIES',  Icon: MapPin   },
+          { id: 'trading', label: 'TRADING', Icon: Target   },
+          { id: 'log',     label: 'FEED',    Icon: FileText },
         ].map(({ id, label, Icon }) => (
           <button
             key={id}
@@ -403,12 +434,11 @@ export default function App() {
         </button>
       </div>
 
-      {/* Footer */}
       <footer
-        className="hidden md:flex items-center justify-between px-4 py-1.5 border-t shrink-0 text-[10px] text-text-muted"
-        style={{ borderColor: '#2a2a3a', background: '#0f0f14' }}
+        className="hidden md:flex items-center justify-between px-4 py-1.5 border-t shrink-0 text-[10px]"
+        style={{ borderColor: '#2a2a3a', background: '#0a0a10', color: '#64748b' }}
       >
-        <span>WeatherAlpha Trading Terminal | Kalshi Weather Markets | Paper Mode</span>
+        <span>WeatherAlpha War Room · Kalshi Weather Markets · Paper Mode</span>
         <span className="stat-value">{new Date().toLocaleString()}</span>
         <div className="flex items-center gap-1.5">
           <div

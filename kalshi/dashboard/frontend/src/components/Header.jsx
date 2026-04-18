@@ -1,7 +1,8 @@
 import { Menu, X, Zap, Wifi, WifiOff } from 'lucide-react'
 
 export default function Header({
-  pnlUsd,
+  lifetimePnl,
+  todayPnl,
   kalshiOk,
   pingMs,
   countdown,
@@ -10,7 +11,8 @@ export default function Header({
   mobileMenuOpen,
   onToggleMobile,
 }) {
-  const pnlPos = pnlUsd >= 0
+  const lifePos = (lifetimePnl ?? 0) >= 0
+  const todayPos = (todayPnl ?? 0) >= 0
   const pingColor = !pingMs
     ? '#ff5e7d'
     : pingMs < 200
@@ -22,9 +24,8 @@ export default function Header({
   return (
     <header
       className="flex items-center justify-between px-4 py-3 border-b shrink-0"
-      style={{ background: '#0f0f14', borderColor: '#2a2a3a' }}
+      style={{ background: '#0a0a10', borderColor: '#2a2a3a' }}
     >
-      {/* Left: logo + paper badge */}
       <div className="flex items-center gap-3">
         <button
           className="md:hidden text-text-secondary hover:text-text-primary mr-1"
@@ -34,12 +35,15 @@ export default function Header({
           {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
         <div className="flex items-center gap-2">
-          <Zap size={18} className="text-accent" />
+          <Zap size={20} style={{ color: '#818cf8' }} />
           <span
-            className="font-bold text-text-primary tracking-tight"
-            style={{ fontFamily: 'Inter', fontSize: 16, letterSpacing: '-0.02em' }}
+            className="font-bold tracking-tight"
+            style={{ fontFamily: 'Inter', fontSize: 18, letterSpacing: '-0.02em', color: '#f8fafc' }}
           >
             WeatherAlpha
+          </span>
+          <span className="text-[10px] font-medium" style={{ color: '#64748b' }}>
+            WAR ROOM
           </span>
         </div>
         <span
@@ -55,10 +59,9 @@ export default function Header({
         </span>
       </div>
 
-      {/* Center: countdown + scan button */}
-      <div className="hidden md:flex items-center gap-3">
+      <div className="hidden md:flex items-center gap-4">
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-text-muted font-medium">NEXT SCAN</span>
+          <span className="text-[10px] text-text-muted font-medium tracking-wider">NEXT SCAN</span>
           <span
             className="stat-value font-bold text-lg"
             style={{
@@ -76,19 +79,15 @@ export default function Header({
           disabled={scanning}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200"
           style={{
-            background: scanning
-              ? 'rgba(129, 140, 248, 0.08)'
-              : 'rgba(129, 140, 248, 0.15)',
+            background: scanning ? 'rgba(129,140,248,0.08)' : 'rgba(129,140,248,0.15)',
             color: scanning ? '#475569' : '#818cf8',
-            border: `1px solid ${scanning ? '#2a2a3a' : 'rgba(129, 140, 248, 0.35)'}`,
+            border: `1px solid ${scanning ? '#2a2a3a' : 'rgba(129,140,248,0.35)'}`,
             cursor: scanning ? 'not-allowed' : 'pointer',
           }}
         >
           {scanning ? (
             <>
-              <span
-                className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse-glow"
-              />
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse-glow" />
               SCANNING
             </>
           ) : (
@@ -97,15 +96,23 @@ export default function Header({
         </button>
       </div>
 
-      {/* Right: P&L + Kalshi status + ping */}
-      <div className="flex items-center gap-4">
-        <div className="hidden sm:block text-right">
-          <div className="text-[10px] text-text-muted font-medium mb-0.5">TODAY P&amp;L</div>
+      <div className="flex items-center gap-5">
+        <div className="hidden sm:block text-right leading-tight">
+          <div className="text-[9px] text-text-muted font-semibold tracking-widest">TODAY</div>
           <div
-            className="stat-value font-bold text-sm"
-            style={{ color: pnlPos ? '#26de81' : '#ff5e7d' }}
+            className="stat-value font-bold text-[13px]"
+            style={{ color: todayPos ? '#26de81' : '#ff5e7d' }}
           >
-            {pnlPos ? '+' : ''}${pnlUsd.toFixed(2)}
+            {todayPos ? '+' : ''}${Math.abs(todayPnl ?? 0).toFixed(2)}
+          </div>
+        </div>
+        <div className="hidden sm:block text-right leading-tight">
+          <div className="text-[9px] text-text-muted font-semibold tracking-widest">LIFETIME</div>
+          <div
+            className="stat-value font-bold text-[13px]"
+            style={{ color: lifePos ? '#26de81' : '#ff5e7d' }}
+          >
+            {lifePos ? '+' : ''}${Math.abs(lifetimePnl ?? 0).toFixed(2)}
           </div>
         </div>
 

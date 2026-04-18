@@ -25,7 +25,8 @@ from config import FLASK_HOST, FLASK_PORT, PAPER_MODE, KALSHI_DEMO
 from database import (
     init_db, get_trades, get_latest_forecasts, get_pnl_history,
     get_summary, get_guardrail_state, log_decision, get_decision_log,
-    get_signals, get_equity_curve, get_calibration, get_trades_with_verification
+    get_signals, get_equity_curve, get_calibration, get_trades_with_verification,
+    get_today_stats, get_city_performance,
 )
 from guardrails import guardrail_status, set_window_override, get_window_override
 from scheduler import start_scheduler, stop_scheduler, trigger_scan_now
@@ -103,6 +104,16 @@ def guardrails_endpoint():
 @app.route("/api/summary")
 def summary():
     return jsonify(get_summary())
+
+
+@app.route("/api/today")
+def today_stats():
+    return jsonify(get_today_stats())
+
+
+@app.route("/api/by-city")
+def by_city():
+    return jsonify(get_city_performance())
 
 
 @app.route("/api/scan", methods=["POST"])

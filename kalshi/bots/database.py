@@ -382,8 +382,51 @@ def get_summary() -> dict:
         "open_trades": open_c,
         "open_risk_usd": round(open_r, 2),
         "total_pnl_usd": round(pnl, 2),
-        "win_rate": round(wins / total, 3) if total else 0.0,
+        # Win rate computed only over resolved trades (wins + losses).
+        "win_rate": round(wins / (wins + losses), 3) if (wins + losses) else 0.0,
     }
+
+
+def get_today_stats() -> dict:
+    """Today's activity: realized PnL, new trades, resolved wins/losses."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN status='won'  THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(pnl_usd),0)
+               FROM trades WHERE date(timestamp)=date('now','localtime')"""
+        ).fetchone()
+    return {
+        "trades_today": row[0],
+        "wins_today": row[1],
+        "losses_today": row[2],
+        "pnl_today_usd": round(row[3], 2),
+    }
+
+
+def get_city_performance() -> list:
+    """Lifetime performance per city — drives the city scoreboard."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT city,
+                      COUNT(*),
+                      SUM(CASE WHEN status='won'  THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),
+                      COALESCE(SUM(pnl_usd),0)
+                 FROM trades GROUP BY city ORDER BY 6 DESC"""
+        ).fetchall()
+    out = []
+    for r in rows:
+        wins, losses = r[2], r[3]
+        out.append({
+            "city": r[0], "total": r[1], "wins": wins, "losses": losses,
+            "open": r[4], "pnl_usd": round(r[5], 2),
+            "win_rate": round(wins/(wins+losses), 3) if (wins+losses) else 0.0,
+        })
+    return out
 
 
 # ── Signals (calibration tracking) ──────────────────────────────────────────
