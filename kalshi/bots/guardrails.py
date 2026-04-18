@@ -103,12 +103,20 @@ def check_bet_size(stake: float) -> tuple[bool, str]:
     return True, "ok"
 
 
-def check_market_disagreement(our_prob_yes: float, yes_price_cents: int) -> tuple[bool, str]:
+def check_market_disagreement(our_prob_yes: float, yes_price_cents: int,
+                              strike_type: str | None = None) -> tuple[bool, str]:
     """
     Skip only when the MARKET prices YES much higher than our model (gap > 30c).
     This blocks NO bets where the market is telling us temps are rising faster than GFS shows.
     When our model is MORE bullish than the market, that's our edge — don't block it.
+
+    NOTE: skip this check entirely for `between` markets. Narrow temp bands have
+    mathematically tiny YES prob (e.g. 3%) regardless of market pricing, so the
+    gap will ALWAYS exceed 30¢ and every between-market NO bet would be blocked.
+    This check was designed for threshold (`greater`) markets.
     """
+    if strike_type == "between":
+        return True, "ok"
     kalshi_implied = yes_price_cents / 100.0
     gap = kalshi_implied - our_prob_yes  # positive = market thinks YES more likely than we do
     if gap > 0.30:
@@ -138,7 +146,8 @@ def check_halt(state: dict) -> tuple[bool, str]:
 def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
                paper: bool = True, our_prob_yes: float | None = None,
                yes_price_cents: int | None = None,
-               ensemble_spread_f: float | None = None) -> tuple[bool, list[str]]:
+               ensemble_spread_f: float | None = None,
+               strike_type: str | None = None) -> tuple[bool, list[str]]:
     """
     Run all guardrail checks.
     Returns (all_passed: bool, failed_reasons: list[str])
@@ -161,7 +170,7 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
     ]
 
     if our_prob_yes is not None and yes_price_cents is not None:
-        checks.append(check_market_disagreement(our_prob_yes, yes_price_cents))
+        checks.append(check_market_disagreement(our_prob_yes, yes_price_cents, strike_type))
     if ensemble_spread_f is not None:
         checks.append(check_ensemble_spread(ensemble_spread_f))
 

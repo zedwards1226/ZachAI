@@ -258,14 +258,22 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 - VBS auto-start: scripts/ORBAgents.vbs → git pull → python main.py
 - Telegram bot: C:\ZachAI\telegram-bridge\bot.py (auto-start via Jarvis_Bot.vbs)
 - Paper mode: ON (NEVER change without explicit approval)
-- Agents schedule (all ET):
+- Agents schedule (all ET, source of truth: trading/main.py):
+  - preflight: 7:00 AM (stack verification)
+  - memory_morning: 7:30 AM (pre-market refresh)
   - sentinel: 8:00 AM initial + every 60s poll
   - structure: 8:45 AM (pulls daily levels, VIX, ATR)
   - briefing: 8:50 AM (sends Telegram morning report)
+  - briefing_heartbeat: 8:55 AM (Telegram ping confirming morning agents ran)
+  - combiner_heartbeat: 9:31 AM (Telegram ping at market open)
   - sweep: every 15s during 9:00-11:00 (closed bars only, batched alerts)
   - combiner: every 15s during 9:30-15:00 (ORB scoring + trade execution)
   - trade_monitor: every 30s (stop/TP reconciliation, time exits)
   - memory: 6:00 PM daily
+  - journal_backup: 6:00 AM daily (copy journal.db, keep 30 days)
+  - journal_weekly: Sunday 7:00 AM (weekly report)
+- Scheduler: misfire_grace_time=3600 — jobs run up to 1h late instead of silently skipping on clock drift
+- Startup: sends "ORB online @ <ET>" Telegram ping; if you reboot and don't see it, boot failed
 - Order placement: single CDP evaluate() call, ~750ms place / ~375ms close
 - Economic calendar: hard-coded 2026 BLS/Fed dates (CPI/NFP/FOMC) — no scraper dependency
 

@@ -206,7 +206,29 @@ async def run_journal_backup():
             for old_backup in backups[:-30]:
                 old_backup.unlink()
     except Exception as e:
-        logger.error("Journal backup failed: %s", e)
+        logger.error("Journal backup failed: %s", e, exc_info=True)
+
+
+async def run_briefing_heartbeat():
+    """Post-briefing Telegram ping so Zach knows morning agents ran."""
+    try:
+        if not is_trading_day():
+            return
+        now_et = datetime.now(ET)
+        await telegram.send(f"ORB morning agents ran @ {now_et.strftime('%I:%M %p ET')}")
+    except Exception:
+        logger.exception("Briefing heartbeat failed")
+
+
+async def run_combiner_heartbeat():
+    """Market-open Telegram ping confirming combiner is armed."""
+    try:
+        if not is_trading_day():
+            return
+        now_et = datetime.now(ET)
+        await telegram.send(f"ORB combiner armed @ {now_et.strftime('%I:%M %p ET')} — scanning for setups")
+    except Exception:
+        logger.exception("Combiner heartbeat failed")
 
 
 async def main():
@@ -218,8 +240,23 @@ async def main():
 
     logger.info("=" * 60)
     logger.info("ORB Multi-Agent Trading System starting (PID %d)", os.getpid())
-    logger.info("Timezone: %s", TIMEZONE)
+    now_et = datetime.now(ET)
+    now_local = datetime.now()
+    logger.info("TZ target=%s | ET now=%s | System now=%s | offset=%s",
+                TIMEZONE,
+                now_et.strftime("%Y-%m-%d %H:%M:%S %Z%z"),
+                now_local.strftime("%Y-%m-%d %H:%M:%S"),
+                now_et.utcoffset())
     logger.info("=" * 60)
+
+    # Startup Telegram ping — if this never arrives, boot failed silently
+    try:
+        await telegram.send(
+            f"ORB online @ {now_et.strftime('%Y-%m-%d %I:%M %p ET')} "
+            f"(PID {os.getpid()})"
+        )
+    except Exception:
+        logger.exception("Startup Telegram ping failed")
 
     # Initialize
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -229,8 +266,13 @@ async def main():
     from services.tv_trader import load_and_reconcile_orders
     await load_and_reconcile_orders()
 
-    # Create scheduler
-    scheduler = AsyncIOScheduler(timezone=TIMEZONE)
+    # Create scheduler — misfire_grace_time=3600 lets jobs run up to 1h late
+    # instead of silently skipping on any clock drift. Without this a 1-second
+    # hiccup = permanently missed morning briefing.
+    scheduler = AsyncIOScheduler(
+        timezone=TIMEZONE,
+        job_defaults={"misfire_grace_time": 3600, "coalesce": True},
+    )
 
     # ─── Scheduled Agents ───
 
@@ -257,6 +299,14 @@ async def main():
     # Morning briefing: 8:50 AM ET
     scheduler.add_job(run_briefing, "cron", hour=8, minute=50,
                       id="briefing", name="Morning Briefing")
+
+    # Heartbeat: 8:55 AM ET — confirms briefing/structure/sentinel fired
+    scheduler.add_job(run_briefing_heartbeat, "cron", hour=8, minute=55,
+                      id="briefing_heartbeat", name="Briefing Heartbeat")
+
+    # Heartbeat: 9:31 AM ET — confirms combiner is active at market open
+    scheduler.add_job(run_combiner_heartbeat, "cron", hour=9, minute=31,
+                      id="combiner_heartbeat", name="Combiner Heartbeat")
 
     # ─── Interval Polls (check clock internally) ───
     # max_instances=1 + coalesce=True prevents overlapping runs if a poll
