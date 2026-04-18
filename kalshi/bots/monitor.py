@@ -187,26 +187,30 @@ def check_trade_consistency():
 
 
 def check_positions_pnl():
-    """Check for extreme unrealized losses."""
+    """Check for extreme unrealized losses. Per-trade price blips silenced —
+    only fire when combined open book is materially underwater."""
     try:
         r = requests.get(f"{API_BASE}/api/positions", timeout=10)
         if r.status_code != 200:
             return
         data = r.json()
         total_unrealized = data.get("total_unrealized_pnl", 0)
-        if total_unrealized < -10:
-            alert("unrealized_loss", f"Large unrealized loss: ${total_unrealized:.2f}")
+        if total_unrealized < -25:
+            # Include per-position breakdown so the alert is actionable
+            positions = data.get("positions", [])
+            losers = sorted(
+                [p for p in positions if (p.get("unrealized_pnl") or 0) < 0],
+                key=lambda p: p.get("unrealized_pnl") or 0,
+            )[:3]
+            breakdown = "; ".join(
+                f"{p.get('city')} {p.get('side')} ${p.get('unrealized_pnl', 0):.2f}"
+                for p in losers
+            )
+            alert("unrealized_loss",
+                  f"Open book down ${total_unrealized:.2f} | worst: {breakdown}")
         else:
             clear_alert("unrealized_loss")
-
-        # Check for stale prices
-        positions = data.get("positions", [])
-        stale = [p for p in positions if p.get("current_price") is None]
-        if stale:
-            tickers = [p["market_id"] for p in stale]
-            alert("stale_prices", f"{len(stale)} positions with no live price: {', '.join(tickers[:3])}")
-        else:
-            clear_alert("stale_prices")
+        # stale_prices alert removed — 0¢/None on a resolving T-market is normal.
     except Exception as e:
         alert("pnl_check_error", f"P&L check failed: {e}")
 
@@ -270,6 +274,38 @@ def build_status_summary() -> str:
     return "\n".join(lines)
 
 
+def send_daily_digest(when: str = "eod"):
+    """Send a single Telegram summary. `when` = 'morning' or 'eod'.
+    Replaces per-event spam with one consolidated message."""
+    try:
+        health = requests.get(f"{API_BASE}/api/health", timeout=5).json()
+        pos    = requests.get(f"{API_BASE}/api/positions", timeout=5).json()
+        summ   = requests.get(f"{API_BASE}/api/summary", timeout=5).json()
+    except Exception as e:
+        send_telegram(f"<b>WeatherAlpha Digest — API unreachable</b>\n{e}")
+        return
+
+    header = "Morning Brief" if when == "morning" else "End-of-Day"
+    lines = [f"<b>WeatherAlpha — {header}</b>"]
+    lines.append(f"Mode: {'PAPER' if health.get('paper_mode') else 'LIVE'} | "
+                 f"Kalshi: {'OK' if health.get('kalshi_connected') else 'DOWN'}")
+    lines.append(f"Lifetime P&L: ${summ.get('total_pnl_usd', 0):+.2f} "
+                 f"({summ.get('wins', 0)}W/{summ.get('losses', 0)}L)")
+    lines.append(f"Open: {len(pos.get('positions', []))} positions | "
+                 f"Unrealized: ${pos.get('total_unrealized_pnl', 0):+.2f}")
+    if pos.get("positions"):
+        lines.append("")
+        for p in pos["positions"]:
+            upnl = p.get("unrealized_pnl")
+            upnl_s = f"${upnl:+.2f}" if upnl is not None else "pending"
+            lines.append(
+                f"• {p.get('city')} {p.get('side')} "
+                f"entry {p.get('price_cents')}c → now {p.get('current_price')}c | {upnl_s}"
+            )
+    send_telegram("\n".join(lines))
+    log.info("Digest sent (%s)", when)
+
+
 def run_all_checks():
     """Run all health checks in sequence."""
     log.info("--- Running health checks ---")
@@ -293,12 +329,9 @@ def main():
     log.info("Telegram: %s", "configured" if TELEGRAM_TOKEN else "NOT configured")
     log.info("=" * 50)
 
-    # Startup notification with status summary
-    summary = build_status_summary()
-    send_telegram(
-        f"<b>WeatherAlpha Monitor Started</b>\n"
-        f"Checking every {CHECK_INTERVAL}s\n\n{summary}"
-    )
+    # Startup ping silenced — morning digest (8 AM ET) covers daily status.
+    # Operational alerts (api_down, halted, dupes, high_risk) still fire real-time.
+    log.info("Startup summary (log only):\n%s", build_status_summary())
 
     while True:
         try:

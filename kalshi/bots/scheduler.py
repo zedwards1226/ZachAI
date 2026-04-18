@@ -7,12 +7,14 @@ APScheduler jobs for WeatherAlpha.
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 import pytz
 
 from config import SCAN_INTERVAL_MINUTES, TIMEZONE
 from trader import scan_and_trade, resolve_expired_trades
 from database import snapshot_pnl, get_summary, get_guardrail_state
 from config import STARTING_CAPITAL
+from monitor import send_daily_digest
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +45,20 @@ def _snapshot_job():
         log.error("Snapshot job failed: %s", exc, exc_info=True)
 
 
+def _morning_digest_job():
+    try:
+        send_daily_digest("morning")
+    except Exception as exc:
+        log.error("Morning digest failed: %s", exc, exc_info=True)
+
+
+def _eod_digest_job():
+    try:
+        send_daily_digest("eod")
+    except Exception as exc:
+        log.error("EOD digest failed: %s", exc, exc_info=True)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     tz = pytz.timezone(TIMEZONE)
@@ -67,6 +83,20 @@ def start_scheduler() -> BackgroundScheduler:
         trigger=IntervalTrigger(minutes=60, timezone=tz),
         id="snapshot",
         name="P&L snapshot",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _morning_digest_job,
+        trigger=CronTrigger(hour=8, minute=0, timezone=tz),
+        id="digest_morning",
+        name="Morning digest (8 AM ET)",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _eod_digest_job,
+        trigger=CronTrigger(hour=18, minute=0, timezone=tz),
+        id="digest_eod",
+        name="EOD digest (6 PM ET)",
         replace_existing=True,
     )
 
