@@ -37,9 +37,9 @@ ORB_ATR_MIN_PCT = 0.30
 ORB_ATR_MAX_PCT = 0.60
 ATR_LOOKBACK_DAYS = 14
 
-# Scoring Thresholds (raised +2 to compensate for news/truth freebie points)
-SCORE_FULL_SIZE = 10
-SCORE_HALF_SIZE = 8
+# Scoring Thresholds
+SCORE_FULL_SIZE = 8
+SCORE_HALF_SIZE = 6
 MAX_TRADES_PER_SESSION = 3
 
 # Stop/Target (Finding 2: extension-based, 7x Sharpe improvement)

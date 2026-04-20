@@ -206,6 +206,16 @@ async def poll() -> Optional[dict]:
 
     # --- Phase 3: Score the trade ---
     states = read_all_states()
+    structure = states.get("structure", {})
+    logger.info(
+        "SCORING INPUTS: price_location=%s rvol=%s vwap=%s vix=%s bias=%s nearest_level=%s",
+        structure.get("price_location"),
+        structure.get("rvol"),
+        structure.get("vwap"),
+        structure.get("vix"),
+        states.get("memory", {}).get("morning_bias"),
+        structure.get("nearest_level", {}).get("name"),
+    )
     breakdown = _score_trade(breakout_direction, is_second_break, states, _orb, price)
 
     # --- Hard blocks ---
@@ -372,7 +382,7 @@ def _score_trade(direction: Direction, is_second_break: bool,
         b.open_air = 1
         b.details["open_air"] = "No major level within 20 pts"
     elif price_loc == "APPROACHING_WALL":
-        b.approaching_wall = -2
+        b.approaching_wall = -1
         b.details["approaching_wall"] = f"Near {structure.get('nearest_level', {}).get('name', '?')}"
     elif price_loc == "AT_LEVEL":
         b.at_level = -5
