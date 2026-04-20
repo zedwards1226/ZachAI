@@ -100,12 +100,16 @@ def detect_order_block(df: pd.DataFrame, displacement_atr_mult: float = 1.5,
     Bullish OB: last down-close candle before a strong up-move (displacement).
     Bearish OB: last up-close candle before a strong down-move.
 
-    Displacement = next-bar range > displacement_atr_mult * ATR.
+    Displacement = current-bar range > displacement_atr_mult * ATR.
+
+    Lookahead-safe: an OB is CONFIRMED on the displacement bar (the bar AFTER
+    the OB candle). Therefore bull_ob.iloc[i]==True means "bar i-1 was an OB,
+    confirmed by displacement on bar i." bull_ob_low/high.iloc[i] = low/high
+    of bar i-1. Use these at bar i without peeking forward.
 
     Returns DataFrame indexed like df with columns:
         bull_ob (bool), bull_ob_low, bull_ob_high
         bear_ob (bool), bear_ob_low, bear_ob_high
-    Where True is on the OB candle itself.
     """
     o, h, l, c = df["open"], df["high"], df["low"], df["close"]
     tr = pd.concat([
@@ -115,23 +119,23 @@ def detect_order_block(df: pd.DataFrame, displacement_atr_mult: float = 1.5,
     ], axis=1).max(axis=1)
     atr = tr.rolling(atr_period, min_periods=1).mean()
 
-    next_range = (h.shift(-1) - l.shift(-1))
-    displaced = next_range > (displacement_atr_mult * atr)
-    next_up = c.shift(-1) > o.shift(-1)
-    next_down = c.shift(-1) < o.shift(-1)
-    down_close = c < o
-    up_close = c > o
+    cur_range = h - l
+    displaced = cur_range > (displacement_atr_mult * atr)
+    cur_up = c > o
+    cur_down = c < o
+    prev_down_close = c.shift(1) < o.shift(1)
+    prev_up_close   = c.shift(1) > o.shift(1)
 
-    bull_ob = down_close & displaced & next_up
-    bear_ob = up_close & displaced & next_down
+    bull_ob = prev_down_close & displaced & cur_up
+    bear_ob = prev_up_close   & displaced & cur_down
 
     out = pd.DataFrame({
         "bull_ob": bull_ob.fillna(False),
-        "bull_ob_low": l.where(bull_ob),
-        "bull_ob_high": h.where(bull_ob),
+        "bull_ob_low":  l.shift(1).where(bull_ob),
+        "bull_ob_high": h.shift(1).where(bull_ob),
         "bear_ob": bear_ob.fillna(False),
-        "bear_ob_low": l.where(bear_ob),
-        "bear_ob_high": h.where(bear_ob),
+        "bear_ob_low":  l.shift(1).where(bear_ob),
+        "bear_ob_high": h.shift(1).where(bear_ob),
     }, index=df.index)
     return out
 
