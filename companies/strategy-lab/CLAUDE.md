@@ -57,7 +57,7 @@ and replace `forge/data_loader.py:load_mnq()` with the appropriate loader.
 ## Folder layout
 
 ```
-companies/ict-research/    (folder name kept for git history; project is general now)
+companies/strategy-lab/
 ├── CLAUDE.md              this file
 ├── ACTIVE_FILES.md        manifest
 ├── README.md              human-facing overview
