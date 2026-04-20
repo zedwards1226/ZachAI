@@ -13,10 +13,15 @@ Every file in this project must be listed here. If it's not listed, delete it.
 - `extractor.py` — Agent 3: Gemini Flash converts tagged transcripts → mechanizable rules JSON
 
 ## forge/ (Phase 2 — rules → backtest)
-- *(empty — pending Phase 2 build)*
+- `__init__.py` — package marker
+- `primitives.py` — ICT building blocks (FVG, OB, MSS, swing points, sessions, PDH/PDL)
 
-## forge/strategies/ (one file per codified ICT setup)
-- *(empty — Coder agent generates these)*
+## scout/ (cont.)
+- `coder.py` — Agent 4: Gemini translates rules JSON → strategy .py with smoke-test gate
+
+## forge/strategies/ (one file per codified ICT setup, generated)
+- `order_block__nQfHZ2DEJ8c.py` — OB-based MSS entry (from Mentorship Ep 3, conf 0.95)
+- `premium_discount__0LhteuLVuDU.py` — equilibrium-based entry (from Month 1 Elements, conf 0.85)
 
 ## data/ (all gitignored except this note)
 - `transcripts/` — raw YT transcript JSONs

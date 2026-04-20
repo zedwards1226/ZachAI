@@ -1,8 +1,11 @@
 data/transcripts/*.json
 data/transcripts/*.txt
+data/rules/*.json
 data/backtests/*.json
 data/judge/*.json
 logs/*.log
 __pycache__/
 *.pyc
 .venv/
+forge/strategies/*.invalid.py
+forge/strategies/*.smoke_failed.py
