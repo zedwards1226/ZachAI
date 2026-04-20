@@ -21,7 +21,7 @@ CDP_HOST = "localhost"
 CDP_PORT = 9222
 
 # Instrument
-DEFAULT_SYMBOL = "MNQ1!"
+DEFAULT_SYMBOL = "CME_MINI:MNQ1!"
 MULTIPLIER = 2  # $2/pt for MNQ
 STARTING_CAPITAL = 5000  # Demo account balance
 
