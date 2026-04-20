@@ -15,6 +15,8 @@ Every file in this project must be listed here. If it's not listed, delete it.
 ## forge/ (Phase 2 — rules → backtest)
 - `__init__.py` — package marker
 - `primitives.py` — ICT building blocks (FVG, OB, MSS, swing points, sessions, PDH/PDL)
+- `data_loader.py` — yfinance MNQ=F loader, returns canonical OHLCV df in US/Eastern
+- `backtester.py` — Agent 5: simulates strategy signals bar-by-bar, writes metrics JSON
 
 ## scout/ (cont.)
 - `coder.py` — Agent 4: Gemini translates rules JSON → strategy .py with smoke-test gate
