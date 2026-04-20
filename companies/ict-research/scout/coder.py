@@ -61,7 +61,9 @@ forge.primitives provides:
   detect_order_block(df, displacement_atr_mult=1.5, atr_period=14) -> DataFrame:
     bull_ob (bool), bull_ob_low, bull_ob_high,
     bear_ob (bool), bear_ob_low, bear_ob_high
-    (last opposite-color candle before a displacement bar)
+    LOOKAHEAD-SAFE: bull_ob.iloc[i]==True means bar i-1 was an OB confirmed by
+    displacement on bar i. bull_ob_low/high.iloc[i] = low/high of that OB candle
+    (bar i-1). Read these at bar i to take an entry — no peeking required.
 
   liquidity_sweep_high(df, level: Series) -> bool Series
   liquidity_sweep_low(df, level: Series) -> bool Series
@@ -93,6 +95,20 @@ You MUST:
 8. Apply HTF/bias context as best you can with the bars you have. If rules require HTF data you don't have, document the assumption in a single comment line at the top of the function.
 9. Keep it deterministic — no random, no IO, no external API calls.
 10. Use sensible default risk/reward if rules don't specify one (e.g. 1:2).
+
+CRITICAL — NO LOOKAHEAD BIAS (violations = automatic rejection):
+A. A signal placed at bar i may ONLY use information from df.iloc[:i+1] (past bars + current bar's close). It MUST NOT read any df[...].iloc[k] where k > i, and MUST NOT use df.shift(-N) for any positive N.
+B. The `entry` price recorded at bar i represents the fill the trader receives going forward. The backtester opens the position assuming fill at that price and walks forward starting bar i+1. Therefore:
+   - Acceptable entry values: `df['close'].iloc[i]` (market-on-close), or a fixed numeric level (e.g., an FVG/OB edge or PDH/PDL) that the NEXT bars are expected to trade through.
+   - FORBIDDEN: setting entry to a price from a PAST bar (e.g., `df['open'].iloc[j]` where j<i, or the open of an order block detected several bars ago). That implies you got filled at a price that already passed — pure lookahead.
+C. Stop and target are absolute price levels chosen at bar i and held constant. The backtester detects intrabar stop/target hits on bars > i. Do not "look ahead" to a future swing high to size your target.
+D. Use the vectorized primitives (`detect_fvg`, `detect_order_block`, `market_structure_shift`, etc.) — they already use `shift()` safely. You may read their values at bar i.
+E. Pattern check before you write each line that sets `entry`, `stop`, or `target`: ask "could a trader actually place this order at bar i without knowing future bars?" If no, rewrite.
+
+ENTRY CONVENTION (use this unless the rules JSON explicitly demands otherwise):
+   entry = df['close'].iloc[i]  # treat as next-bar-market fill
+   stop  = <some level at or beyond a recent swing/OB/FVG edge, computed from df.iloc[:i+1]>
+   target = entry +/- (entry - stop) * R   # R from rules or default 2.0
 
 PRIMITIVE API REFERENCE:
 {PRIMITIVES_API}
@@ -234,7 +250,28 @@ def smoke_test(strategy_path: Path) -> tuple[bool, str]:
     valid_signals = result["signal"].isin([-1, 0, 1]).all()
     if not valid_signals:
         return False, f"signal contains values outside {{-1,0,1}}"
-    return True, f"ok, {int((result['signal'] != 0).sum())} signals on synthetic data"
+
+    # Lookahead bias detector: signals at bar i must not depend on bars > i.
+    # Run on a truncated df; the first N rows must match the full-df result.
+    cut = len(df) - 20
+    try:
+        result_trunc = mod.generate_signals(df.iloc[:cut].copy())
+    except Exception as e:
+        return False, f"truncation re-run crashed: {type(e).__name__}: {e}"
+    full_head = result.iloc[:cut].reset_index(drop=True)
+    trunc = result_trunc.reset_index(drop=True)
+    for col in ("signal", "entry", "stop", "target"):
+        a = full_head[col].fillna(-9999.0).to_numpy()
+        b = trunc[col].fillna(-9999.0).to_numpy()
+        diffs = (a != b).sum()
+        if diffs > 0:
+            first = int(((a != b)).argmax())
+            return False, (f"LOOKAHEAD BIAS: column {col!r} differs at {diffs} bars "
+                           f"between full and truncated runs (first at row {first}: "
+                           f"full={a[first]} vs trunc={b[first]})")
+
+    n_sig = int((result['signal'] != 0).sum())
+    return True, f"ok, {n_sig} signals on synthetic data, lookahead-clean"
 
 
 def main():
