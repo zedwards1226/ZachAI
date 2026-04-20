@@ -8,6 +8,7 @@ import logging
 from datetime import date, datetime
 
 from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, PROB_SHRINK_TO_MARKET
+from calibration import get_shrinkage
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
@@ -131,8 +132,12 @@ def scan_and_trade() -> list[dict]:
             continue
 
         # 5. Find market with best edge using ENSEMBLE probabilities.
-        # Shrink our probability toward the market's implied probability to
-        # damp ensemble overconfidence (Brier 0.4151 on raw ensemble).
+        # Per-city shrinkage pulls our prob toward the market's implied prob
+        # proportional to historical miscalibration for that city + side.
+        # Since a market has a YES and a NO view, we evaluate each side with
+        # its own shrinkage factor and pick the larger residual edge.
+        shrink_yes = get_shrinkage(city_code, "YES")
+        shrink_no = get_shrinkage(city_code, "NO")
         best = None
         best_abs_edge = 0.0
         for m in markets:
@@ -141,12 +146,28 @@ def scan_and_trade() -> list[dict]:
             else:
                 raw_p = prob_exceeds(member_highs, m["strike_f"])
             market_p = m["yes_price_cents"] / 100.0
-            our_p = raw_p + PROB_SHRINK_TO_MARKET * (market_p - raw_p)
-            e = compute_edge(our_p, m["yes_price_cents"])
+            # YES view: shrink raw_p toward market_p using YES calibration
+            our_p_yes = raw_p + shrink_yes * (market_p - raw_p)
+            edge_yes = compute_edge(our_p_yes, m["yes_price_cents"])
+            # NO view: shrink (1-raw_p) toward (1-market_p) using NO calibration
+            raw_p_no = 1.0 - raw_p
+            market_p_no = 1.0 - market_p
+            our_p_no = raw_p_no + shrink_no * (market_p_no - raw_p_no)
+            # Negative edge => side_best will flip to NO downstream via best_side()
+            edge_no_as_yes = -(our_p_no - market_p_no)  # same sign convention
+            # Pick whichever side has bigger |edge|
+            if abs(edge_yes) >= abs(edge_no_as_yes):
+                our_p_chosen = our_p_yes
+                e = edge_yes
+            else:
+                our_p_chosen = 1.0 - our_p_no  # express as YES-prob for downstream
+                e = edge_no_as_yes
             ae = effective_edge(e)
             if ae > best_abs_edge:
                 best_abs_edge = ae
-                best = {**m, "our_prob": our_p, "raw_prob": raw_p, "edge": e, "abs_edge": ae}
+                best = {**m, "our_prob": our_p_chosen, "raw_prob": raw_p,
+                        "edge": e, "abs_edge": ae,
+                        "shrink_yes": shrink_yes, "shrink_no": shrink_no}
 
         if not best:
             insert_forecast(city_code, high_f, low_f)

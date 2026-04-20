@@ -1,8 +1,9 @@
 """
-Open-Meteo GFS Ensemble weather forecast fetcher.
-Returns 31-member ensemble high/low forecasts in degF for each city.
-Probability is calculated by counting ensemble members, not Gaussian CDF.
+Open-Meteo multi-model ensemble weather forecast fetcher.
+Combines GFS (31 members) + ICON-EPS (21 members) = ~52 members total.
+Larger ensemble -> tighter probability estimates -> better Brier score.
 """
+import os
 import requests
 import logging
 from datetime import date, timedelta
@@ -12,6 +13,9 @@ log = logging.getLogger(__name__)
 
 ENSEMBLE_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+# Comma-separated Open-Meteo model IDs. Default: GFS + ICON for 52 members.
+# Override with ENSEMBLE_MODELS env var if you want to pin a single model.
+ENSEMBLE_MODELS = os.getenv("ENSEMBLE_MODELS", "gfs_seamless,icon_seamless")
 
 # Cache: (city_code, date_str) -> forecast dict, refreshed every 15 min by scheduler
 _cache: dict[tuple[str, str], dict] = {}
@@ -47,7 +51,7 @@ def fetch_ensemble_forecast(city_code: str, target_date: date | None = None) -> 
         "temperature_unit": "fahrenheit",
         "start_date": ds,
         "end_date": ds,
-        "models": "gfs_seamless",
+        "models": ENSEMBLE_MODELS,
     }
 
     resp = requests.get(ENSEMBLE_URL, params=params, timeout=15)

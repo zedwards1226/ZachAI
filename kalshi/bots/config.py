@@ -35,7 +35,16 @@ MIN_EDGE_YES = float(os.getenv("MIN_EDGE_YES", "0.15"))
 # 0.0 = trust ensemble fully  |  1.0 = trust market fully
 # 0.25 = pull ensemble 25% of the way toward Kalshi's implied probability.
 PROB_SHRINK_TO_MARKET = float(os.getenv("PROB_SHRINK_TO_MARKET", "0.25"))
-KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))
+# Competitive Kalshi weather bots use 15% fractional Kelly (suislanchez et al.);
+# dropping from 25% cuts drawdown risk ~40% at small cost to compounding.
+KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.15"))
+
+# Per-city calibration: min resolved trades before we trust historical WR
+# instead of the global default. Below this, fall back to global shrinkage.
+CALIBRATION_MIN_SAMPLE = int(os.getenv("CALIBRATION_MIN_SAMPLE", "3"))
+# Bayesian prior trades (per-side) pulling toward 50% WR. Higher = more stable
+# shrinkage when sample is small.
+CALIBRATION_PRIOR_WEIGHT = int(os.getenv("CALIBRATION_PRIOR_WEIGHT", "5"))
 MIN_PRICE_CENTS = int(os.getenv("MIN_PRICE_CENTS", "5"))     # skip illiquid penny contracts
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "100"))        # Kalshi weather depth is ~50-200
 
