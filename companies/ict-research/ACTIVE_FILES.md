@@ -25,6 +25,7 @@ Every file in this project must be listed here. If it's not listed, delete it.
 ## forge/strategies/ (one file per codified ICT setup, generated)
 - `order_block__nQfHZ2DEJ8c.py` — OB-based MSS entry (from Mentorship Ep 3, conf 0.95)
 - `premium_discount__0LhteuLVuDU.py` — equilibrium-based entry (from Month 1 Elements, conf 0.85)
+- `fair_value_gap__XN8tuO4QIRw.py` — FVG + PM-session entry (Groq-generated from ICT Mentorship 2023 Ep 01)
 
 ## data/ (all gitignored except this note)
 - `transcripts/` — raw YT transcript JSONs

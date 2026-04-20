@@ -25,22 +25,29 @@ import argparse
 import ast
 import importlib.util
 import json
+import os
 import re
 import sys
 import time
 from pathlib import Path
 
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import numpy as np
 import pandas as pd
 
-from google import genai
-from google.genai import types
+from groq import Groq
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES_DIR = ROOT / "data" / "rules"
 STRATEGY_DIR = ROOT / "forge" / "strategies"
 PRIMITIVES_PATH = ROOT / "forge" / "primitives.py"
-MODEL = "gemini-flash-latest"
+MODEL = "llama-3.3-70b-versatile"
 MAX_RETRIES = 4
 
 PRIMITIVES_API = """\
@@ -136,9 +143,9 @@ Output the strategy file content NOW. Python only, no fences."""
 def load_api_key() -> str:
     env = ROOT / ".env"
     for line in env.read_text().splitlines():
-        if line.startswith("GEMINI_API_KEY="):
+        if line.startswith("GROQ_API_KEY="):
             return line.split("=", 1)[1].strip()
-    raise SystemExit("GEMINI_API_KEY missing from .env")
+    raise SystemExit("GROQ_API_KEY missing from .env")
 
 
 def strip_fences(text: str) -> str:
@@ -146,39 +153,53 @@ def strip_fences(text: str) -> str:
     if text.startswith("```"):
         text = re.sub(r"^```(?:python|py)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
+    lines = text.rstrip().split("\n")
     # Strip stray trailing triple-quote (common LLM artifact closing the
     # file-level docstring as if it were an unclosed multi-line string).
-    lines = text.rstrip().split("\n")
     while lines and lines[-1].strip() == '"""':
         lines.pop()
+    # Some LLMs (Llama in particular) output the docstring text without its
+    # opening triple-quote. If the first non-empty line is prose (not a valid
+    # Python top-level start), wrap it in a comment so the file still parses.
+    py_starts = ("from ", "import ", "def ", "class ", "#", '"""', "'''", "@")
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if not s:
+            continue
+        if not s.startswith(py_starts):
+            lines[i] = "# " + ln.lstrip()
+        break
     return "\n".join(lines)
 
 
-def call_gemini(client, rules: dict) -> tuple[str, dict]:
+def call_llm(client: Groq, rules: dict) -> tuple[str, dict]:
     user_msg = (
         f"Rules JSON to translate:\n\n"
         f"{json.dumps(rules, indent=2, ensure_ascii=False)}\n\n"
         f"Output the complete Python strategy file content."
     )
-    cfg = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        temperature=0.2,
-        max_output_tokens=8192,
-    )
     last = None
     for attempt in range(MAX_RETRIES):
         try:
-            resp = client.models.generate_content(model=MODEL, contents=user_msg, config=cfg)
-            code = strip_fences(resp.text)
+            resp = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_msg},
+                ],
+                temperature=0.2,
+                max_tokens=8192,
+            )
+            code = strip_fences(resp.choices[0].message.content)
             usage = {
-                "prompt_tokens": getattr(resp.usage_metadata, "prompt_token_count", 0),
-                "output_tokens": getattr(resp.usage_metadata, "candidates_token_count", 0),
+                "prompt_tokens": getattr(resp.usage, "prompt_tokens", 0),
+                "output_tokens": getattr(resp.usage, "completion_tokens", 0),
             }
             return code, usage
         except Exception as e:
             last = e
             msg = str(e)
-            transient = "503" in msg or "UNAVAILABLE" in msg or "429" in msg
+            transient = "503" in msg or "429" in msg or "rate_limit" in msg.lower() or "overloaded" in msg.lower()
             if not transient or attempt == MAX_RETRIES - 1:
                 raise
             backoff = 2 ** attempt * 5
@@ -294,7 +315,7 @@ def main():
         rules_paths = rules_paths[: args.limit]
 
     print(f"[coder] processing {len(rules_paths)} rules files with model={MODEL}")
-    client = genai.Client(api_key=load_api_key())
+    client = Groq(api_key=load_api_key())
 
     ok = fail = skipped = 0
     for i, rp in enumerate(rules_paths, 1):
@@ -306,7 +327,7 @@ def main():
 
         rules = json.loads(rp.read_text(encoding="utf-8"))
         try:
-            code, usage = call_gemini(client, rules)
+            code, usage = call_llm(client, rules)
         except Exception as e:
             print(f"[{i}/{len(rules_paths)}] {rp.stem} CALL_FAILED: {type(e).__name__}: {str(e)[:120]}")
             fail += 1
@@ -317,7 +338,7 @@ def main():
             print(f"[{i}/{len(rules_paths)}] {rp.stem} INVALID: {reason}")
             (STRATEGY_DIR / f"{rp.stem}.invalid.py").write_text(code, encoding="utf-8")
             fail += 1
-            time.sleep(6.5)
+            time.sleep(2.0)
             continue
 
         out_path.write_text(code, encoding="utf-8")
