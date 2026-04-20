@@ -18,6 +18,12 @@ Every file in this project must be listed here. If it's not listed, delete it.
 
 ## forge/strategies/ (one .py per strategy you want to test)
 - `.gitkeep` — placeholder so the empty dir is tracked
+- `_test_buyhold.py` — sanity: 1-trade buy-and-hold, validates cost model + accounting
+- `_test_random.py` — sanity: random 1:1 R:R signals, validates per-trade cost drag
+- `_test_perfect_oracle.py` — sanity: deliberate lookahead leak, demonstrates the "high Sharpe + huge DD" fingerprint of cheating
+
+> Files prefixed `_` are auto-skipped by bulk runs. Run individually with
+> `python -m forge.judge --strategy _test_<name>`.
 
 ## data/ (all gitignored except this note)
 - `backtests/` — per-strategy backtest result JSONs
