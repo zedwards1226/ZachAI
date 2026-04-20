@@ -7,8 +7,9 @@ Uses 31-member GFS ensemble for probability (not normal distribution).
 import logging
 from datetime import date, datetime
 
-from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, PROB_SHRINK_TO_MARKET
+from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, PROB_SHRINK_TO_MARKET, SHIN_Z
 from calibration import get_shrinkage
+from edge import shin_adjust
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
@@ -145,13 +146,15 @@ def scan_and_trade() -> list[dict]:
                 raw_p = prob_between(member_highs, m["floor_f"], m["cap_f"])
             else:
                 raw_p = prob_exceeds(member_highs, m["strike_f"])
-            market_p = m["yes_price_cents"] / 100.0
+            # Shin-adjusted market probabilities correct for longshot bias
+            # before we decide if an edge exists.
+            market_p = shin_adjust(m["yes_price_cents"] / 100.0, SHIN_Z)
+            market_p_no = shin_adjust(m["no_price_cents"] / 100.0, SHIN_Z)
             # YES view: shrink raw_p toward market_p using YES calibration
             our_p_yes = raw_p + shrink_yes * (market_p - raw_p)
-            edge_yes = compute_edge(our_p_yes, m["yes_price_cents"])
-            # NO view: shrink (1-raw_p) toward (1-market_p) using NO calibration
+            edge_yes = our_p_yes - market_p
+            # NO view: shrink (1-raw_p) toward Shin-adjusted NO market prob
             raw_p_no = 1.0 - raw_p
-            market_p_no = 1.0 - market_p
             our_p_no = raw_p_no + shrink_no * (market_p_no - raw_p_no)
             # Negative edge => side_best will flip to NO downstream via best_side()
             edge_no_as_yes = -(our_p_no - market_p_no)  # same sign convention

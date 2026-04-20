@@ -7,6 +7,7 @@ forecasts, and real forecast uncertainty.
 
 Edge = our_prob - kalshi_implied_prob  (positive = YES underpriced)
 """
+import math
 
 
 def prob_exceeds(member_highs: list[float], strike_f: float) -> float:
@@ -35,12 +36,47 @@ def prob_between(member_highs: list[float], floor_f: float, cap_f: float) -> flo
     return max(0.03, min(0.97, raw))
 
 
-def compute_edge(our_prob: float, kalshi_price_cents: int) -> float:
+def shin_adjust(market_p: float, z: float = 0.05) -> float:
+    """
+    Longshot-bias correction for prediction-market prices.
+
+    Prediction markets systematically over-price long-shot outcomes
+    (Page & Clemen 2013, Wolfers & Zitzewitz 2004): a 5% YES contract
+    resolves YES slightly more than 5% of the time in aggregate, and a
+    95% contract resolves slightly less than 95%.
+
+    Kalshi has no bookmaker margin (YES + NO = 1), so Shin's original
+    insider-trader formula is degenerate. We use the standard prediction-
+    market substitute: symmetric log-odds shrinkage toward 0.5.
+
+        adj = sigmoid((1 - z) * logit(p))
+
+    z = 0.0 disables the correction. z = 0.05 is typical for Kalshi
+    weather markets; 0.10+ for very illiquid contracts.
+    """
+    if market_p <= 0.0:
+        return 0.0
+    if market_p >= 1.0:
+        return 1.0
+    if z <= 0.0:
+        return market_p
+    alpha = 1.0 - z  # shrink factor on log-odds
+    lo = math.log(market_p / (1.0 - market_p))
+    lo_adj = alpha * lo
+    return 1.0 / (1.0 + math.exp(-lo_adj))
+
+
+def compute_edge(our_prob: float, kalshi_price_cents: int, shin_z: float = 0.0) -> float:
     """
     edge = our_prob - kalshi_implied_prob
     Positive edge -> bet YES.  Negative edge -> bet NO.
+
+    When shin_z > 0, the kalshi_implied_prob is Shin-corrected first so
+    longshot-biased extreme quotes don't create phantom edges.
     """
     kalshi_prob = kalshi_price_cents / 100.0
+    if shin_z > 0.0:
+        kalshi_prob = shin_adjust(kalshi_prob, shin_z)
     return round(our_prob - kalshi_prob, 4)
 
 

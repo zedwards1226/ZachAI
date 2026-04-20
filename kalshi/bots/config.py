@@ -45,6 +45,12 @@ CALIBRATION_MIN_SAMPLE = int(os.getenv("CALIBRATION_MIN_SAMPLE", "3"))
 # Bayesian prior trades (per-side) pulling toward 50% WR. Higher = more stable
 # shrinkage when sample is small.
 CALIBRATION_PRIOR_WEIGHT = int(os.getenv("CALIBRATION_PRIOR_WEIGHT", "5"))
+
+# Longshot-bias correction via log-odds shrinkage on market prices.
+# 0.0 = off  |  0.05 = conservative liquid market  |  0.10 = illiquid weather contracts
+# Pulls extreme Kalshi quotes (5c, 95c) symmetrically toward 50c before
+# computing edge, reflecting documented longshot bias in prediction markets.
+SHIN_Z = float(os.getenv("SHIN_Z", "0.05"))
 MIN_PRICE_CENTS = int(os.getenv("MIN_PRICE_CENTS", "5"))     # skip illiquid penny contracts
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "100"))        # Kalshi weather depth is ~50-200
 
