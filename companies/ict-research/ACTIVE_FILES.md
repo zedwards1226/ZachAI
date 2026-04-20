@@ -8,7 +8,7 @@ Every file in this project must be listed here. If it's not listed, delete it.
 - `README.md` — human overview (TBD)
 
 ## scout/ (Phase 1 — YouTube → rules)
-- *(empty — pending Phase 1 build)*
+- `harvester.py` — Agent 1: pulls ICT channel uploads + transcripts via YouTube Data API v3
 
 ## forge/ (Phase 2 — rules → backtest)
 - *(empty — pending Phase 2 build)*
