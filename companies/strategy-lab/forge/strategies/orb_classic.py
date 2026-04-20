@@ -45,6 +45,11 @@ ATR_LOOKBACK_DAYS = 14
 ORB_ATR_MIN_PCT = 0.30
 ORB_ATR_MAX_PCT = 0.60
 
+# --- backtester intraday-exit hooks (live bot rules) ---
+# Live bot: MAX_HOLD_MINUTES=120, HARD_CLOSE_HOUR=15. On 5m bars, 120/5 = 24.
+MAX_HOLD_BARS = 24
+SESSION_END_TIME = time(15, 0)
+
 
 def _et_index(df: pd.DataFrame) -> pd.DatetimeIndex:
     return df.index.tz_convert("US/Eastern") if df.index.tz is not None else df.index

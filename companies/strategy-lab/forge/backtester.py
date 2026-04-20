@@ -29,6 +29,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, asdict
+from datetime import time as dtime  # for session_end exits — separate from `time` module
 from pathlib import Path
 
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
@@ -79,16 +80,35 @@ class Trade:
         return self.gross_pnl - slippage - COMMISSION_RT
 
 
-def simulate(df: pd.DataFrame, signals: pd.DataFrame) -> list[Trade]:
-    """Honest intrabar simulation. One position at a time. Stop wins on tie."""
+def simulate(
+    df: pd.DataFrame,
+    signals: pd.DataFrame,
+    max_hold_bars: int | None = None,
+    session_end: dtime | None = None,
+) -> list[Trade]:
+    """Honest intrabar simulation. One position at a time. Stop wins on tie.
+
+    Optional intraday exits (both default OFF for backwards compat with
+    swing/buyhold strategies):
+      max_hold_bars  — force-close after N bars in market (e.g. 24 = 120min on 5m)
+      session_end    — datetime.time; close at first bar whose ET time >= this
+                       on a date AFTER the entry date (handles overnight futures
+                       sessions). Exits at that bar's open.
+    """
     n = len(df)
     high = df["high"].to_numpy()
     low = df["low"].to_numpy()
     close = df["close"].to_numpy()
+    open_ = df["open"].to_numpy()
     sig = signals["signal"].to_numpy()
     entry_p = signals["entry"].to_numpy()
     stop_p = signals["stop"].to_numpy()
     target_p = signals["target"].to_numpy()
+
+    # Pre-compute ET wall clock for session_end checks
+    et_index = df.index.tz_convert("US/Eastern") if df.index.tz is not None else df.index
+    bar_times = [t.time() for t in et_index] if session_end is not None else None
+    bar_dates = [t.date() for t in et_index] if session_end is not None else None
 
     trades: list[Trade] = []
     i = 0
@@ -104,6 +124,8 @@ def simulate(df: pd.DataFrame, signals: pd.DataFrame) -> list[Trade]:
         tg_price = float(target_p[i])
         entry_idx = i
         exit_idx, exit_price, reason = None, None, "eod"
+
+        entry_date = bar_dates[i] if bar_dates is not None else None
 
         for j in range(i + 1, n):
             h, l = high[j], low[j]
@@ -123,6 +145,20 @@ def simulate(df: pd.DataFrame, signals: pd.DataFrame) -> list[Trade]:
             if hit_target:
                 exit_idx, exit_price, reason = j, tg_price, "target"
                 break
+
+            # --- intraday time-based exits ---
+            if max_hold_bars is not None and (j - entry_idx) >= max_hold_bars:
+                exit_idx, exit_price, reason = j, float(close[j]), "max_hold"
+                break
+            if session_end is not None:
+                # Trigger on first bar at/after session_end. Allow same-day close
+                # if entry happened before session_end on the entry date.
+                if bar_times[j] >= session_end and (
+                    bar_dates[j] != entry_date or bar_times[entry_idx] < session_end
+                ):
+                    exit_idx, exit_price, reason = j, float(open_[j]), "session_end"
+                    break
+
         if exit_idx is None:
             exit_idx = n - 1
             exit_price = float(close[exit_idx])
@@ -216,7 +252,10 @@ def run_one(path: Path, df: pd.DataFrame, interval: str, period: str) -> dict:
     signals = mod.generate_signals(df)
     gen_ms = (time.perf_counter() - t0) * 1000
 
-    trades = simulate(df, signals)
+    # Optional intraday exits — strategies opt in via module-level constants.
+    max_hold = getattr(mod, "MAX_HOLD_BARS", None)
+    sess_end = getattr(mod, "SESSION_END_TIME", None)
+    trades = simulate(df, signals, max_hold_bars=max_hold, session_end=sess_end)
     metrics = compute_metrics(trades, df)
 
     return {

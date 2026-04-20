@@ -81,6 +81,8 @@ def walk_forward(strategy_path: Path, df: pd.DataFrame, splits: int = WF_SPLITS)
     metrics and aggregate."""
     mod = load_strategy(strategy_path)
     full_signals = mod.generate_signals(df)
+    max_hold = getattr(mod, "MAX_HOLD_BARS", None)
+    sess_end = getattr(mod, "SESSION_END_TIME", None)
     n = len(df)
     window_size = n // splits
 
@@ -92,7 +94,7 @@ def walk_forward(strategy_path: Path, df: pd.DataFrame, splits: int = WF_SPLITS)
 
         test_df = df.iloc[train_end:hi]
         test_sig = full_signals.iloc[train_end:hi]
-        test_trades = simulate(test_df, test_sig)
+        test_trades = simulate(test_df, test_sig, max_hold_bars=max_hold, session_end=sess_end)
 
         m = compute_metrics(test_trades, test_df)
         results.append({
@@ -160,9 +162,11 @@ def composite_score(metrics: dict) -> float | None:
 
 def evaluate(strategy_path: Path, df: pd.DataFrame) -> dict:
     mod = load_strategy(strategy_path)
+    max_hold = getattr(mod, "MAX_HOLD_BARS", None)
+    sess_end = getattr(mod, "SESSION_END_TIME", None)
     t0 = time.perf_counter()
     signals = mod.generate_signals(df)
-    trades = simulate(df, signals)
+    trades = simulate(df, signals, max_hold_bars=max_hold, session_end=sess_end)
     is_metrics = compute_metrics(trades, df)
     in_sample_ms = (time.perf_counter() - t0) * 1000
 

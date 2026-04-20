@@ -27,6 +27,10 @@ SESSION_END = time(15, 0)
 STOP_EXTENSION_MULT = 1.25
 TARGET_MULT = 1.5
 
+# Backtester intraday-exit hooks (live bot rules)
+MAX_HOLD_BARS = 24                  # 120min on 5m
+SESSION_END_TIME = time(15, 0)
+
 
 def _et_index(df: pd.DataFrame) -> pd.DatetimeIndex:
     return df.index.tz_convert("US/Eastern") if df.index.tz is not None else df.index
