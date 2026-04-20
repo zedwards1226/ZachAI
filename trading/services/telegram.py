@@ -2,6 +2,9 @@
 
 All trading notifications go to the dedicated ORB Alerts bot.
 Jarvis bot (telegram-bridge/bot.py) is separate — commands only.
+
+Message style: plain English, no abbreviations on first use, always explain
+WHY an alert is firing so Zach doesn't have to decode it from his phone.
 """
 from __future__ import annotations
 
@@ -16,6 +19,10 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 logger = logging.getLogger(__name__)
 
 _client: Optional[httpx.AsyncClient] = None
+
+# MNQ contract: $2 per point. Used to convert price moves into dollars in
+# the message text so Zach sees "$50 risk" instead of "1.0 R:R".
+MNQ_POINT_VALUE = 2.00
 
 
 def _get_client() -> httpx.AsyncClient:
@@ -71,7 +78,13 @@ async def notify_briefing(text: str) -> bool:
 async def notify_trade_entry(direction: str, score: int, size: str,
                              entry: float, stop: float, t1: float, t2: float,
                              breakdown: dict) -> bool:
-    """Send trade entry notification with full score breakdown."""
+    """Send trade entry notification with full score breakdown.
+
+    Plain-English version: spells out targets, converts risk/reward into
+    dollars, lists the top 3 reasons we took the trade and the top 3 reasons
+    against. Direction comes in as 'LONG' or 'SHORT'.
+    """
+    # Sort breakdown into reasons-for and reasons-against
     positives = []
     negatives = []
     for key, val in breakdown.items():
@@ -81,24 +94,34 @@ async def notify_trade_entry(direction: str, score: int, size: str,
             positives.append((key, val))
         elif val < 0:
             negatives.append((key, val))
-
     positives.sort(key=lambda x: x[1], reverse=True)
     negatives.sort(key=lambda x: x[1])
 
-    pos_text = "\n".join(f"  +{v} {k}" for k, v in positives[:3]) or "  (none)"
-    neg_text = "\n".join(f"  {v} {k}" for k, v in negatives[:3]) or "  (none)"
+    pos_text = "\n".join(f"  • {k.replace('_', ' ')} (+{v})" for k, v in positives[:3]) or "  (none)"
+    neg_text = "\n".join(f"  • {k.replace('_', ' ')} ({v})" for k, v in negatives[:3]) or "  (none)"
 
-    rr = abs(t1 - entry) / abs(entry - stop) if abs(entry - stop) > 0 else 0
+    # Risk vs reward in dollars (MNQ = $2/point)
+    risk_pts = abs(entry - stop)
+    reward_pts = abs(t1 - entry)
+    risk_dollars = risk_pts * MNQ_POINT_VALUE
+    reward_dollars = reward_pts * MNQ_POINT_VALUE
+    rr = reward_pts / risk_pts if risk_pts > 0 else 0
+
+    direction_word = "buying" if direction == "LONG" else "selling short"
+    arrow = "📈" if direction == "LONG" else "📉"
 
     msg = (
-        f"🔔 <b>ORB TRADE — {direction}</b>\n\n"
-        f"Score: <b>{score}</b> → {size}\n"
-        f"Entry: {entry:.2f}\n"
-        f"Stop: {stop:.2f}\n"
-        f"T1: {t1:.2f} | T2: {t2:.2f}\n"
-        f"R:R = {rr:.1f}\n\n"
-        f"<b>Top reasons FOR:</b>\n{pos_text}\n\n"
-        f"<b>Top reasons AGAINST:</b>\n{neg_text}"
+        f"{arrow} <b>NEW TRADE — {direction_word.upper()}</b>\n\n"
+        f"<b>Confidence score:</b> {score}/10 → {size} position\n"
+        f"<i>(higher score = stronger setup; size scales with score)</i>\n\n"
+        f"<b>The plan:</b>\n"
+        f"  Entry price: {entry:.2f}\n"
+        f"  Stop loss: {stop:.2f}  (if hit, we lose ${risk_dollars:.0f})\n"
+        f"  First exit (close half): {t1:.2f}  (if hit, we make ${reward_dollars:.0f} on that half)\n"
+        f"  Final exit (close rest): {t2:.2f}\n"
+        f"  Risking ${risk_dollars:.0f} to make ${reward_dollars:.0f} on first target ({rr:.1f}x)\n\n"
+        f"<b>Why we took it:</b>\n{pos_text}\n\n"
+        f"<b>What's working against us:</b>\n{neg_text}"
     )
     return await send(msg)
 
@@ -106,73 +129,112 @@ async def notify_trade_entry(direction: str, score: int, size: str,
 async def notify_trade_exit(direction: str, entry: float, exit_price: float,
                             pnl: float, pnl_after_slip: float,
                             outcome: str, rr: float) -> bool:
-    """Send trade exit notification."""
-    emoji = "✅" if outcome == "WIN" else "❌" if outcome == "LOSS" else "➖"
+    """Send trade exit notification in plain English."""
+    if outcome == "WIN":
+        emoji = "✅"
+        outcome_word = "WIN"
+        result_phrase = f"made ${pnl_after_slip:.2f}"
+    elif outcome == "LOSS":
+        emoji = "❌"
+        outcome_word = "LOSS"
+        result_phrase = f"lost ${abs(pnl_after_slip):.2f}"
+    else:
+        emoji = "➖"
+        outcome_word = "BREAKEVEN"
+        result_phrase = f"closed flat (${pnl_after_slip:+.2f})"
+
+    direction_word = "long" if direction == "LONG" else "short"
+    move_pts = (exit_price - entry) if direction == "LONG" else (entry - exit_price)
+
+    # Slippage = the difference between theoretical pnl and actual after slippage
+    slippage_cost = pnl - pnl_after_slip
+
     msg = (
-        f"{emoji} <b>TRADE CLOSED — {direction}</b>\n\n"
-        f"Entry: {entry:.2f} → Exit: {exit_price:.2f}\n"
-        f"P&L: ${pnl:.2f} (after slip: ${pnl_after_slip:.2f})\n"
-        f"Outcome: {outcome} | RR: {rr:.1f}"
+        f"{emoji} <b>TRADE CLOSED — {outcome_word}</b>\n\n"
+        f"Direction: {direction_word}\n"
+        f"Entered at {entry:.2f}, exited at {exit_price:.2f} ({move_pts:+.2f} points)\n"
+        f"Result: {result_phrase}\n"
+        f"Reward-to-risk ratio: {rr:.1f}x  "
+        f"<i>(how much we made compared to what we risked)</i>\n"
+        f"Slippage cost: ${slippage_cost:.2f}"
     )
     return await send(msg)
 
 
 async def notify_skip(direction: str, score: int, reason: str) -> bool:
-    """Send notification when a trade is skipped."""
+    """Send notification when a trade is skipped (setup not strong enough)."""
+    direction_word = "long" if direction == "LONG" else "short"
     msg = (
-        f"⏭️ <b>ORB SKIP — {direction}</b>\n\n"
-        f"Score: {score} (below threshold)\n"
-        f"Reason: {reason}"
+        f"⏭️ <b>SKIPPED A {direction_word.upper()} SETUP</b>\n\n"
+        f"Confidence score was {score}/10 — below our minimum to take the trade.\n"
+        f"Main reason: {reason}\n\n"
+        f"<i>No trade placed. Watching for the next setup.</i>"
     )
     return await send(msg)
 
 
 async def notify_hard_block(reason: str) -> bool:
-    """Send notification when trading is hard-blocked."""
-    msg = f"🚫 <b>HARD BLOCK</b>\n\n{reason}"
+    """Send notification when trading is hard-blocked (won't take any trades)."""
+    msg = (
+        f"🚫 <b>TRADING BLOCKED</b>\n\n"
+        f"Not taking any new trades right now.\n\n"
+        f"<b>Reason:</b> {reason}\n\n"
+        f"<i>Block clears automatically when the condition resolves.</i>"
+    )
     return await send(msg)
 
 
 async def notify_circuit_breaker(losses: int, daily_pnl: float) -> bool:
-    """Send circuit breaker alert."""
+    """Send circuit breaker alert — too many losses, stopping for the day."""
     msg = (
-        f"⚠️ <b>CIRCUIT BREAKER</b>\n\n"
-        f"Consecutive losses: {losses}\n"
-        f"Daily P&L: ${daily_pnl:.2f}\n"
-        f"Trading paused for the day."
+        f"⚠️ <b>STOPPING TRADING FOR TODAY</b>\n\n"
+        f"We've hit {losses} losses in a row.\n"
+        f"Today's profit/loss: ${daily_pnl:+.2f}\n\n"
+        f"Circuit breaker tripped — no more trades until tomorrow.\n"
+        f"<i>This protects us from revenge trading after a bad streak.</i>"
     )
     return await send(msg)
 
 
 async def notify_sentinel_alert(alert_type: str, details: str) -> bool:
-    """Send sentinel alert (news/truth social)."""
-    msg = f"🚨 <b>SENTINEL — {alert_type}</b>\n\n{details}"
+    """Send sentinel alert — news or social media event that may move markets."""
+    msg = (
+        f"🚨 <b>MARKET-MOVING NEWS DETECTED</b>\n\n"
+        f"<b>Type:</b> {alert_type}\n"
+        f"<b>Details:</b> {details}\n\n"
+        f"<i>Heads up — this could shake things up. The bot may pause or "
+        f"tighten stops depending on the rules.</i>"
+    )
     return await send(msg)
 
 
 async def notify_sweep(direction: str, level: float, sweep_type: str) -> bool:
-    """Send sweep detection alert."""
+    """Send liquidity sweep alert — price ran a key level then reversed."""
+    direction_word = "bullish" if direction == "LONG" else "bearish"
     msg = (
-        f"🌊 <b>SWEEP DETECTED</b>\n\n"
-        f"Type: {sweep_type}\n"
-        f"Level: {level:.2f}\n"
-        f"Direction: {direction}"
+        f"🌊 <b>LIQUIDITY SWEEP</b>\n\n"
+        f"Price just ran the stops at <b>{level:.2f}</b> ({sweep_type}) "
+        f"and reversed.\n"
+        f"This is a {direction_word} signal — smart money likely accumulating.\n\n"
+        f"<i>Watching for a setup to trade in the {direction.lower()} direction.</i>"
     )
     return await send(msg)
 
 
 async def notify_weekly_report(report_text: str) -> bool:
     """Send the Sunday weekly journal report."""
-    return await send(f"📈 <b>WEEKLY ORB REPORT</b>\n\n{report_text}")
+    return await send(f"📈 <b>WEEKLY TRADING REPORT</b>\n\n{report_text}")
 
 
 async def notify_strategy_review(rolling_wr: float, weeks: int) -> bool:
     """Send alert when rolling win rate drops below threshold."""
     msg = (
-        f"⚠️ <b>STRATEGY REVIEW NEEDED</b>\n\n"
-        f"Rolling 20-trade win rate: {rolling_wr:.0%}\n"
-        f"Below 40% for {weeks} consecutive weeks.\n"
-        f"Consider re-evaluating parameters."
+        f"⚠️ <b>STRATEGY MAY NEED A REVIEW</b>\n\n"
+        f"Win rate over the last 20 trades: <b>{rolling_wr:.0%}</b>\n"
+        f"It's been below 40% for {weeks} weeks in a row.\n\n"
+        f"<i>The strategy might be drifting. Time to look at recent trades "
+        f"and decide if anything needs adjusting (parameters, filters, or "
+        f"pausing live trading until conditions change).</i>"
     )
     return await send(msg)
 
