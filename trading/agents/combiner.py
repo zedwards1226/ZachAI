@@ -229,23 +229,26 @@ async def poll() -> Optional[dict]:
         _persist_session()
         return None
 
-    # --- Determine trade size ---
-    score = breakdown.total
-    if score >= SCORE_FULL_SIZE:
-        size = TradeSize.FULL
-    elif score >= SCORE_HALF_SIZE:
-        size = TradeSize.HALF
-    else:
-        size = TradeSize.SKIP
-
-    if size == TradeSize.SKIP:
-        reason = f"Score {score} below threshold {SCORE_HALF_SIZE}"
-        logger.info("Trade skipped: %s (%s)", breakout_direction.value, reason)
-        await telegram.notify_skip(breakout_direction.value, score, reason)
-        _log_signal(breakout_direction, price, breakdown, size, is_second_break)
+    # --- Cascade filter (4 hard gates, no scoring) ---
+    # Replaces the old weighted score threshold. Research (Zarattini ORB paper,
+    # freqtrade/backtrader conventions) shows production breakout bots use 3-4
+    # AND-gated booleans, not confluence scoring. Score/RVOL/VWAP/VIX etc.
+    # still recorded to signal_history for later ML-based meta-labeling.
+    score = breakdown.total  # kept for logging/metadata only
+    gate_failed = _check_cascade(breakout_direction, _orb, states, price)
+    if gate_failed:
+        logger.info("Trade skipped: %s (gate failed: %s)",
+                    breakout_direction.value, gate_failed)
+        await telegram.notify_skip(breakout_direction.value, score, gate_failed)
+        _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
+                    block_reason=f"cascade:{gate_failed}")
         _breakout_processed = True
         _persist_session()
         return None
+
+    # All 4 gates passed → HALF size by default (conservative while we gather data).
+    # Will promote to FULL once signal_history shows consistent WR >= 55%.
+    size = TradeSize.HALF
 
     # --- Phase 4: Calculate stop/target ---
     orb_range = _orb.range
@@ -431,6 +434,37 @@ def _score_trade(direction: Direction, is_second_break: bool,
 
     b.compute_total()
     return b
+
+
+def _check_cascade(direction: Direction, orb: ORBRange,
+                   states: dict, price: float) -> Optional[str]:
+    """Hard 4-gate entry filter. Returns None if all gates pass, else the failing gate name.
+
+    Gate 1: ORB candle direction matches trade direction.
+    Gate 2: HTF bias matches trade direction OR bias is NEUTRAL.
+    Gate 3: Not AT a strong level (prior day/week H/L/C) in trade direction.
+    Gate 4: News hard-blocks handled separately in _check_hard_blocks() upstream.
+    """
+    # Gate 1 — ORB candle
+    if direction == Direction.LONG and orb.candle_direction != CandleDirection.BULLISH:
+        return "orb_candle_wrong_direction"
+    if direction == Direction.SHORT and orb.candle_direction != CandleDirection.BEARISH:
+        return "orb_candle_wrong_direction"
+
+    # Gate 2 — HTF bias
+    bias = states.get("memory", {}).get("morning_bias", "NEUTRAL")
+    if bias == "BULLISH_BIAS" and direction == Direction.SHORT:
+        return "htf_bias_conflict"
+    if bias == "BEARISH_BIAS" and direction == Direction.LONG:
+        return "htf_bias_conflict"
+
+    # Gate 3 — not pinned against a strong level ahead
+    from agents.structure import recompute_price_location
+    loc, nearest = recompute_price_location(price, states.get("structure", {}), direction.value)
+    if loc.value == "AT_LEVEL":
+        return f"at_strong_level_ahead:{nearest.name}"
+
+    return None
 
 
 def _check_hard_blocks(states: dict, orb: ORBRange) -> Optional[str]:
