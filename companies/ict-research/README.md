@@ -1,14 +1,17 @@
-# ICT Research Lab
+# Strategy Lab
 
-Autonomous research team that studies every ICT (Inner Circle Trader) strategy, backtests on MNQ, and — if an edge survives — spins up a live paper bot.
+Backtest + validation factory for trading strategy ideas.
 
-**Paper mode only.** See [CLAUDE.md](./CLAUDE.md) for full architecture.
+Write a `generate_signals(df)` function → Judge runs intrabar simulation,
+walk-forward, Monte Carlo, and 6 promotion gates → survivors are candidates
+for paper-bot deployment.
 
-## Pipeline at a glance
+See [CLAUDE.md](./CLAUDE.md) for architecture and how to add a strategy.
 
+## Quick test
+```bash
+python -m forge.backtester --strategy <name>   # quick sanity
+python -m forge.judge      --strategy <name>   # full gauntlet
 ```
-YouTube → Harvester → Librarian → Extractor → Coder → Backtester → Judge → Bot
-```
 
-## Status
-Scaffold only. Phase 1 (YouTube transcript pull) pending green-light from Zach.
+**Paper mode only.** No strategy goes live without explicit approval.

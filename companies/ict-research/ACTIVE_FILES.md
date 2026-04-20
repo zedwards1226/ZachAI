@@ -1,37 +1,27 @@
-# ict-research — Active Files Manifest
+# Strategy Lab — Active Files Manifest
 
 Every file in this project must be listed here. If it's not listed, delete it.
 
 ## Root
-- `CLAUDE.md` — mission + architecture
+- `CLAUDE.md` — mission + lab architecture
 - `ACTIVE_FILES.md` — this file
-- `README.md` — human overview (TBD)
+- `README.md` — human-facing overview
+- `.env` — `GROQ_API_KEY` (gitignored via root `.gitignore`)
+- `.gitignore` — excludes `data/{backtests,judge}/*.json`, `logs/`, pycache
 
-## scout/ (Phase 1 — YouTube → rules)
-- `harvester.py` — Agent 1: pulls ICT channel uploads + transcripts via YouTube Data API v3
-- `librarian.py` — Agent 2: tags transcripts by ICT setup name (regex taxonomy), groups + dedupes by views
-- `extractor.py` — Agent 3: Gemini Flash converts tagged transcripts → mechanizable rules JSON
-
-## forge/ (Phase 2 — rules → backtest → rank)
+## forge/ (the lab)
 - `__init__.py` — package marker
-- `primitives.py` — ICT building blocks (smc-backed: FVG, OB, MSS, swings, PDH/PDL); lookahead-safe via swing_length shifts
 - `data_loader.py` — yfinance MNQ=F loader, returns canonical OHLCV df in US/Eastern
-- `backtester.py` — Agent 5: intrabar simulator + vectorbt-derived sharpe/sortino, writes metrics JSON
-- `judge.py` — Agent 6: walk-forward + Monte Carlo + promotion gates, writes leaderboard JSON
+- `primitives.py` — SMC/TA building blocks (FVG, OB, MSS, swings, PDH/PDL, sessions, liquidity sweeps); lookahead-safe via `swing_length` shifts
+- `backtester.py` — Honest intrabar simulator + vectorbt-derived sharpe/sortino/expectancy
+- `judge.py` — Walk-forward + Monte Carlo + 6 promotion gates, writes leaderboard JSON
 
-## scout/ (cont.)
-- `coder.py` — Agent 4: Gemini translates rules JSON → strategy .py with smoke-test gate
-
-## forge/strategies/ (one file per codified ICT setup, generated)
-- `order_block__nQfHZ2DEJ8c.py` — OB-based MSS entry (from Mentorship Ep 3, conf 0.95)
-- `premium_discount__0LhteuLVuDU.py` — equilibrium-based entry (from Month 1 Elements, conf 0.85)
-- `fair_value_gap__XN8tuO4QIRw.py` — FVG + PM-session entry (Groq-generated from ICT Mentorship 2023 Ep 01)
+## forge/strategies/ (one .py per strategy you want to test)
+- `.gitkeep` — placeholder so the empty dir is tracked
 
 ## data/ (all gitignored except this note)
-- `transcripts/` — raw YT transcript JSONs
-- `rules/` — LLM-extracted strategy rules
-- `backtests/` — backtest result JSONs
-- `judge/` — leaderboard JSONs
+- `backtests/` — per-strategy backtest result JSONs
+- `judge/` — per-strategy verdicts + leaderboard.json
 
 ## logs/
 - *(gitignored)*

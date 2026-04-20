@@ -1,79 +1,89 @@
-# ICT Research Lab
+# Strategy Lab
 
 ## Mission
-Study every ICT (Inner Circle Trader) strategy from his YouTube channel, codify the rules, backtest on MNQ historical data, rank by composite edge score, and — if a strategy survives the gauntlet — spin up a live paper bot that trades it alongside ORB.
+A general-purpose backtest + validation factory for any trading strategy idea. You write a `generate_signals(df)` function in `forge/strategies/<name>.py`, the lab runs it through honest intrabar simulation → walk-forward → Monte Carlo → 6 promotion gates. If it survives, it's a candidate to deploy as a paper bot alongside ORB.
 
-**Paper mode ONLY. No live money touches the ICT bot until Zach approves.**
+**Paper mode ONLY. No strategy goes live until Zach approves.**
 
-## 7-Agent Pipeline
-
-```
-Harvester ─► Librarian ─► Extractor ─► Coder ─► Backtester ─► Judge ─► Bot Builder
- (YT dl)   (tag/dedupe)   (LLM rules)  (py fn)   (MNQ 5yr)    (rank)    (deploy)
-```
-
-| Agent | Role | Input | Output |
-|---|---|---|---|
-| Harvester | Pull ICT YT transcripts (channel + playlists) | channel ID | `data/transcripts/*.json` |
-| Librarian | Tag + dedupe by setup name | transcripts | `data/transcripts/index.json` |
-| Extractor | LLM → machine-readable rules | tagged transcripts | `data/rules/<setup>.json` |
-| Coder | Rules → Python backtest function | rules.json | `forge/strategies/<setup>.py` |
-| Backtester | Run on 5yr MNQ 1m/5m/15m | strategies + data | `data/backtests/<setup>.json` |
-| Judge | Rank, walk-forward validate | backtest results | `data/judge/leaderboard.json` |
-| Bot Builder | Deploy winner as sibling of ORB | winning strategy | new project folder |
-
-## "Best Strategy" Criteria
-
-A strategy is PROMOTED to paper trading only if ALL pass:
-- ≥ 100 trades in backtest (statistical significance)
-- Walk-forward out-of-sample: train 2020-2024, test 2025 — must hold up
-- Realistic costs: 2 ticks slippage + $1.50 commission per MNQ
-- Sharpe > 1.0 AND max drawdown < 20% AND profit factor > 1.5
-- Beats buy-and-hold MNQ return
-- Matches ORB bot or better
-
-Composite rank: `0.4*Sharpe + 0.3*PF + 0.2*(1 - MaxDD) + 0.1*(wins/trades)`
-
-## Folder Layout
+## What's in the box
 
 ```
-companies/ict-research/
-├── CLAUDE.md              # this file
-├── ACTIVE_FILES.md        # manifest
-├── scout/                 # Harvester + Librarian + Extractor
-├── forge/                 # Coder + Backtester + Judge
-│   └── strategies/        # one .py per codified ICT setup
-├── data/
-│   ├── transcripts/       # YT transcripts (gitignored)
-│   ├── rules/             # extracted rules JSON
-│   ├── backtests/         # backtest result JSON
-│   └── judge/             # leaderboard
-├── logs/                  # runtime logs (gitignored)
-└── README.md              # human-facing overview
+forge/data_loader.py   yfinance MNQ=F loader (5m / 60d default), US/Eastern tz
+forge/primitives.py    SMC/TA building blocks (FVG, OB, MSS, swings, PDH/PDL,
+                       sessions, liquidity sweeps) — wraps smartmoneyconcepts,
+                       lookahead-safe via swing_length shifts
+forge/backtester.py    Honest intrabar sim (one position, stop-wins-on-tie),
+                       vectorbt-derived sharpe/sortino/expectancy
+forge/judge.py         Walk-forward (3 splits, 60/40) + Monte Carlo (1000
+                       trade-shuffle) + 6 promotion gates, writes leaderboard
+forge/strategies/      One .py file per strategy. Must export
+                       generate_signals(df) -> DataFrame[signal,entry,stop,target]
 ```
 
-## Reference Repos (to clone + study, NOT fork wholesale)
+## Promotion gates
+A strategy is PROMOTED only if ALL pass:
+- ≥ 100 trades in-sample
+- Sharpe > 1.0
+- Profit factor > 1.5
+- Max drawdown < 20% of starting equity
+- Walk-forward: > 50% of test windows profitable
+- Monte Carlo: median PnL > 0
 
-Per build-first rule, these three get cloned into `C:\ZachAI\reference\` (gitignored):
-1. **ajaygm18/ict-trading-ai-agent** — full ICT bot w/ ML + backtest + execution
-2. **Therealtuk/SmartMoneyAI-SMC-Trading-Dashboard-Strategy-Backtester** — SMC indicator + backtester
-3. **Ad1xon/AI-Algorithmic-Trading-Backtester** — recent (2026-03) MT5 + SMC + ML backtester
+Composite rank: `0.4*Sharpe + 0.3*PF + 0.2*(1-MaxDD%) + 0.1*winrate`
 
-For transcripts:
-4. **Dennis-1am/YT_Metadata_Downloader** — YT Data V3 API + transcript_api, channel-wide pull
+## Lookahead protection
+The backtester walks forward bar-by-bar, stops/targets resolved intrabar with
+worst-case-stop-wins ties. `forge/primitives.py` shifts every swing-derived
+signal forward by `swing_length` bars so signals are only "confirmed" after
+enough future bars have passed. Strategies that use only the public primitives
+API (no `df.iloc[k]` for k > current bar, no negative `shift()`) are
+lookahead-safe by construction.
 
-## Auto-merge Exceptions
-- `forge/strategies/*.py` — BEFORE any strategy is promoted to live paper trading, Zach approves the promotion. Strategy code itself auto-merges.
-- Any file in a new `companies/ict-bot/` folder (spun up by Bot Builder) follows the same notify-first policy as `trading/` and `kalshi/`.
+## How to add a strategy
+
+1. Create `forge/strategies/<name>.py` with `generate_signals(df)`.
+2. Run `python -m forge.backtester --strategy <name>` for a quick sanity check.
+3. Run `python -m forge.judge --strategy <name>` for the full gauntlet.
+4. Read `data/judge/<name>.json` for the verdict.
+
+## Cost model (MNQ defaults)
+- Tick size: 0.25 pts, point value: $2.00
+- Slippage: 2 ticks entry + 2 ticks exit
+- Commission: $1.50 round-turn
+
+To target a different instrument, edit constants at the top of `forge/backtester.py`
+and replace `forge/data_loader.py:load_mnq()` with the appropriate loader.
+
+## Folder layout
+
+```
+companies/ict-research/    (folder name kept for git history; project is general now)
+├── CLAUDE.md              this file
+├── ACTIVE_FILES.md        manifest
+├── README.md              human-facing overview
+├── .env                   GROQ_API_KEY (used only by future agentic helpers)
+├── forge/                 the lab
+│   ├── data_loader.py
+│   ├── primitives.py
+│   ├── backtester.py
+│   ├── judge.py
+│   └── strategies/        your strategy files (gitkeeped, otherwise empty)
+└── data/                  outputs (gitignored)
+    ├── backtests/         per-strategy result JSONs
+    └── judge/             leaderboard + per-strategy verdicts
+```
+
+## Auto-merge exceptions
+- Anything in `forge/strategies/` auto-merges (they're code, not config).
+- BEFORE any strategy is wired into a live paper bot, Zach approves.
 
 ## Current Status (2026-04-20)
-- 6 / 7 agents live: Harvester, Librarian, Extractor, Coder, Backtester, Judge
-- Tech stack hardened: `smartmoneyconcepts` (joshyattridge) for ICT primitives, `vectorbt` for metrics
-- Lookahead bias guarded at 3 layers: Coder system prompt rules → AST + smoke gate → truncation-equivalence test
-- 2 hand-written reference strategies in `forge/strategies/` (Gemini quota exhausted; LLM regen tomorrow)
-- End-to-end Judge run: 0 / 2 strategies promoted (both correctly REJECTED — system working as designed)
+- Clean slate after retiring the ICT-specific YouTube research pipeline
+- 4 universal modules in `forge/`, ready for strategy submissions
+- 0 strategies, 0 backtests, 0 verdicts — bring your own idea
 
 ## Next Actions
-1. Wait for Gemini daily quota reset → re-run Coder on remaining rules JSONs
-2. Harvest remaining ICT videos through Extractor for more rule sets
-3. Build Agent 7 (Bot Builder) — deploy first PROMOTED strategy as a sibling of `trading/` ORB bot
+1. Decide on first strategy to test (Larry Connors mean-reversion? Opening range
+   gap fade? Simple SMA crossover with proper risk?)
+2. Write `forge/strategies/<name>.py`
+3. Run Judge, read verdict
