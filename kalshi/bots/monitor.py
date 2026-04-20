@@ -14,7 +14,18 @@ from pathlib import Path
 
 API_BASE = "http://localhost:5000"
 CHECK_INTERVAL = 30  # seconds between checks
-ALERT_COOLDOWN = 3600  # don't repeat same alert within 1 hour
+ALERT_COOLDOWN = 21600  # default 6h between same alert
+
+# Per-key overrides for conditions that stay tripped all day. These got spammy
+# at the old 1h cooldown — bump them to once-per-day so the feed stays useful.
+ALERT_COOLDOWN_OVERRIDES = {
+    "unrealized_loss": 86400,      # open book underwater — don't re-ping every hour
+    "daily_loss_warning": 86400,   # day-long condition, one notice is enough
+    "high_risk": 43200,            # capital-at-risk — 12h
+    "kalshi_disconnected": 3600,   # keep 1h — urgent
+    "halted": 3600,                # keep 1h — urgent
+    "api_down": 1800,              # 30m — urgent
+}
 
 # Telegram config — read from trading .env or fall back to hardcoded
 def _load_telegram_config():
@@ -70,13 +81,23 @@ def send_telegram(msg: str):
         log.warning("Telegram send failed: %s", e)
 
 
+def _cooldown_for(key: str) -> int:
+    """Resolve per-key cooldown. Duplicate position alerts share the `dupe_` prefix."""
+    if key in ALERT_COOLDOWN_OVERRIDES:
+        return ALERT_COOLDOWN_OVERRIDES[key]
+    if key.startswith("dupe_"):
+        return 43200  # 12h — dupe persists until manually cleared
+    return ALERT_COOLDOWN
+
+
 def alert(key: str, msg: str):
     """Log an alert and send to Telegram, respecting cooldown."""
     now = time.time()
-    if key in _last_alert and (now - _last_alert[key]) < ALERT_COOLDOWN:
+    cooldown = _cooldown_for(key)
+    if key in _last_alert and (now - _last_alert[key]) < cooldown:
         return  # still in cooldown
     _last_alert[key] = now
-    log.warning("ALERT: %s", msg)
+    log.warning("ALERT: %s (cooldown=%ds)", msg, cooldown)
     send_telegram(f"<b>WeatherAlpha Alert</b>\n{msg}")
 
 
