@@ -10,6 +10,7 @@ Every file in this project must be listed here. If it's not listed, delete it.
 ## scout/ (Phase 1 — YouTube → rules)
 - `harvester.py` — Agent 1: pulls ICT channel uploads + transcripts via YouTube Data API v3
 - `librarian.py` — Agent 2: tags transcripts by ICT setup name (regex taxonomy), groups + dedupes by views
+- `extractor.py` — Agent 3: Gemini Flash converts tagged transcripts → mechanizable rules JSON
 
 ## forge/ (Phase 2 — rules → backtest)
 - *(empty — pending Phase 2 build)*
