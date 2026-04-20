@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Optional
 
 import pytz
 
@@ -228,12 +229,14 @@ def _extract_session_ranges(bars: list[dict]) -> tuple[dict, dict]:
     )
 
 
-def recompute_price_location(price: float, structure_state: dict) -> tuple[PriceLocation, Level]:
-    """Recompute price_location vs structure's captured levels at a new price.
+def recompute_price_location(price: float, structure_state: dict,
+                             direction: Optional[str] = None) -> tuple[PriceLocation, Level]:
+    """Recompute price_location vs structure's captured levels.
 
-    Structure is captured once at 8:45 AM ET, so its stored price_location is stale
-    by the time a breakout fires at 9:45+. This lets the combiner re-tag location
-    using the current breakout price against the same level set.
+    Structure is captured once at 8:45 AM ET so its stored tag is stale by 9:45+.
+    When `direction` is passed ("LONG" or "SHORT"), only levels in front of the
+    trade count as obstacles — levels behind (already broken through) are ignored.
+    This prevents penalizing breakouts for the exact moment they're designed to fire.
     """
     pd = structure_state.get("prior_day", {})
     pw = structure_state.get("prior_week", {})
@@ -251,32 +254,59 @@ def recompute_price_location(price: float, structure_state: dict) -> tuple[Price
         "premarket_low": pm.get("low", 0),
         "equilibrium": structure_state.get("equilibrium", 0),
     }
-    return _tag_price_location(price, levels)
+    return _tag_price_location(price, levels, direction)
 
 
-def _tag_price_location(price: float, levels: dict) -> tuple[PriceLocation, Level]:
-    """Determine price location relative to key levels."""
-    nearest_name = ""
-    nearest_price = 0
-    min_distance = float("inf")
+# Strong levels — well-known historical pivots that actually defend.
+# Hit within 5pts = genuine "no room" risk. Weak levels don't trigger AT_LEVEL,
+# only APPROACHING_WALL at best.
+_STRONG_LEVELS = {
+    "prior_day_high", "prior_day_low", "prior_day_close",
+    "prior_week_high", "prior_week_low",
+}
+
+
+def _tag_price_location(price: float, levels: dict,
+                        direction: Optional[str] = None) -> tuple[PriceLocation, Level]:
+    """Determine price location relative to key levels.
+
+    Only counts levels in the trade direction (LONG = above, SHORT = below) as
+    obstacles. Only STRONG levels (prior day/week H/L/C) trigger the AT_LEVEL
+    penalty — weak levels (overnight, premarket, equilibrium) cap at
+    APPROACHING_WALL. Prevents ORB breakouts from getting vetoed when price is
+    1pt from a minor level that isn't meaningful support/resistance.
+    """
+    strong_best = (float("inf"), "", 0)
+    any_best = (float("inf"), "", 0)
 
     for name, level_price in levels.items():
         if level_price == 0:
             continue
+        if direction == "LONG" and level_price <= price:
+            continue  # level behind the trade, not an obstacle
+        if direction == "SHORT" and level_price >= price:
+            continue
         dist = abs(price - level_price)
-        if dist < min_distance:
-            min_distance = dist
-            nearest_name = name
-            nearest_price = level_price
+        if dist < any_best[0]:
+            any_best = (dist, name, level_price)
+        if name in _STRONG_LEVELS and dist < strong_best[0]:
+            strong_best = (dist, name, level_price)
 
-    nearest = Level(name=nearest_name, price=nearest_price, distance_pts=min_distance)
+    if any_best[0] == float("inf"):
+        return PriceLocation.OPEN_AIR, Level(name="none_ahead", price=0, distance_pts=999)
 
-    if min_distance <= 5:
-        return PriceLocation.AT_LEVEL, nearest
-    elif min_distance <= 20:
+    # AT_LEVEL requires a STRONG level within 5pts
+    if strong_best[0] <= 5:
+        return PriceLocation.AT_LEVEL, Level(
+            name=strong_best[1], price=strong_best[2], distance_pts=strong_best[0]
+        )
+
+    # APPROACHING_WALL uses nearest level of any strength within 20pts
+    nearest = Level(name=any_best[1], price=any_best[2], distance_pts=any_best[0])
+    if any_best[0] <= 20:
         return PriceLocation.APPROACHING_WALL, nearest
-    else:
-        return PriceLocation.OPEN_AIR, nearest
+
+    return PriceLocation.OPEN_AIR, nearest
 
 
 async def _get_vix(tv) -> float:

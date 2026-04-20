@@ -38,8 +38,11 @@ ORB_ATR_MAX_PCT = 0.60
 ATR_LOOKBACK_DAYS = 14
 
 # Scoring Thresholds
+# Lowered HALF from 6 → 5 to compensate for direction-aware / strength-tiered
+# AT_LEVEL filter (structure.py). The old filter over-penalized any nearby
+# level regardless of trade direction, dragging average scores down by ~1-2pts.
 SCORE_FULL_SIZE = 8
-SCORE_HALF_SIZE = 6
+SCORE_HALF_SIZE = 5
 MAX_TRADES_PER_SESSION = 3
 
 # Stop/Target (Finding 2: extension-based, 7x Sharpe improvement)
