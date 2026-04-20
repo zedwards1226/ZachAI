@@ -10,7 +10,7 @@ from config import (
     MAX_CONSECUTIVE_LOSSES, MIN_EDGE, MIN_PRICE_CENTS, TRADE_WINDOW_START_HOUR,
     TRADE_WINDOW_END_HOUR, TIMEZONE, STARTING_CAPITAL
 )
-from database import get_guardrail_state, get_summary
+from database import get_guardrail_state, get_summary, city_is_paused
 
 log = logging.getLogger(__name__)
 
@@ -79,9 +79,26 @@ def check_capital_at_risk(state: dict, new_stake: float, capital: float) -> tupl
     return True, "ok"
 
 
+def _effective_min_edge() -> float:
+    """Agent-tuned MIN_EDGE, or fall back to config."""
+    try:
+        from learning_agent import effective_min_edge
+        return effective_min_edge()
+    except Exception:
+        return MIN_EDGE
+
+
 def check_edge(edge: float) -> tuple[bool, str]:
-    if edge < MIN_EDGE:
-        return False, f"Edge {edge*100:.1f}% below minimum {MIN_EDGE*100:.0f}%"
+    floor = _effective_min_edge()
+    if edge < floor:
+        return False, f"Edge {edge*100:.1f}% below minimum {floor*100:.1f}%"
+    return True, "ok"
+
+
+def check_city_cooldown(city: str) -> tuple[bool, str]:
+    paused, reason = city_is_paused(city)
+    if paused:
+        return False, f"{city} paused by learning agent: {reason}"
     return True, "ok"
 
 
@@ -147,7 +164,8 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
                paper: bool = True, our_prob_yes: float | None = None,
                yes_price_cents: int | None = None,
                ensemble_spread_f: float | None = None,
-               strike_type: str | None = None) -> tuple[bool, list[str]]:
+               strike_type: str | None = None,
+               city: str | None = None) -> tuple[bool, list[str]]:
     """
     Run all guardrail checks.
     Returns (all_passed: bool, failed_reasons: list[str])
@@ -173,6 +191,8 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
         checks.append(check_market_disagreement(our_prob_yes, yes_price_cents, strike_type))
     if ensemble_spread_f is not None:
         checks.append(check_ensemble_spread(ensemble_spread_f))
+    if city is not None:
+        checks.append(check_city_cooldown(city))
 
     # Paper mode: skip window check unless override is explicitly OFF (default: allow anytime)
     if paper and not _window_override:

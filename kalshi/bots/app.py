@@ -220,6 +220,36 @@ def calibration():
     return jsonify(get_calibration())
 
 
+@app.route("/api/agent-journal")
+def agent_journal():
+    from database import get_agent_journal
+    limit = int(request.args.get("limit", 100))
+    category = request.args.get("category")
+    return jsonify(get_agent_journal(limit=limit, category=category))
+
+
+@app.route("/api/agent-state")
+def agent_state_endpoint():
+    from database import agent_state_all, get_city_cooldowns
+    from learning_agent import effective_min_edge
+    return jsonify({
+        "state": agent_state_all(),
+        "effective_min_edge": effective_min_edge(),
+        "city_cooldowns": get_city_cooldowns(),
+    })
+
+
+@app.route("/api/agent-review", methods=["POST"])
+def agent_review():
+    """Manually trigger a learning agent review (also runs daily at 6:30 PM)."""
+    from learning_agent import run_review
+    try:
+        result = run_review()
+        return jsonify({"ok": True, "result": result})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @app.route("/api/trades/verified")
 def trades_verified():
     limit = int(request.args.get("limit", 100))

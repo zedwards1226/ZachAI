@@ -205,6 +205,7 @@ def scan_and_trade() -> list[dict]:
             yes_price_cents=best["yes_price_cents"],
             ensemble_spread_f=forecast.get("ensemble_spread"),
             strike_type=best.get("strike_type"),
+            city=city_code,
         )
         if not passed:
             log.info("Trade blocked [%s %s]: %s", city_code, best["ticker"], "; ".join(reasons))

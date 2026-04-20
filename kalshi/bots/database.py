@@ -138,6 +138,28 @@ def init_db() -> None:
             error_detail      TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS agent_state (
+            key         TEXT PRIMARY KEY,
+            value       TEXT NOT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS city_cooldowns (
+            city        TEXT PRIMARY KEY,
+            reason      TEXT NOT NULL,
+            until_ts    TEXT NOT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_journal (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
+            category    TEXT NOT NULL,   -- observation|decision|action|digest
+            subject     TEXT,            -- city, setting name, or null
+            rationale   TEXT NOT NULL,
+            data_json   TEXT             -- raw metrics JSON
+        );
+
         -- Prevent duplicate trades: one open trade per market at a time
         CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_market_open
             ON trades (market_id) WHERE status = 'open';
@@ -565,3 +587,158 @@ def get_trades_with_verification(limit=100) -> list[dict]:
             (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Agent state / cooldowns / journal ────────────────────────────────────────
+
+def agent_get(key: str, default=None):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM agent_state WHERE key=?", (key,)
+        ).fetchone()
+    if row is None:
+        return default
+    try:
+        return json.loads(row["value"])
+    except Exception:
+        return row["value"]
+
+
+def agent_set(key: str, value) -> None:
+    payload = json.dumps(value) if not isinstance(value, str) else value
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO agent_state (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET
+                   value=excluded.value, updated_at=excluded.updated_at""",
+            (key, payload)
+        )
+
+
+def agent_state_all() -> dict:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT key, value, updated_at FROM agent_state").fetchall()
+    out = {}
+    for r in rows:
+        try:
+            out[r["key"]] = {"value": json.loads(r["value"]), "updated_at": r["updated_at"]}
+        except Exception:
+            out[r["key"]] = {"value": r["value"], "updated_at": r["updated_at"]}
+    return out
+
+
+def pause_city(city: str, hours: int, reason: str) -> None:
+    from datetime import timedelta
+    until = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO city_cooldowns (city, reason, until_ts, created_at)
+               VALUES (?, ?, ?, datetime('now'))
+               ON CONFLICT(city) DO UPDATE SET
+                   reason=excluded.reason,
+                   until_ts=excluded.until_ts,
+                   created_at=excluded.created_at""",
+            (city, reason, until)
+        )
+
+
+def unpause_city(city: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM city_cooldowns WHERE city=?", (city,))
+
+
+def city_is_paused(city: str) -> tuple[bool, str | None]:
+    """Return (paused, reason). Auto-expires cooldowns past until_ts."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT reason, until_ts FROM city_cooldowns WHERE city=?", (city,)
+        ).fetchone()
+        if row is None:
+            return False, None
+        try:
+            until = datetime.fromisoformat(row["until_ts"])
+        except Exception:
+            return False, None
+        if datetime.utcnow() >= until:
+            conn.execute("DELETE FROM city_cooldowns WHERE city=?", (city,))
+            return False, None
+        return True, f"{row['reason']} (until {row['until_ts']})"
+
+
+def get_city_cooldowns() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT city, reason, until_ts, created_at FROM city_cooldowns"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def journal_write(category: str, rationale: str, subject: str | None = None,
+                  data: dict | None = None) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO agent_journal (category, subject, rationale, data_json)
+               VALUES (?, ?, ?, ?)""",
+            (category, subject, rationale, json.dumps(data) if data else None)
+        )
+        return cur.lastrowid
+
+
+def get_agent_journal(limit: int = 100, category: str | None = None) -> list[dict]:
+    with get_conn() as conn:
+        if category:
+            rows = conn.execute(
+                """SELECT * FROM agent_journal WHERE category=?
+                   ORDER BY id DESC LIMIT ?""",
+                (category, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM agent_journal ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("data_json"):
+            try:
+                d["data"] = json.loads(d["data_json"])
+            except Exception:
+                pass
+        out.append(d)
+    return out
+
+
+def get_recent_city_trades(city: str, limit: int = 10) -> list[dict]:
+    """Resolved trades for a city, newest first, for streak analysis."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM trades
+               WHERE city=? AND status IN ('won','lost')
+               ORDER BY resolved_at DESC LIMIT ?""",
+            (city, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_brier_recent(days: int = 14) -> dict:
+    """Rolling Brier + accuracy over the last N days of settled signals."""
+    from datetime import timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT model_prob, outcome_correct FROM signals
+               WHERE actual_outcome IS NOT NULL
+                 AND model_prob IS NOT NULL
+                 AND settled_at >= ?""",
+            (cutoff,)
+        ).fetchall()
+    if not rows:
+        return {"samples": 0, "brier": None, "accuracy": None}
+    sq = [(r["model_prob"] - r["outcome_correct"]) ** 2 for r in rows]
+    correct = sum(r["outcome_correct"] for r in rows)
+    return {
+        "samples": len(rows),
+        "brier": round(sum(sq) / len(sq), 4),
+        "accuracy": round(correct / len(rows), 4),
+    }

@@ -15,6 +15,7 @@ from trader import scan_and_trade, resolve_expired_trades
 from database import snapshot_pnl, get_summary, get_guardrail_state
 from config import STARTING_CAPITAL
 from monitor import send_daily_digest
+from learning_agent import run_review as run_agent_review
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,13 @@ def _eod_digest_job():
         log.error("EOD digest failed: %s", exc, exc_info=True)
 
 
+def _learning_agent_job():
+    try:
+        run_agent_review()
+    except Exception as exc:
+        log.error("Learning agent review failed: %s", exc, exc_info=True)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     tz = pytz.timezone(TIMEZONE)
@@ -97,6 +105,13 @@ def start_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(hour=18, minute=0, timezone=tz),
         id="digest_eod",
         name="EOD digest (6 PM ET)",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _learning_agent_job,
+        trigger=CronTrigger(hour=18, minute=30, timezone=tz),
+        id="learning_agent",
+        name="Learning agent review (6:30 PM)",
         replace_existing=True,
     )
 
