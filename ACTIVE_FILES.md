@@ -55,6 +55,24 @@ trading/main.py (APScheduler)
 
 ---
 
+## JARVIS FIELD TECH (v1 scaffold — 2026-04-17)
+Mobile PWA for pulling electrical drawings + manuals from Google Drive and troubleshooting toilet paper converting machines with a Jarvis-style HUD and voice. See `jarvis-field-tech/ACTIVE_FILES.md` for the full manifest.
+
+| File | Purpose | Port |
+|------|---------|------|
+| `jarvis-field-tech/backend/app.py` | Flask API + serves React build | :5050 |
+| `jarvis-field-tech/backend/drive_client.py` | Google Drive OAuth + folder cache | — |
+| `jarvis-field-tech/backend/claude_client.py` | Claude Opus/Haiku routing for Jarvis persona | — |
+| `jarvis-field-tech/backend/pdf_extractor.py` | PDF text extraction for Claude context | — |
+| `jarvis-field-tech/frontend/` | React + Vite PWA, builds to `backend/static/` | — |
+| `jarvis-field-tech/.env` | ANTHROPIC + Google OAuth + Drive folder ID (gitignored) | — |
+| `scripts/JarvisFieldTech.vbs` | Auto-start backend on boot | — |
+| `scripts/JarvisFieldTechTunnel.vbs` | Cloudflare tunnel for phone access | — |
+
+Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements.txt`, `npm install && npm run build`, OAuth bootstrap via `python drive_client.py --auth`, then VBS added to Windows Startup folder.
+
+---
+
 ## TELEGRAM
 | File | Purpose |
 |------|---------|
