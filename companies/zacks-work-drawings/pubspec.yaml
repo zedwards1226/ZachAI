@@ -1,0 +1,51 @@
+name: zacks_work_drawings
+description: Zack's Work Drawings — offline-capable viewer for machine wiring diagrams and SOPs stored in Google Drive.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # UI + state
+  provider: ^6.1.2
+
+  # PDF viewer with pinch-zoom + multipage scroll
+  syncfusion_flutter_pdfviewer: ^27.1.48
+
+  # Google Drive auth + API
+  google_sign_in: ^6.2.1
+  googleapis: ^13.2.0
+  extension_google_sign_in_as_googleapis_auth: ^2.0.12
+
+  # Local storage + caching
+  path_provider: ^2.1.4
+  shared_preferences: ^2.3.2
+  http: ^1.2.2
+
+  # Connectivity
+  connectivity_plus: ^6.0.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/
+
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: false
+  image_path: "assets/icon/lightning_bolt.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/icon/lightning_bolt.png"
+  min_sdk_android: 26

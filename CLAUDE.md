@@ -123,6 +123,7 @@ Each project owns a nested `CLAUDE.md` with its operational details. Claude Code
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
 - **`companies\precisionfittedparts\`** — eBay F150 dropship (building)
+- **`companies\zacks-work-drawings\`** — Flutter Android app: Google Drive PDF viewer for machine wiring diagrams (built) → see `companies/zacks-work-drawings/CLAUDE.md`
 
 ## NEW PROJECT SCAFFOLD RULE
 When creating a new project folder under `companies\` or `C:\ZachAI\`, the scaffold MUST include a `CLAUDE.md` with:
