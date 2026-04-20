@@ -223,7 +223,8 @@ async def poll() -> Optional[dict]:
     if block_reason:
         logger.info("Hard block: %s", block_reason)
         await telegram.notify_hard_block(block_reason)
-        _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break)
+        _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
+                    block_reason=block_reason)
         _breakout_processed = True
         _persist_session()
         return None
@@ -475,8 +476,9 @@ def _filter_bars_in_range(bars: list[dict], start: datetime, end: datetime) -> l
 
 
 def _log_signal(direction: Direction, price: float, breakdown: ScoreBreakdown,
-                size: TradeSize, is_second_break: bool):
-    """Log signal to signal_log.json."""
+                size: TradeSize, is_second_break: bool,
+                block_reason: Optional[str] = None):
+    """Log signal to signal_log.json (session) + journal.db signal_history (30-day)."""
     global _signals
     _signals.append({
         "time": datetime.now(ET).isoformat(),
@@ -485,6 +487,7 @@ def _log_signal(direction: Direction, price: float, breakdown: ScoreBreakdown,
         "score": breakdown.total,
         "size": size.value,
         "was_second_break": is_second_break,
+        "block_reason": block_reason,
         "breakdown": breakdown.model_dump(),
     })
 
@@ -498,3 +501,16 @@ def _log_signal(direction: Direction, price: float, breakdown: ScoreBreakdown,
         },
     }
     write_state("signal_log", data)
+
+    try:
+        journal.log_signal_history(
+            direction=direction.value,
+            price=round(price, 2),
+            score=breakdown.total,
+            size=size.value,
+            breakdown=breakdown.model_dump(),
+            was_second_break=is_second_break,
+            block_reason=block_reason,
+        )
+    except Exception as e:
+        logger.error("Failed to persist signal_history: %s", e)
