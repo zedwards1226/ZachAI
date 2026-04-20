@@ -25,6 +25,10 @@ Every file in this project must be listed here. If it's not listed, delete it.
 > Files prefixed `_` are auto-skipped by bulk runs. Run individually with
 > `python -m forge.judge --strategy _test_<name>`.
 
+- `orb_classic.py` — port of the live ORB bot's mechanical rules (15-min ORB,
+  1.25× stop, 1.5× target, 30-60% ATR filter). Tests the breakout edge ALONE,
+  without the live bot's multi-agent context score.
+
 ## data/ (all gitignored except this note)
 - `backtests/` — per-strategy backtest result JSONs
 - `judge/` — per-strategy verdicts + leaderboard.json
