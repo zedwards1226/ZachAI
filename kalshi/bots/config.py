@@ -27,11 +27,14 @@ MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "150"))
 MAX_CAPITAL_AT_RISK = float(os.getenv("MAX_CAPITAL_AT_RISK", "0.40"))
 MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
 MIN_EDGE = float(os.getenv("MIN_EDGE", "0.08"))
-# YES-side has been anti-predictive (1/13 WR vs NO 8/9 WR over 22 trades,
-# Brier 0.4151 = worse than random). Until calibration improves, require a
-# much bigger edge for YES entries, or disable YES entirely via env flag.
-MIN_EDGE_YES = float(os.getenv("MIN_EDGE_YES", "0.20"))
-DISABLE_YES_SIDE = os.getenv("DISABLE_YES_SIDE", "true").lower() == "true"
+# YES-side was anti-predictive in a 22-trade sample (1/13 WR, Brier 0.4151).
+# Root cause: GFS ensemble over-extrapolates hot tails. Fix = higher edge bar
+# for YES + shrink our probability toward the market's implied probability so
+# overconfident ensemble readings get pulled back toward reality.
+MIN_EDGE_YES = float(os.getenv("MIN_EDGE_YES", "0.15"))
+# 0.0 = trust ensemble fully  |  1.0 = trust market fully
+# 0.25 = pull ensemble 25% of the way toward Kalshi's implied probability.
+PROB_SHRINK_TO_MARKET = float(os.getenv("PROB_SHRINK_TO_MARKET", "0.25"))
 KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))
 MIN_PRICE_CENTS = int(os.getenv("MIN_PRICE_CENTS", "5"))     # skip illiquid penny contracts
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "100"))        # Kalshi weather depth is ~50-200

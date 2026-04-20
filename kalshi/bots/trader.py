@@ -7,7 +7,7 @@ Uses 31-member GFS ensemble for probability (not normal distribution).
 import logging
 from datetime import date, datetime
 
-from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, DISABLE_YES_SIDE
+from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, PROB_SHRINK_TO_MARKET
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
@@ -130,19 +130,23 @@ def scan_and_trade() -> list[dict]:
             insert_forecast(city_code, high_f, low_f)
             continue
 
-        # 5. Find market with best edge using ENSEMBLE probabilities
+        # 5. Find market with best edge using ENSEMBLE probabilities.
+        # Shrink our probability toward the market's implied probability to
+        # damp ensemble overconfidence (Brier 0.4151 on raw ensemble).
         best = None
         best_abs_edge = 0.0
         for m in markets:
             if m["strike_type"] == "between":
-                our_p = prob_between(member_highs, m["floor_f"], m["cap_f"])
+                raw_p = prob_between(member_highs, m["floor_f"], m["cap_f"])
             else:
-                our_p = prob_exceeds(member_highs, m["strike_f"])
+                raw_p = prob_exceeds(member_highs, m["strike_f"])
+            market_p = m["yes_price_cents"] / 100.0
+            our_p = raw_p + PROB_SHRINK_TO_MARKET * (market_p - raw_p)
             e = compute_edge(our_p, m["yes_price_cents"])
             ae = effective_edge(e)
             if ae > best_abs_edge:
                 best_abs_edge = ae
-                best = {**m, "our_prob": our_p, "edge": e, "abs_edge": ae}
+                best = {**m, "our_prob": our_p, "raw_prob": raw_p, "edge": e, "abs_edge": ae}
 
         if not best:
             insert_forecast(city_code, high_f, low_f)
@@ -151,40 +155,25 @@ def scan_and_trade() -> list[dict]:
         # 6. Determine side
         side = best_side(best["edge"])
 
-        # 6a. YES-side guard: calibration check (22-trade window showed YES 1/13,
-        # NO 8/9, Brier 0.4151). Block YES entries until calibration recovers.
-        if side == "yes":
-            if DISABLE_YES_SIDE:
-                log.info("Skipping %s %s -- YES side disabled by config (poor calibration)",
-                         city_code, best["ticker"])
-                actions.append({"city": city_code, "ticker": best["ticker"],
-                                "action": "blocked", "reasons": ["yes_side_disabled"],
-                                "edge": best["edge"]})
-                _sig = dict(
-                    city=city_code, market_id=best["ticker"],
-                    direction="YES", model_prob=best["our_prob"],
-                    market_price=best["yes_price_cents"] / 100, edge=best["edge"],
-                    kelly_fraction=0.0, suggested_size=0.0,
-                    forecast_hi_f=high_f, forecast_lo_f=low_f, strike_f=best["strike_f"],
-                )
-                insert_signal(**_sig, reason_skipped="yes_side_disabled")
-                continue
-            if best["abs_edge"] < MIN_EDGE_YES:
-                log.info("Skipping %s %s -- YES edge %.3f below MIN_EDGE_YES %.3f",
-                         city_code, best["ticker"], best["abs_edge"], MIN_EDGE_YES)
-                actions.append({"city": city_code, "ticker": best["ticker"],
-                                "action": "blocked",
-                                "reasons": [f"yes_edge_below_{MIN_EDGE_YES}"],
-                                "edge": best["edge"]})
-                _sig = dict(
-                    city=city_code, market_id=best["ticker"],
-                    direction="YES", model_prob=best["our_prob"],
-                    market_price=best["yes_price_cents"] / 100, edge=best["edge"],
-                    kelly_fraction=0.0, suggested_size=0.0,
-                    forecast_hi_f=high_f, forecast_lo_f=low_f, strike_f=best["strike_f"],
-                )
-                insert_signal(**_sig, reason_skipped=f"yes_edge_below_{MIN_EDGE_YES}")
-                continue
+        # 6a. YES-side needs a bigger edge than NO because raw ensemble has been
+        # overconfident on YES. Shrinkage already pulled our_prob toward market,
+        # but keep an extra gate on the residual edge.
+        if side == "yes" and best["abs_edge"] < MIN_EDGE_YES:
+            log.info("Skipping %s %s -- YES edge %.3f below MIN_EDGE_YES %.3f",
+                     city_code, best["ticker"], best["abs_edge"], MIN_EDGE_YES)
+            actions.append({"city": city_code, "ticker": best["ticker"],
+                            "action": "blocked",
+                            "reasons": [f"yes_edge_below_{MIN_EDGE_YES}"],
+                            "edge": best["edge"]})
+            _sig = dict(
+                city=city_code, market_id=best["ticker"],
+                direction="YES", model_prob=best["our_prob"],
+                market_price=best["yes_price_cents"] / 100, edge=best["edge"],
+                kelly_fraction=0.0, suggested_size=0.0,
+                forecast_hi_f=high_f, forecast_lo_f=low_f, strike_f=best["strike_f"],
+            )
+            insert_signal(**_sig, reason_skipped=f"yes_edge_below_{MIN_EDGE_YES}")
+            continue
 
         price_cents = (best["yes_price_cents"] if side == "yes"
                        else best["no_price_cents"])
