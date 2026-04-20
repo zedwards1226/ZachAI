@@ -27,19 +27,37 @@ ALERT_COOLDOWN_OVERRIDES = {
     "api_down": 1800,              # 30m — urgent
 }
 
-# Telegram config — read from trading .env or fall back to hardcoded
+# Telegram config — prefer dedicated WeatherAlpha bot in kalshi/.env,
+# fall back to shared ORB Trading Alerts bot in trading/.env if not set.
 def _load_telegram_config():
-    """Load Telegram bot token and chat ID."""
-    env_path = Path(__file__).parent.parent.parent / "trading" / ".env"
-    token = None
-    chat_id = None
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
+    """Load Telegram bot token and chat ID.
+
+    Priority:
+      1. kalshi/.env  → @zacksweather_bot (dedicated WeatherAlpha bot)
+      2. trading/.env → @ORD_trading_bot   (legacy shared bot)
+      3. Environment variables (override)
+    """
+    def _read_env(path: Path):
+        token, chat_id = None, None
+        if not path.exists():
+            return token, chat_id
+        for line in path.read_text().splitlines():
             line = line.strip()
             if line.startswith("TELEGRAM_BOT_TOKEN="):
-                token = line.split("=", 1)[1].strip()
+                token = line.split("=", 1)[1].strip() or None
             elif line.startswith("TELEGRAM_CHAT_ID="):
-                chat_id = line.split("=", 1)[1].strip()
+                chat_id = line.split("=", 1)[1].strip() or None
+        return token, chat_id
+
+    kalshi_env = Path(__file__).parent.parent / ".env"
+    trading_env = Path(__file__).parent.parent.parent / "trading" / ".env"
+
+    token, chat_id = _read_env(kalshi_env)
+    if not token or not chat_id:
+        fallback_token, fallback_chat = _read_env(trading_env)
+        token = token or fallback_token
+        chat_id = chat_id or fallback_chat
+
     # Environment variable override
     token = os.environ.get("TELEGRAM_BOT_TOKEN", token)
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", chat_id)
@@ -98,7 +116,7 @@ def alert(key: str, msg: str):
         return  # still in cooldown
     _last_alert[key] = now
     log.warning("ALERT: %s (cooldown=%ds)", msg, cooldown)
-    send_telegram(f"<b>WeatherAlpha Alert</b>\n{msg}")
+    send_telegram(f"⚠️ <b>WeatherAlpha — Heads Up</b>\n\n{msg}")
 
 
 def clear_alert(key: str):
@@ -111,20 +129,20 @@ def check_api_health():
     try:
         r = requests.get(f"{API_BASE}/api/health", timeout=10)
         if r.status_code != 200:
-            alert("api_down", f"API returned HTTP {r.status_code}")
+            alert("api_down", f"The WeatherAlpha bot's web service is responding with an error code ({r.status_code}). It may be crashing or restarting.")
             return False
         data = r.json()
         if not data.get("kalshi_connected"):
-            alert("kalshi_disconnected", "Kalshi API is disconnected")
+            alert("kalshi_disconnected", "Lost connection to Kalshi (the prediction market exchange). The bot can't place trades or check market prices until this reconnects.")
         else:
             clear_alert("kalshi_disconnected")
         clear_alert("api_down")
         return True
     except requests.ConnectionError:
-        alert("api_down", "Cannot connect to bot API at localhost:5000 — is the bot running?")
+        alert("api_down", "Can't reach the WeatherAlpha bot at all. The bot process may have crashed — check if app.py is running.")
         return False
     except Exception as e:
-        alert("api_error", f"Health check error: {e}")
+        alert("api_error", f"Something went wrong checking the bot's health: {e}")
         return False
 
 
@@ -143,7 +161,7 @@ def check_duplicate_trades():
             market_counts[mid] = market_counts.get(mid, 0) + 1
         for mid, count in market_counts.items():
             if count > 1:
-                alert(f"dupe_{mid}", f"DUPLICATE: {count} open positions for {mid}")
+                alert(f"dupe_{mid}", f"Found {count} open positions on the same market ({mid}). Looks like a duplicate trade was opened — one of them probably needs closing.")
             else:
                 clear_alert(f"dupe_{mid}")
         # Also check per-city duplicates
@@ -153,11 +171,11 @@ def check_duplicate_trades():
             city_counts[c] = city_counts.get(c, 0) + 1
         for city, count in city_counts.items():
             if count > 1:
-                alert(f"dupe_city_{city}", f"DUPLICATE: {count} open positions for city {city}")
+                alert(f"dupe_city_{city}", f"There are {count} open positions for {city}. We usually only hold one position per city — something doubled up.")
             else:
                 clear_alert(f"dupe_city_{city}")
     except Exception as e:
-        alert("dupe_check_error", f"Duplicate check failed: {e}")
+        alert("dupe_check_error", f"Couldn't run the duplicate-trade check: {e}")
 
 
 def check_guardrails():
@@ -168,14 +186,14 @@ def check_guardrails():
             return
         data = r.json()
         if data.get("halted"):
-            alert("halted", f"Bot is HALTED: {data.get('halt_reason', 'unknown')}")
+            alert("halted", f"Trading is paused right now. Reason: {data.get('halt_reason', 'unknown')}. The bot won't take any new trades until this clears.")
         else:
             clear_alert("halted")
 
         # Check if daily loss is approaching limit
         daily_pnl = data.get("daily_pnl_usd", 0)
         if daily_pnl < -15:  # approaching $20 max daily loss
-            alert("daily_loss_warning", f"Daily P&L is ${daily_pnl:.2f} — approaching $20 limit")
+            alert("daily_loss_warning", f"Down ${abs(daily_pnl):.2f} today — getting close to the $20 daily loss cap. If we hit $20 the bot stops trading until tomorrow.")
         else:
             clear_alert("daily_loss_warning")
 
@@ -183,11 +201,11 @@ def check_guardrails():
         car = data.get("capital_at_risk_usd", 0)
         max_car = data.get("max_capital_at_risk", 40)  # from guardrail_status()
         if car > max_car:
-            alert("high_risk", f"Capital at risk: ${car:.2f} (over ${max_car:.2f} limit)")
+            alert("high_risk", f"We have ${car:.2f} tied up in open trades right now — that's over our ${max_car:.2f} risk limit. Won't open new positions until something closes.")
         else:
             clear_alert("high_risk")
     except Exception as e:
-        alert("guardrail_error", f"Guardrail check failed: {e}")
+        alert("guardrail_error", f"Couldn't check the safety guardrails: {e}")
 
 
 def check_trade_consistency():
@@ -200,11 +218,11 @@ def check_trade_consistency():
         open_count = summary.get("open_trades", 0)
 
         if open_count > 12:
-            alert("too_many_open", f"Unusual: {open_count} open trades (expected max ~6)")
+            alert("too_many_open", f"There are {open_count} open trades right now. We normally don't carry more than ~6 at once, so something's off — worth checking the dashboard.")
         else:
             clear_alert("too_many_open")
     except Exception as e:
-        alert("consistency_error", f"Consistency check failed: {e}")
+        alert("consistency_error", f"Couldn't double-check the trade counts: {e}")
 
 
 def check_positions_pnl():
@@ -224,16 +242,16 @@ def check_positions_pnl():
                 key=lambda p: p.get("unrealized_pnl") or 0,
             )[:3]
             breakdown = "; ".join(
-                f"{p.get('city')} {p.get('side')} ${p.get('unrealized_pnl', 0):.2f}"
+                f"{p.get('city')} {p.get('side')} (down ${abs(p.get('unrealized_pnl', 0)):.2f})"
                 for p in losers
             )
             alert("unrealized_loss",
-                  f"Open book down ${total_unrealized:.2f} | worst: {breakdown}")
+                  f"Our open positions are down ${abs(total_unrealized):.2f} right now. Worst three: {breakdown}. Nothing's locked in yet — these can recover before the markets close.")
         else:
             clear_alert("unrealized_loss")
         # stale_prices alert removed — 0¢/None on a resolving T-market is normal.
     except Exception as e:
-        alert("pnl_check_error", f"P&L check failed: {e}")
+        alert("pnl_check_error", f"Couldn't check current profit/loss: {e}")
 
 
 def check_scan_status():
@@ -250,13 +268,13 @@ def check_scan_status():
                     last_scan = datetime.fromisoformat(last_scan_str)
                     elapsed = (datetime.utcnow() - last_scan).total_seconds()
                     if elapsed > 300:
-                        alert("scan_stuck", f"Scan running for {elapsed:.0f}s — may be stuck")
+                        alert("scan_stuck", f"The market scan has been running for {elapsed:.0f} seconds — that's way longer than normal. It may be stuck and need a restart.")
                 except Exception:
                     pass
         else:
             clear_alert("scan_stuck")
     except Exception as e:
-        alert("scan_status_error", f"Scan status check failed: {e}")
+        alert("scan_status_error", f"Couldn't check whether the scanner is healthy: {e}")
 
 
 def build_status_summary() -> str:
@@ -297,32 +315,88 @@ def build_status_summary() -> str:
 
 def send_daily_digest(when: str = "eod"):
     """Send a single Telegram summary. `when` = 'morning' or 'eod'.
-    Replaces per-event spam with one consolidated message."""
+    Plain-English replacement for per-event spam."""
     try:
         health = requests.get(f"{API_BASE}/api/health", timeout=5).json()
         pos    = requests.get(f"{API_BASE}/api/positions", timeout=5).json()
         summ   = requests.get(f"{API_BASE}/api/summary", timeout=5).json()
     except Exception as e:
-        send_telegram(f"<b>WeatherAlpha Digest — API unreachable</b>\n{e}")
+        send_telegram(
+            f"<b>WeatherAlpha digest couldn't run</b>\n\n"
+            f"The bot's web service didn't respond, so I can't pull the numbers.\n"
+            f"Technical detail: {e}"
+        )
         return
 
-    header = "Morning Brief" if when == "morning" else "End-of-Day"
-    lines = [f"<b>WeatherAlpha — {header}</b>"]
-    lines.append(f"Mode: {'PAPER' if health.get('paper_mode') else 'LIVE'} | "
-                 f"Kalshi: {'OK' if health.get('kalshi_connected') else 'DOWN'}")
-    lines.append(f"Lifetime P&L: ${summ.get('total_pnl_usd', 0):+.2f} "
-                 f"({summ.get('wins', 0)}W/{summ.get('losses', 0)}L)")
-    lines.append(f"Open: {len(pos.get('positions', []))} positions | "
-                 f"Unrealized: ${pos.get('total_unrealized_pnl', 0):+.2f}")
+    if when == "morning":
+        emoji, header, intro = "☀️", "Good morning — WeatherAlpha update", "Here's where we stand heading into today's markets."
+    else:
+        emoji, header, intro = "🌙", "End-of-day wrap — WeatherAlpha", "Here's how today landed."
+
+    mode_text = "paper trading (no real money on the line)" if health.get("paper_mode") else "LIVE TRADING (real money)"
+    kalshi_text = "working" if health.get("kalshi_connected") else "DOWN — bot can't trade right now"
+
+    total_pnl = summ.get("total_pnl_usd", 0)
+    wins = summ.get("wins", 0)
+    losses = summ.get("losses", 0)
+    total_trades = summ.get("total_trades", wins + losses)
+    win_rate = (wins / total_trades * 100) if total_trades else 0
+    pnl_word = "profit" if total_pnl >= 0 else "loss"
+
+    open_count = len(pos.get("positions", []))
+    unrealized = pos.get("total_unrealized_pnl", 0)
+    if open_count == 0:
+        open_text = "No positions open right now."
+    else:
+        unreal_word = "up" if unrealized >= 0 else "down"
+        open_text = (
+            f"Holding <b>{open_count} position{'s' if open_count != 1 else ''}</b> right now — "
+            f"currently {unreal_word} <b>${abs(unrealized):.2f}</b> "
+            f"<i>(not locked in until markets resolve)</i>"
+        )
+
+    lines = [
+        f"{emoji} <b>{header}</b>",
+        f"<i>{intro}</i>",
+        "",
+        f"<b>System status</b>",
+        f"  • Trading mode: {mode_text}",
+        f"  • Kalshi connection: {kalshi_text}",
+        "",
+        f"<b>Lifetime results</b>",
+        f"  • {total_trades} trades total — <b>{wins} wins, {losses} losses</b> ({win_rate:.0f}% win rate)",
+        f"  • Total {pnl_word}: <b>${abs(total_pnl):.2f}</b>",
+        "",
+        f"<b>Right now</b>",
+        f"  {open_text}",
+    ]
+
     if pos.get("positions"):
         lines.append("")
+        lines.append(f"<b>Open positions</b>")
         for p in pos["positions"]:
-            upnl = p.get("unrealized_pnl")
-            upnl_s = f"${upnl:+.2f}" if upnl is not None else "pending"
-            lines.append(
-                f"• {p.get('city')} {p.get('side')} "
-                f"entry {p.get('price_cents')}c → now {p.get('current_price')}c | {upnl_s}"
+            city = p.get("city", "?")
+            side = (p.get("side") or "").upper()
+            side_phrase = (
+                "betting the high temp WILL hit the target" if side == "YES"
+                else "betting the high temp WON'T hit the target" if side == "NO"
+                else side
             )
+            entry_c = p.get("price_cents")
+            now_c = p.get("current_price")
+            upnl = p.get("unrealized_pnl")
+            if upnl is None:
+                pnl_phrase = "still waiting on a current price"
+            elif upnl >= 0:
+                pnl_phrase = f"up ${upnl:.2f}"
+            else:
+                pnl_phrase = f"down ${abs(upnl):.2f}"
+            price_phrase = (
+                f"bought at {entry_c}¢" + (f", currently {now_c}¢" if now_c is not None else "")
+                if entry_c is not None else "price data pending"
+            )
+            lines.append(f"  • <b>{city}</b> — {side_phrase}. {price_phrase} → {pnl_phrase}")
+
     send_telegram("\n".join(lines))
     log.info("Digest sent (%s)", when)
 
@@ -358,7 +432,7 @@ def main():
         try:
             run_all_checks()
         except KeyboardInterrupt:
-            send_telegram("WeatherAlpha Monitor stopped")
+            send_telegram("🛑 <b>WeatherAlpha monitor stopped</b>\n\nThe health-check process was shut down. Real-time alerts are paused until it starts again.")
             break
         except Exception as e:
             log.error("Monitor loop error: %s", e)
