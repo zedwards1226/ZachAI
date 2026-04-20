@@ -80,6 +80,24 @@ def init_db() -> None:
                 notes           TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS signal_history (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                date            TEXT NOT NULL,
+                time            TEXT NOT NULL,
+                direction       TEXT NOT NULL,
+                price           REAL NOT NULL,
+                score           INTEGER NOT NULL,
+                size            TEXT NOT NULL,
+                was_second_break INTEGER DEFAULT 0,
+                block_reason    TEXT,
+                breakdown       TEXT NOT NULL,
+                created_at      TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_signal_history_date ON signal_history(date)"
+        )
 
 
 def log_trade_open(direction: str, score: int, breakdown: dict,
@@ -152,6 +170,35 @@ def log_trade_close(trade_id: int, exit_price: float, outcome: str,
             "outcome": outcome,
             "rr": round(rr, 2),
         }
+
+
+def log_signal_history(direction: str, price: float, score: int, size: str,
+                       breakdown: dict, was_second_break: bool,
+                       block_reason: Optional[str] = None) -> None:
+    """Log every scored signal (taken, skipped, or hard-blocked) for threshold calibration."""
+    now = datetime.now(ET)
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO signal_history (date, time, direction, price, score, size,
+                                        was_second_break, block_reason, breakdown, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"),
+            direction, price, score, size,
+            1 if was_second_break else 0,
+            block_reason, json.dumps(breakdown), now.isoformat(),
+        ))
+
+
+def get_signal_history(days: int = 30) -> list[dict]:
+    """Get all scored signals from the last N days."""
+    cutoff = (datetime.now(ET) - timedelta(days=days)).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM signal_history WHERE date >= ? ORDER BY date, time",
+            (cutoff,)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_open_trades() -> list[dict]:
