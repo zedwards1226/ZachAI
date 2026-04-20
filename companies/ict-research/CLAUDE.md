@@ -66,13 +66,14 @@ For transcripts:
 - `forge/strategies/*.py` — BEFORE any strategy is promoted to live paper trading, Zach approves the promotion. Strategy code itself auto-merges.
 - Any file in a new `companies/ict-bot/` folder (spun up by Bot Builder) follows the same notify-first policy as `trading/` and `kalshi/`.
 
-## Current Status
-- 2026-04-20 — scaffold created on branch `ict-research-scaffold`
-- Phase 1 (Scout) pending Zach go-ahead to start pulling YouTube transcripts
+## Current Status (2026-04-20)
+- 6 / 7 agents live: Harvester, Librarian, Extractor, Coder, Backtester, Judge
+- Tech stack hardened: `smartmoneyconcepts` (joshyattridge) for ICT primitives, `vectorbt` for metrics
+- Lookahead bias guarded at 3 layers: Coder system prompt rules → AST + smoke gate → truncation-equivalence test
+- 2 hand-written reference strategies in `forge/strategies/` (Gemini quota exhausted; LLM regen tomorrow)
+- End-to-end Judge run: 0 / 2 strategies promoted (both correctly REJECTED — system working as designed)
 
 ## Next Actions
-1. Clone 4 reference repos into `C:\ZachAI\reference\`
-2. Read each, identify reusable components
-3. Build Harvester on top of `Dennis-1am/YT_Metadata_Downloader` (YouTube Data API key needed)
-4. Pull ICT Concepts channel transcripts → Librarian tags them
-5. Extractor runs on top 20 most-viewed videos first (fast validation loop)
+1. Wait for Gemini daily quota reset → re-run Coder on remaining rules JSONs
+2. Harvest remaining ICT videos through Extractor for more rule sets
+3. Build Agent 7 (Bot Builder) — deploy first PROMOTED strategy as a sibling of `trading/` ORB bot

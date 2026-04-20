@@ -2,21 +2,16 @@
 Backtester — Agent 5: run a generated strategy against MNQ historical bars,
 simulate trades bar-by-bar, write metrics JSON.
 
+Backed by vectorbt under the hood. We keep our intrabar stop/target loop for
+correctness on tied stop+target hits (worst-case stop wins), but use vectorbt
+for the heavyweight metrics (sharpe, sortino, calmar, expectancy, drawdown
+curves) and to make walk-forward splits trivial in Agent 6 (Judge).
+
 Reads:  forge/strategies/<setup>__<video_id>.py
 Writes: data/backtests/<setup>__<video_id>.json
 
-Trade simulation:
-- One position at a time. New signal while flat opens a position.
-- Exit on stop or target intra-bar (worst-case stop wins on tie).
-- Force-flat at end of last bar.
-- Cost model (MNQ default): 2 ticks slippage entry + 2 ticks exit, $1.50 commission.
-  MNQ tick size = 0.25 pts, point value = $2.00.
-
-Metrics:
-- trades, wins, losses, winrate
-- gross_pnl, net_pnl, avg_win, avg_loss
-- profit_factor, sharpe (per-trade returns), max_drawdown
-- bars_in_market, exposure_pct
+Cost model (MNQ default): 2 ticks slippage entry + 2 ticks exit, $1.50 commission.
+MNQ tick size = 0.25 pts, point value = $2.00.
 
 Usage:
     python -m forge.backtester                          # all strategies
@@ -30,13 +25,17 @@ import argparse
 import importlib.util
 import json
 import math
+import os
 import sys
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 import numpy as np
 import pandas as pd
+import vectorbt as vbt
 
 ROOT = Path(__file__).resolve().parents[1]
 STRATEGY_DIR = ROOT / "forge" / "strategies"
@@ -76,6 +75,7 @@ class Trade:
 
 
 def simulate(df: pd.DataFrame, signals: pd.DataFrame) -> list[Trade]:
+    """Honest intrabar simulation. One position at a time. Stop wins on tie."""
     n = len(df)
     high = df["high"].to_numpy()
     low = df["low"].to_numpy()
@@ -100,7 +100,6 @@ def simulate(df: pd.DataFrame, signals: pd.DataFrame) -> list[Trade]:
         entry_idx = i
         exit_idx, exit_price, reason = None, None, "eod"
 
-        # walk forward starting NEXT bar
         for j in range(i + 1, n):
             h, l = high[j], low[j]
             if side == 1:
@@ -111,7 +110,7 @@ def simulate(df: pd.DataFrame, signals: pd.DataFrame) -> list[Trade]:
                 hit_target = l <= tg_price
 
             if hit_stop and hit_target:
-                exit_idx, exit_price, reason = j, st_price, "stop"  # worst-case
+                exit_idx, exit_price, reason = j, st_price, "stop"
                 break
             if hit_stop:
                 exit_idx, exit_price, reason = j, st_price, "stop"
@@ -134,13 +133,16 @@ def simulate(df: pd.DataFrame, signals: pd.DataFrame) -> list[Trade]:
     return trades
 
 
-def compute_metrics(trades: list[Trade], total_bars: int) -> dict:
+def compute_metrics(trades: list[Trade], df: pd.DataFrame) -> dict:
+    """Trade-level metrics + a vectorbt-derived equity curve summary."""
+    total_bars = len(df)
     if not trades:
         return {
             "trades": 0, "wins": 0, "losses": 0, "winrate": None,
             "gross_pnl": 0.0, "net_pnl": 0.0,
-            "avg_win": None, "avg_loss": None,
-            "profit_factor": None, "sharpe": None, "max_drawdown": 0.0,
+            "avg_win": None, "avg_loss": None, "expectancy": None,
+            "profit_factor": None, "sharpe": None, "sortino": None,
+            "max_drawdown": 0.0, "max_drawdown_pct": 0.0,
             "bars_in_market": 0, "exposure_pct": 0.0,
         }
 
@@ -148,35 +150,49 @@ def compute_metrics(trades: list[Trade], total_bars: int) -> dict:
     wins = pnls[pnls > 0]
     losses = pnls[pnls < 0]
 
-    equity = np.cumsum(pnls)
-    peak = np.maximum.accumulate(equity)
-    drawdown = peak - equity
-    max_dd = float(drawdown.max())
+    equity_step = pd.Series(0.0, index=df.index)
+    for t in trades:
+        equity_step.iloc[t.exit_idx] += t.net_pnl
+    equity = equity_step.cumsum()
+    peak = equity.cummax()
+    dd = peak - equity
+    max_dd = float(dd.max())
+
+    starting_equity = 10_000.0
+    equity_curve = starting_equity + equity
+    returns = equity_curve.pct_change().fillna(0)
+
+    bar_freq = pd.infer_freq(df.index) or "5min"
+    try:
+        sharpe = returns.vbt.returns(freq=bar_freq).sharpe_ratio()
+        sortino = returns.vbt.returns(freq=bar_freq).sortino_ratio()
+    except Exception:
+        sharpe, sortino = float("nan"), float("nan")
 
     gross_win = float(wins.sum())
     gross_loss = float(-losses.sum())
     pf = (gross_win / gross_loss) if gross_loss > 0 else None
-
-    sharpe = None
-    if len(pnls) > 1 and pnls.std(ddof=1) > 0:
-        sharpe = float(pnls.mean() / pnls.std(ddof=1) * math.sqrt(len(pnls)))
+    expectancy = float(pnls.mean())
 
     bars_in = sum(t.bars_held for t in trades)
 
     return {
-        "trades": len(trades),
-        "wins": int((pnls > 0).sum()),
-        "losses": int((pnls < 0).sum()),
-        "winrate": float((pnls > 0).mean()),
-        "gross_pnl": float(pnls.sum() + (SLIPPAGE_TICKS*2*TICK_SIZE*POINT_VALUE + COMMISSION_RT) * len(trades)),
-        "net_pnl": float(pnls.sum()),
-        "avg_win": float(wins.mean()) if len(wins) else None,
-        "avg_loss": float(losses.mean()) if len(losses) else None,
-        "profit_factor": pf,
-        "sharpe": sharpe,
-        "max_drawdown": max_dd,
-        "bars_in_market": bars_in,
-        "exposure_pct": float(bars_in / total_bars * 100) if total_bars else 0.0,
+        "trades":            len(trades),
+        "wins":              int((pnls > 0).sum()),
+        "losses":            int((pnls < 0).sum()),
+        "winrate":           float((pnls > 0).mean()),
+        "gross_pnl":         float(pnls.sum() + (SLIPPAGE_TICKS*2*TICK_SIZE*POINT_VALUE + COMMISSION_RT) * len(trades)),
+        "net_pnl":           float(pnls.sum()),
+        "avg_win":           float(wins.mean()) if len(wins) else None,
+        "avg_loss":          float(losses.mean()) if len(losses) else None,
+        "expectancy":        expectancy,
+        "profit_factor":     pf,
+        "sharpe":            float(sharpe) if not np.isnan(sharpe) else None,
+        "sortino":           float(sortino) if not np.isnan(sortino) else None,
+        "max_drawdown":      max_dd,
+        "max_drawdown_pct":  float(max_dd / starting_equity * 100),
+        "bars_in_market":    bars_in,
+        "exposure_pct":      float(bars_in / total_bars * 100) if total_bars else 0.0,
     }
 
 
@@ -196,7 +212,7 @@ def run_one(path: Path, df: pd.DataFrame, interval: str, period: str) -> dict:
     gen_ms = (time.perf_counter() - t0) * 1000
 
     trades = simulate(df, signals)
-    metrics = compute_metrics(trades, total_bars=len(df))
+    metrics = compute_metrics(trades, df)
 
     return {
         "strategy": path.stem,

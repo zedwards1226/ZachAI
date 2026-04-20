@@ -12,11 +12,12 @@ Every file in this project must be listed here. If it's not listed, delete it.
 - `librarian.py` — Agent 2: tags transcripts by ICT setup name (regex taxonomy), groups + dedupes by views
 - `extractor.py` — Agent 3: Gemini Flash converts tagged transcripts → mechanizable rules JSON
 
-## forge/ (Phase 2 — rules → backtest)
+## forge/ (Phase 2 — rules → backtest → rank)
 - `__init__.py` — package marker
-- `primitives.py` — ICT building blocks (FVG, OB, MSS, swing points, sessions, PDH/PDL)
+- `primitives.py` — ICT building blocks (smc-backed: FVG, OB, MSS, swings, PDH/PDL); lookahead-safe via swing_length shifts
 - `data_loader.py` — yfinance MNQ=F loader, returns canonical OHLCV df in US/Eastern
-- `backtester.py` — Agent 5: simulates strategy signals bar-by-bar, writes metrics JSON
+- `backtester.py` — Agent 5: intrabar simulator + vectorbt-derived sharpe/sortino, writes metrics JSON
+- `judge.py` — Agent 6: walk-forward + Monte Carlo + promotion gates, writes leaderboard JSON
 
 ## scout/ (cont.)
 - `coder.py` — Agent 4: Gemini translates rules JSON → strategy .py with smoke-test gate
