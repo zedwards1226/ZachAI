@@ -1,0 +1,8 @@
+data/transcripts/*.json
+data/transcripts/*.txt
+data/backtests/*.json
+data/judge/*.json
+logs/*.log
+__pycache__/
+*.pyc
+.venv/
