@@ -228,6 +228,32 @@ def _extract_session_ranges(bars: list[dict]) -> tuple[dict, dict]:
     )
 
 
+def recompute_price_location(price: float, structure_state: dict) -> tuple[PriceLocation, Level]:
+    """Recompute price_location vs structure's captured levels at a new price.
+
+    Structure is captured once at 8:45 AM ET, so its stored price_location is stale
+    by the time a breakout fires at 9:45+. This lets the combiner re-tag location
+    using the current breakout price against the same level set.
+    """
+    pd = structure_state.get("prior_day", {})
+    pw = structure_state.get("prior_week", {})
+    on = structure_state.get("overnight", {})
+    pm = structure_state.get("premarket", {})
+    levels = {
+        "prior_day_high": pd.get("high", 0),
+        "prior_day_low": pd.get("low", 0),
+        "prior_day_close": pd.get("close", 0),
+        "prior_week_high": pw.get("high", 0),
+        "prior_week_low": pw.get("low", 0),
+        "overnight_high": on.get("high", 0),
+        "overnight_low": on.get("low", 0),
+        "premarket_high": pm.get("high", 0),
+        "premarket_low": pm.get("low", 0),
+        "equilibrium": structure_state.get("equilibrium", 0),
+    }
+    return _tag_price_location(price, levels)
+
+
 def _tag_price_location(price: float, levels: dict) -> tuple[PriceLocation, Level]:
     """Determine price location relative to key levels."""
     nearest_name = ""

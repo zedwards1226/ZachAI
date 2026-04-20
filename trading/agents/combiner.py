@@ -377,17 +377,20 @@ def _score_trade(direction: Direction, is_second_break: bool,
             b.sweep_trap = -2
             b.details["sweep_trap"] = f"Sweep in {direction.value} direction (trap warning)"
 
-    # +1: Structure OPEN_AIR
-    price_loc = structure.get("price_location", "")
+    # +1: Structure OPEN_AIR — recomputed against breakout price
+    # (structure state was captured at 8:45 AM; reuse its levels, not its stale tag)
+    from agents.structure import recompute_price_location
+    price_loc_enum, nearest = recompute_price_location(price, structure)
+    price_loc = price_loc_enum.value
     if price_loc == "OPEN_AIR":
         b.open_air = 1
         b.details["open_air"] = "No major level within 20 pts"
     elif price_loc == "APPROACHING_WALL":
         b.approaching_wall = -1
-        b.details["approaching_wall"] = f"Near {structure.get('nearest_level', {}).get('name', '?')}"
+        b.details["approaching_wall"] = f"Near {nearest.name} ({nearest.distance_pts:.1f}pts)"
     elif price_loc == "AT_LEVEL":
         b.at_level = -5
-        b.details["at_level"] = f"At {structure.get('nearest_level', {}).get('name', '?')} — no room"
+        b.details["at_level"] = f"At {nearest.name} — no room"
 
     # +1: RVOL > 1.5 (Finding 6)
     rvol = structure.get("rvol")
