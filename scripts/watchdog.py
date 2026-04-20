@@ -252,11 +252,16 @@ def _is_process_running(name_fragment: str) -> bool:
         return False
 
 
+_PYTHONW = r"C:\Python314\pythonw.exe"
+
+
 def _start_process(script_path: str, label: str) -> bool:
-    """Start a Python script as a detached background process."""
+    """Start a Python script as a detached background process.
+    Uses explicit Python314 path to avoid Windows Store Python shim spawning
+    a duplicate process."""
     try:
         subprocess.Popen(
-            ["pythonw", script_path],
+            [_PYTHONW, script_path],
             cwd=str(Path(script_path).parent),
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         )
