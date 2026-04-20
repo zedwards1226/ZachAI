@@ -119,3 +119,6 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 | `Startup/CloudflareTunnel.vbs` | 2026-04-17 | Auto-start of deleted tunnel |
 | `trading/logs/paper_trader.log` | 2026-04-17 | Log for deleted paper_trader |
 | `logs/tunnel.log` | 2026-04-17 | Log for deleted tunnel |
+| `trading/paper_trader.log` | 2026-04-20 | Stale log at trading/ root — paper_trader.py was retired 2026-04-17, log file was missed in that cleanup |
+| `trading/logs/orb_live.log` | 2026-04-20 | Pre-rotation ORB log — superseded by `trading/logs/trading.log.*` dated backups |
+| `weatheralpha.log` | 2026-04-20 | Empty zero-byte orphan at repo root |

@@ -8,6 +8,9 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 ## Core
 - `config.py` — constants, timezone, market holidays, `is_trading_day()`, `get_hard_close_time()`
 - `models.py` — dataclasses (Trade, Signal, etc.)
+- `requirements.txt` — pip deps
+- `CLAUDE.md` — per-project operating brief (auto-loaded by Claude Code)
+- `ACTIVE_FILES.md` — this manifest
 
 ## Agents
 - `agents/__init__.py`
