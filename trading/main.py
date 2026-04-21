@@ -37,14 +37,32 @@ def _acquire_pid_lock() -> None:
         old_pid = PID_FILE.read_text().strip()
         try:
             old_pid = int(old_pid)
-            # Check if process is actually running
-            os.kill(old_pid, 0)  # signal 0 = check existence
-            # Process exists — kill it so we take over with latest code
-            logger.warning("Killing stale ORB instance PID %d", old_pid)
-            os.kill(old_pid, 9)
-            import time
-            time.sleep(1)
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            # Check if process is actually running (os.kill(pid,0) broken on Windows)
+            alive = False
+            if sys.platform == "win32":
+                import ctypes
+                SYNCHRONIZE = 0x00100000
+                h = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, old_pid)
+                if h:
+                    ctypes.windll.kernel32.CloseHandle(h)
+                    alive = True
+            else:
+                try:
+                    os.kill(old_pid, 0)
+                    alive = True
+                except OSError:
+                    pass
+            if alive:
+                logger.warning("Killing stale ORB instance PID %d", old_pid)
+                if sys.platform == "win32":
+                    import subprocess as _sp
+                    _sp.run(["taskkill", "/PID", str(old_pid), "/F"],
+                            capture_output=True)
+                else:
+                    os.kill(old_pid, 9)
+                import time
+                time.sleep(1)
+        except (ValueError, OSError):
             pass  # Process already dead or PID invalid
 
     PID_FILE.write_text(str(os.getpid()))

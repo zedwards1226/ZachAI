@@ -111,6 +111,15 @@ def resolved(key: str, msg: str) -> None:
 
 # ─── Process management ───────────────────────────────────────────────────
 def _pid_alive(pid: int) -> bool:
+    # os.kill(pid, 0) raises OSError on Windows — use OpenProcess instead.
+    if sys.platform == "win32":
+        import ctypes
+        SYNCHRONIZE = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
     try:
         os.kill(pid, 0)
         return True
@@ -160,7 +169,21 @@ def _start_vbs(vbs_path: Path) -> bool:
 def check_orb_main() -> bool:
     """ORB main.py alive via PID file. Restart via VBS if dead."""
     if not ORB_PID_FILE.exists():
-        log.warning("ORB PID file missing — starting main.py")
+        # Before restarting, check if main.py is already running (PID file lost).
+        # On Windows os.kill(pid,9) silently fails, so spawned instances crash,
+        # their atexit deletes the PID file, and we loop forever.
+        live_pids = _find_processes("main.py")
+        if live_pids:
+            pid = live_pids[0]
+            try:
+                ORB_PID_FILE.write_text(str(pid))
+                log.info("ORB running as PID %d but PID file was missing — restored", pid)
+                resolved("orb_dead", f"✅ <b>ORB running (PID {pid})</b> — PID file restored")
+            except OSError as e:
+                log.error("Failed to restore PID file: %s", e)
+            return True
+
+        log.warning("ORB PID file missing and no main.py process found — starting")
         alert("orb_dead",
               f"⚠️ <b>ORB main.py not running</b>\n🔧 Starting via ORBAgents.vbs\n"
               f"⏰ {datetime.now().strftime('%H:%M:%S')}")
