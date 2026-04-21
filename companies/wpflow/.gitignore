@@ -1,0 +1,17 @@
+# wpflow — do not commit live secrets or test-site credentials
+data/test_site.json
+data/*.secret.json
+data/_seed.py
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db

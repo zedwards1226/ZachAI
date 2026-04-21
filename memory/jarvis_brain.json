@@ -1,0 +1,56 @@
+{
+  "owner": {
+    "name": "Zach Edwards",
+    "location": "Memphis TN",
+    "github": "zedwards1226",
+    "telegram_chat_id": "6592347446"
+  },
+  "projects": {
+    "wpflow": {
+      "status": "v0.1 shipped",
+      "created": "2026-04-20",
+      "path": "C:\\ZachAI\\companies\\wpflow",
+      "what": "WordPress operator MCP server — wraps WordPress REST API via Application Passwords for Claude Desktop / Claude Code agents",
+      "target_buyer": "non-coder WP site owners + small agencies managing 5-25 sites",
+      "tool_count": 25,
+      "tools": ["list_posts", "get_post", "create_post", "update_post", "delete_post", "search_content", "list_pages", "get_page", "update_page", "list_media", "upload_media", "list_plugins", "activate_plugin", "deactivate_plugin", "list_themes", "get_active_theme", "list_users", "get_user", "list_comments", "moderate_comment", "list_categories", "list_tags", "create_term", "verify_connection", "site_health"],
+      "data_sources": ["live WordPress REST API via /wp-json/wp/v2/* endpoints, Basic auth with Application Password"],
+      "test_site": "https://graduatenote.s6-tastewp.com (TasteWP, 48h TTL from 2026-04-20)",
+      "test_status": "41/41 pass",
+      "stack": ["Python 3.11+", "mcp SDK (official)", "httpx", "pydantic", "python-dotenv", "stdio transport"],
+      "monetization": {
+        "primary_platform": "MCPize (15% rev share)",
+        "fallback": "self-host GitHub + Stripe + Fly.io",
+        "pricing": {
+          "free": "OSS self-host, 1 site, rate-limited",
+          "solo": "$19/mo, 1 site",
+          "pro": "$49/mo, 5 sites",
+          "agency": "$149/mo, 25 sites",
+          "enterprise": "quote-only"
+        },
+        "week1_target": "first paying Solo sub by Day 3; 10 paying customers by 2026-04-27",
+        "kill_signal": "<10 paid + <150 activated free users by 2026-05-20 → pivot to DECISION.md #2 (Meta Ads) or #5 (OpenAPI→MCP generator)"
+      },
+      "key_artifacts": [
+        "companies/_research/MARKET_MAP.md",
+        "companies/_research/DEMAND_SIGNALS.md",
+        "companies/_research/MONEY_PATTERNS.md",
+        "companies/_research/DECISION.md",
+        "companies/wpflow/ARCHITECTURE.md",
+        "companies/wpflow/data/INGESTION.md",
+        "companies/wpflow/server.py",
+        "companies/wpflow/test_server.py",
+        "companies/wpflow/MONETIZATION.md",
+        "companies/wpflow/README.md"
+      ],
+      "installed_in_claude_desktop": true,
+      "claude_desktop_config_path": "C:\\Users\\zedwa\\AppData\\Roaming\\Claude\\claude_desktop_config.json"
+    }
+  },
+  "patterns": {
+    "mcp_build_recipe": "Recon (market/demand/money parallel agents) -> Synthesis (cross-reference overlap) -> Architect + Data-Ingestor parallel -> Builder sequential -> Install + smoke -> GTM",
+    "mcp_auth_gotchas": "WordPress Application Passwords skip OAuth review gates; TasteWP is fronted by Cloudflare so any Python client must send a browser UA header (urllib default is blocked with 403 error 1010); httpx default UA works",
+    "mcp_pricing_anchor": "21st.dev Magic at $20/mo hit $10K MRR in 6 weeks — prosumer $9-29/mo is the proven standalone-SaaS MCP band"
+  },
+  "last_updated": "2026-04-20"
+}
