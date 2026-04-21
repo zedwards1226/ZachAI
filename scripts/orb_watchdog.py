@@ -149,7 +149,7 @@ def _start_vbs(vbs_path: Path) -> bool:
             ["wscript", str(vbs_path)],
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         )
-        time.sleep(5)
+        time.sleep(10)
         return True
     except Exception as e:
         log.error("Failed to start %s: %s", vbs_path, e)
@@ -165,7 +165,7 @@ def check_orb_main() -> bool:
               f"⚠️ <b>ORB main.py not running</b>\n🔧 Starting via ORBAgents.vbs\n"
               f"⏰ {datetime.now().strftime('%H:%M:%S')}")
         if _start_vbs(ORB_VBS):
-            time.sleep(10)
+            time.sleep(30)
             if ORB_PID_FILE.exists():
                 resolved("orb_dead", "✅ <b>ORB main.py restarted</b>")
                 return True
@@ -190,7 +190,7 @@ def check_orb_main() -> bool:
     except OSError:
         pass
     if _start_vbs(ORB_VBS):
-        time.sleep(10)
+        time.sleep(30)
         if ORB_PID_FILE.exists():
             resolved("orb_dead", "✅ <b>ORB main.py recovered</b>")
             return True
