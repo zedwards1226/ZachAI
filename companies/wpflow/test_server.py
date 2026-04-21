@@ -49,17 +49,17 @@ _CREDS = _load_creds()
 
 # Reload config module after setting env
 import importlib
-import config as _config_mod
+from wpflow import config as _config_mod
 importlib.reload(_config_mod)
-import wp_client as _wp_mod
+from wpflow import wp_client as _wp_mod
 importlib.reload(_wp_mod)
-from tools import posts as _pm, pages as _pgm, media as _mm, plugins as _plm, themes as _tm, users as _um, comments as _cm, taxonomy as _txm, health as _hm
+from wpflow.tools import posts as _pm, pages as _pgm, media as _mm, plugins as _plm, themes as _tm, users as _um, comments as _cm, taxonomy as _txm, health as _hm
 for m in (_pm, _pgm, _mm, _plm, _tm, _um, _cm, _txm, _hm):
     importlib.reload(m)
-import tools as _tools_pkg
+from wpflow import tools as _tools_pkg
 importlib.reload(_tools_pkg)
 
-from server import get_server_and_tools  # noqa: E402
+from wpflow.server import get_server_and_tools  # noqa: E402
 
 
 RESULTS: List[Tuple[str, str, str]] = []
@@ -120,7 +120,7 @@ def main() -> int:
         os.environ["WPFLOW_APP_PASSWORD"] = "bogus pass word zzzz yyyy xxxx"
         importlib.reload(_config_mod)
         importlib.reload(_wp_mod)
-        from tools.health import _verify_connection as _vc_reloaded  # type: ignore
+        from wpflow.tools.health import _verify_connection as _vc_reloaded  # type: ignore
         neg = _vc_reloaded({})
         record("verify_connection:bad_password", _is_err(neg, "auth_failed"), f"got code={neg.get('error', {}).get('code') if isinstance(neg, dict) else 'n/a'}")
         # Restore good creds

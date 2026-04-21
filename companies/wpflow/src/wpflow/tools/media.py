@@ -6,10 +6,10 @@ from typing import Any, Dict
 
 import mcp.types as mt
 
-import wp_client
-from config import CONFIG
-from errors import WPClientError, err
-from tools._common import coerce_page, page_meta
+from .. import wp_client
+from ..config import CONFIG
+from ..errors import WPClientError, err
+from ._common import coerce_page, page_meta
 
 
 def _media_summary(raw: Dict[str, Any]) -> Dict[str, Any]:

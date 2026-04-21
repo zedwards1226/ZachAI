@@ -24,14 +24,15 @@ from urllib.parse import urlparse
 
 import httpx
 
-from config import CONFIG
-from errors import WPClientError
+from .config import CONFIG
+from .errors import WPClientError
 
 
 # ---------- Logging ----------
 
-LOG_DIR = Path(__file__).parent / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+_LOG_DIR_OVERRIDE = os.environ.get("WPFLOW_LOG_DIR")
+LOG_DIR = Path(_LOG_DIR_OVERRIDE) if _LOG_DIR_OVERRIDE else (Path.home() / ".wpflow" / "logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "wpflow.log"
 
 _logger: Optional[logging.Logger] = None

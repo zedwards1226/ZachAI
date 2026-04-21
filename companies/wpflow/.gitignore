@@ -12,6 +12,12 @@ __pycache__/
 .venv/
 venv/
 
+# Build artifacts
+dist/
+build/
+*.egg-info/
+src/*.egg-info/
+
 # OS
 .DS_Store
 Thumbs.db

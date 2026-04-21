@@ -5,9 +5,9 @@ from typing import Any, Dict
 
 import mcp.types as mt
 
-import wp_client
-from errors import WPClientError, err
-from tools._common import coerce_page, page_meta
+from .. import wp_client
+from ..errors import WPClientError, err
+from ._common import coerce_page, page_meta
 
 
 def _user_summary(raw: Dict[str, Any]) -> Dict[str, Any]:

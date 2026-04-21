@@ -5,8 +5,8 @@ from typing import Any, Dict
 
 import mcp.types as mt
 
-import wp_client
-from errors import WPClientError, err
+from .. import wp_client
+from ..errors import WPClientError, err
 
 
 def _theme_summary(raw: Dict[str, Any]) -> Dict[str, Any]:

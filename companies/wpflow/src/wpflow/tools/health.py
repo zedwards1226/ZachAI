@@ -6,9 +6,9 @@ from typing import Any, Dict, List
 
 import mcp.types as mt
 
-import wp_client
-from config import CONFIG
-from errors import WPClientError, err
+from .. import wp_client
+from ..config import CONFIG
+from ..errors import WPClientError, err
 
 
 def _verify_connection(args: Dict[str, Any]) -> Dict[str, Any]:
