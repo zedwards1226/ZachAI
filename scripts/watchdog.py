@@ -92,12 +92,21 @@ log = logging.getLogger("watchdog")
 
 # ── Alert cooldown ────────────────────────────────────────────────────────────
 _last_alert = {}
-ALERT_COOLDOWN = 3600  # 1 hour between same alerts
+ALERT_COOLDOWN = 3600  # default: 1 hour between same alerts
+
+# Per-key cooldown overrides (seconds). Use for day-long conditions
+# that shouldn't re-notify every hour.
+ALERT_COOLDOWN_OVERRIDES = {
+    "daily_loss": 86400,      # once per day — condition won't resolve until midnight
+    "risk_over_40": 21600,    # 6h — capital at risk is slow-moving
+    "scan_stuck": 7200,       # 2h
+}
 
 
 def _cooldown_ok(key: str) -> bool:
     now = time.time()
-    if key in _last_alert and (now - _last_alert[key]) < ALERT_COOLDOWN:
+    window = ALERT_COOLDOWN_OVERRIDES.get(key, ALERT_COOLDOWN)
+    if key in _last_alert and (now - _last_alert[key]) < window:
         return False
     _last_alert[key] = now
     return True

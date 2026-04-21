@@ -5,7 +5,8 @@ Dim isRunning
 isRunning = False
 Set colProcs = objWMI.ExecQuery("SELECT * FROM Win32_Process WHERE Name='pythonw.exe' OR Name='python.exe'")
 For Each proc In colProcs
-    If InStr(LCase(proc.CommandLine), "watchdog.py") > 0 Then
+    ' Match C:\ZachAI\scripts\watchdog.py but NOT orb_watchdog.py
+    If InStr(LCase(proc.CommandLine), "scripts\watchdog.py") > 0 Then
         isRunning = True
     End If
 Next
