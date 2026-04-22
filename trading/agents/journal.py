@@ -172,6 +172,30 @@ def log_trade_close(trade_id: int, exit_price: float, outcome: str,
         }
 
 
+def mark_failed_placement(trade_id: int, reason: str = "") -> None:
+    """Mark a trade row as FAILED_PLACEMENT so the DB doesn't keep phantom OPEN rows.
+
+    Called from tv_trader.place_bracket_order when DOM order submission fails
+    (e.g. Paper Trading broker disconnected). The journal row was already
+    inserted by combiner.log_trade_open before the order attempt — this
+    updates that row in place.
+    """
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE trades
+               SET outcome = 'FAILED_PLACEMENT',
+                   pnl = 0,
+                   pnl_after_slippage = 0,
+                   notes = COALESCE(NULLIF(notes, ''), ?)
+             WHERE id = ? AND outcome = 'OPEN'
+            """,
+            (f"Order placement failed: {reason}" if reason else "Order placement failed",
+             trade_id),
+        )
+    logger.warning("Trade %d marked FAILED_PLACEMENT (reason=%s)", trade_id, reason)
+
+
 def log_signal_history(direction: str, price: float, score: int, size: str,
                        breakdown: dict, was_second_break: bool,
                        block_reason: Optional[str] = None) -> None:

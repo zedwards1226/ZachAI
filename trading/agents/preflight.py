@@ -60,6 +60,100 @@ async def _check_quote() -> tuple[bool, str]:
         return False, f"Quote pull failed: {e}"
 
 
+async def _check_paper_broker() -> tuple[bool, str]:
+    """Verify Paper Trading broker session is connected.
+
+    Strategy (order of precedence, simplest wins):
+    1. If broker-picker modal ("Trade with your broker" / "Need a broker?")
+       is visible anywhere on the page → disconnected, fail loud.
+    2. If Buy/Sell side elements (buy-OnZ1FRe5 / sell-OnZ1FRe5 with width>50)
+       are already visible → panel is open and broker is connected.
+    3. Otherwise, open the Order Panel via the top-right Trade button and
+       re-check. If still no side elements and still no picker, assume the
+       panel layout changed and return an informational state (not fail).
+
+    We intentionally do NOT depend on count-before vs count-after — that
+    toggles the panel, which can close a panel the user intentionally
+    had open and causes false negatives when the panel was already open.
+    """
+    try:
+        tv = await get_client()
+        js = """
+        (async function() {
+          var sleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+
+          var pickerVisible = function() {
+            var all = document.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+              var txt = (all[i].textContent || '').trim();
+              if (txt === 'Trade with your broker' || txt === 'Need a broker?') {
+                var r = all[i].getBoundingClientRect();
+                if (r.width > 50 && r.height > 20) return true;
+              }
+            }
+            return false;
+          };
+
+          var sideVisible = function() {
+            var buys = document.querySelectorAll('[class*="buy-OnZ1FRe5"]');
+            for (var i = 0; i < buys.length; i++) {
+              var r = buys[i].getBoundingClientRect();
+              if (r.width > 50) return true;
+            }
+            return false;
+          };
+
+          // 1. Picker modal already up? Disconnected.
+          if (pickerVisible()) return {ok: false, state: 'picker_visible'};
+
+          // 2. Panel already open with side elements? Connected.
+          if (sideVisible()) return {ok: true, state: 'panel_already_open'};
+
+          // 3. Try opening the panel.
+          var btns = document.querySelectorAll('button');
+          var tradeBtn = null;
+          for (var i = 0; i < btns.length; i++) {
+            var t = (btns[i].textContent || '').trim();
+            var r = btns[i].getBoundingClientRect();
+            if (t === 'Trade' && r.y < 50 && r.x > 1000) { tradeBtn = btns[i]; break; }
+          }
+          if (!tradeBtn) return {ok: false, state: 'trade_button_not_found'};
+
+          tradeBtn.click();
+          await sleep(500);
+
+          if (pickerVisible()) {
+            // Close modal if possible, then report
+            tradeBtn.click();
+            return {ok: false, state: 'picker_appeared_after_click'};
+          }
+          if (sideVisible()) {
+            // Restore: click again to close what we opened
+            tradeBtn.click();
+            return {ok: true, state: 'opened_and_verified'};
+          }
+          // Neither side elements nor picker — unknown layout.
+          tradeBtn.click();
+          return {ok: false, state: 'no_side_no_picker'};
+        })()
+        """
+        result = await tv.evaluate_async(js) or {}
+        state = result.get("state", "unknown")
+        if result.get("ok"):
+            return True, f"Paper Trading broker connected ({state})"
+        if state in ("picker_visible", "picker_appeared_after_click"):
+            return False, "❗ Paper Trading DISCONNECTED — reconnect before open"
+        if state == "trade_button_not_found":
+            return False, "Trade button not found — TV layout changed or chart not loaded"
+        if state == "no_side_no_picker":
+            # Inconclusive — don't fail preflight on this alone since it
+            # commonly happens after hours when Order panel stays hidden.
+            return True, "Broker state inconclusive (no picker) — OK for preflight"
+        return False, f"Broker check failed: state={state}"
+    except Exception as e:
+        return False, f"Broker check error: {e}"
+
+
 def _check_calendar() -> tuple[bool, str]:
     today = datetime.now(ET).strftime("%Y-%m-%d")
     events = []
@@ -101,10 +195,12 @@ async def run() -> None:
     journal_ok, journal_msg = _check_journal_db()
     cdp_ok, cdp_msg = await _check_cdp_and_symbol()
     quote_ok, quote_msg = await _check_quote()
+    broker_ok, broker_msg = await _check_paper_broker()
 
     checks = [
         ("CDP/symbol", cdp_ok, cdp_msg),
         ("quote pull", quote_ok, quote_msg),
+        ("paper broker", broker_ok, broker_msg),
         ("calendar", calendar_ok, calendar_msg),
         ("disk space", disk_ok, disk_msg),
         ("journal DB", journal_ok, journal_msg),

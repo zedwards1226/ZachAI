@@ -102,7 +102,7 @@ async def place_bracket_order(direction: str, entry_price: float,
     tv = await get_client()
     side = "buy" if direction == "LONG" else "sell"
 
-    success = await _place_via_trading_panel(tv, side, stop_price, target_1)
+    success, fail_reason = await _place_via_trading_panel(tv, side, stop_price, target_1)
 
     # Confirm order appeared by checking quote is valid
     if success:
@@ -123,6 +123,12 @@ async def place_bracket_order(direction: str, entry_price: float,
         _persist_active_orders()
         logger.info("Paper order placed: %s 1 %s @ ~%.2f  SL=%.2f TP=%.2f",
                      side.upper(), DEFAULT_SYMBOL, entry_price, stop_price, target_1)
+    else:
+        # Clean the phantom journal row so it doesn't sit OPEN forever.
+        try:
+            journal.mark_failed_placement(trade_id, fail_reason or "unknown")
+        except Exception as e:
+            logger.error("Failed to mark trade %d FAILED_PLACEMENT: %s", trade_id, e)
 
     return success
 
@@ -144,11 +150,15 @@ async def _confirm_order_placed(tv, timeout: float = 5.0) -> bool:
     return False
 
 
-async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> bool:
+async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tuple[bool, str]:
     """Place order through TradingView's Trading Panel DOM — single CDP call.
 
     All 7 steps run in one async IIFE with minimal internal delays (~50ms)
     for React to process state changes between critical steps.
+
+    Returns (success, reason). reason is empty on success, otherwise one of:
+    side_not_found, submit_not_found, submit_not_found_after_retry, exception,
+    or 'unknown' if the DOM result was malformed.
     """
     side_class = "buy-" if side == "buy" else "sell-"
     side_word = "Buy" if side == "buy" else "Sell"
@@ -294,13 +304,31 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> boo
         result = await tv.evaluate_async(js)
         if result and result.get("clicked"):
             logger.info("Trading panel order submitted: %s", result.get("text"))
-            return True
+            return True, ""
         else:
+            reason = (result or {}).get("reason", "unknown")
             logger.warning("Order placement failed: %s", result)
-            return False
+            # Fail loud — journal already has a phantom OPEN trade row at this point.
+            # Zach needs to know immediately so he can reconnect broker / kill the row.
+            try:
+                await telegram.send(
+                    f"❗ <b>Order placement FAILED</b>\n"
+                    f"Reason: <code>{reason}</code>\n"
+                    f"Side: {side.upper()}  Stop: {stop:.2f}  TP: {tp:.2f}\n\n"
+                    f"Likely cause: Paper Trading broker disconnected. "
+                    f"Open TradingView → click 'Trade' top-right → reconnect Paper Trading. "
+                    f"Journal row will be marked FAILED_PLACEMENT automatically."
+                )
+            except Exception:
+                pass
+            return False, reason
     except Exception as e:
         logger.error("Trading panel order failed: %s", e)
-        return False
+        try:
+            await telegram.send(f"❗ Order placement exception: <code>{e}</code>")
+        except Exception:
+            pass
+        return False, f"exception: {e}"
 
 
 async def close_via_trading_panel(tv, direction: str) -> bool:
