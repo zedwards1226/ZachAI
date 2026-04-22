@@ -2,6 +2,52 @@
 
 ---
 
+## 2026-04-21 (Evening — cleanup + ORB fix + Kalshi visibility)
+
+**Worked on:**
+- Cleaned up duplicate/orphan files (tradingview-mcp/, cloudflared.exe, dropship/, _research/, precisionfittedparts/, 6 root logs, 8 worktrees)
+- Created `C:\ZachAI\sandbox\` — strict-isolation experiments workspace with 7 hard rules (ports 8000-8999, no cross-imports, no VBS, PAPER_MODE=True, per-experiment CLAUDE.md)
+- Scaffolded `companies\tradingagents\CLAUDE.md` (status: BUILDING)
+- Diagnosed ORB 2-week trade drought: Paper Trading broker silently disconnected → `side_not_found` → journal phantoms → no Telegram
+- Rewrote `preflight.py::_check_paper_broker()` — picker-first logic, eliminates false negatives from panel toggle
+- Added `journal.mark_failed_placement()` — auto-cleans phantom OPEN rows
+- Updated `tv_trader.py` — `(bool, reason)` tuple return + loud Telegram on every failure branch + auto-mark journal
+- Cleaned phantom trade id=3 to FAILED_PLACEMENT
+- Diagnosed Kalshi Telegram silence: bot WAS alive all day (480 signals scanned, 478 skipped by guardrails), but `send_telegram()` was fire-and-forget with no receipts
+- Added HTTP status logging to `monitor.py::send_telegram()` (status=200 / non-200 body logged)
+- Added `database.get_today_signal_stats()` + heartbeat line to every digest
+- Verified `scripts/watchdog.py::check_monitor_alive()` already monitors monitor.py (no VBS change needed)
+
+**Decisions made:**
+- Sandbox goes on `C:\ZachAI\sandbox\` (own CLAUDE.md, ACTIVE_FILES.md, _template folder)
+- precisionfittedparts/ DELETED outright rather than scaffolded — Zach moved on
+- Preflight broker check returns informational PASS on `no_side_no_picker` (common after hours, don't fail loudly for ambiguity)
+- Kept kalshi EOD digest heartbeat in monitor.py (not scheduler.py) since digest lives there
+
+**What worked:**
+- Preflight dry-run: 6/6 PASS with Telegram delivery confirmed
+- Kalshi `send_telegram()` test: status=200 logged correctly
+- `get_today_signal_stats()` returned 480 scanned/2 opened/478 skipped — proving bot WAS alive
+- Full EOD digest fired with heartbeat line, text_len=781
+
+**Commits pushed to master:**
+- `19aebfe` — sandbox + tradingagents scaffold
+- `414a86f` — ORB loud broker-disconnect alerts + phantom cleanup (tv_trader.py — Zach pre-approved "ok do it smh")
+- `5163cf7` — kalshi send_telegram receipts + daily heartbeat
+
+**Structural changes (reflected in master CLAUDE.md):**
+- Added sandbox/ to PROJECT ROSTER + FOLDER STRUCTURE
+- Removed precisionfittedparts/ line
+- Added companies\tradingagents\ + companies\wpflow\ + companies\zacks-work-drawings\ entries
+
+**Next steps (tomorrow 2026-04-22):**
+1. 7:00 AM — preflight fires with new paper-broker check
+2. 9:30 AM — market open. First signal either places real trade OR fires loud `❗ Order placement FAILED` Telegram with reason + reconnect steps
+3. 8:00 AM + 6:00 PM — Kalshi digests with heartbeat line + HTTP status receipts
+4. Verify auto-cleanup of any phantom journal rows (FAILED_PLACEMENT)
+
+---
+
 ## 2026-04-06 (Evening — continued)
 
 **Worked on:**
@@ -33,3 +79,39 @@
 - access.json location: C:\Users\zedwa\.claude\channels\telegram\access.json
 - Approved marker: C:\Users\zedwa\.claude\channels\telegram\approved\6592347446
 - The "typing then goes away" bug = two bun instances conflicting (test_jarvis.bat still open)
+
+---
+
+## 2026-04-20 — ICT Research Lab scaffold + API key provisioned
+
+**Worked on:**
+- Fixed ORB morning preflight cosmetic bug: `trading/config.py` DEFAULT_SYMBOL `MNQ1!` → `CME_MINI:MNQ1!` (commit 911cafd on master). Preflight now returns all_ok=True.
+- Scaffolded `companies/ict-research/` — CLAUDE.md + ACTIVE_FILES.md + README.md + .gitignore (commit 7d2e41b on branch `ict-research-scaffold`). 7-agent pipeline design: Harvester → Librarian → Extractor → Coder → Backtester → Judge → Bot Builder.
+- Installed GitHub CLI via winget (gh 2.90.0 at `C:\Program Files\GitHub CLI\gh.exe`).
+- Created Google Cloud project `ict-research` (ID: ict-research-493911), enabled YouTube Data API v3, generated API key.
+- Saved `YOUTUBE_API_KEY=AIzaSyAiVFlOjcbJ0-0lJvi-BKm8uWe3O4sD2YY` to `companies/ict-research/.env` (gitignored).
+- Sanity test passed: ICT channel (`UCtjxa77NqamhVC8atV85Rog`, @innercircletrader) returns valid JSON.
+
+**Decisions made:**
+- ICT bot promotion criteria (all must pass): ≥100 trades, walk-forward 2020-2024→2025, Sharpe>1.0, MaxDD<20%, PF>1.5, beats buy-and-hold, matches ORB or better.
+- Composite rank: `0.4*Sharpe + 0.3*PF + 0.2*(1-MaxDD) + 0.1*winrate`
+- 4 reference repos to clone next session (into `C:\ZachAI\reference\`, gitignored):
+  - ajaygm18/ict-trading-ai-agent
+  - Therealtuk/SmartMoneyAI-SMC-Trading-Dashboard
+  - Ad1xon/AI-Algorithmic-Trading-Backtester
+  - Dennis-1am/YT_Metadata_Downloader (Harvester base)
+
+**Next steps (new session):**
+1. Clone 4 reference repos to `C:\ZachAI\reference\`
+2. Build Harvester agent (YouTube transcript puller for @innercircletrader)
+3. Librarian → Extractor → Coder → Backtester → Judge in sequence
+4. Merge `ict-research-scaffold` branch to master after Harvester lands
+
+**Security flag:**
+- YouTube API key was pasted in chat transcript. Key is restricted to YouTube Data API v3 (quota only 10k/day at risk). Optional: regenerate in Google Cloud Console if paranoid.
+- GitHub PAT `gho_NkbKi...NhgIn` was also exposed in terminal output earlier — rotate at https://github.com/settings/tokens when convenient.
+
+**Notes:**
+- ICT channel: @innercircletrader, ID `UCtjxa77NqamhVC8atV85Rog`, created 2012-02-28
+- Google Cloud project: ict-research-493911
+- Quota: 10k units/day, transcript pulls ~200 units per channel = plenty
