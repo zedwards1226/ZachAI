@@ -122,3 +122,11 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 | `trading/paper_trader.log` | 2026-04-20 | Stale log at trading/ root — paper_trader.py was retired 2026-04-17, log file was missed in that cleanup |
 | `trading/logs/orb_live.log` | 2026-04-20 | Pre-rotation ORB log — superseded by `trading/logs/trading.log.*` dated backups |
 | `weatheralpha.log` | 2026-04-20 | Empty zero-byte orphan at repo root |
+| `tradingview-mcp/` | 2026-04-21 | Duplicate of `tradingview-mcp-jackson/` — active MCP per `.claude.json` is jackson |
+| `cloudflared.exe` | 2026-04-21 | Retired tunnel binary — was in DELETED list but file still existed at root |
+| `trading/__pycache__/paper_trader.cpython-314.pyc` | 2026-04-21 | Stale .pyc from paper_trader.py (retired 2026-04-17) |
+| `dropship/` | 2026-04-21 | Empty pre-project scaffold — replaced by `companies/precisionfittedparts/` |
+| `companies/_research/` | 2026-04-21 | Phase-2 research docs — captured in session memory |
+| `.claude/worktrees/` (8 of 9) | 2026-04-21 | Worktrees violate CLAUDE.md rule — only current `thirsty-yonath-616d04` retained; `jolly-jang-3934ff` file-locked, pending reboot |
+| Duplicate serve.py (Store Python PID 15068) + 4 wpflow.exe duplicates | 2026-04-21 | Orphan processes from MCP restart loop — dashboard restarted clean via `WeatherAlpha_Dashboard.vbs` |
+| `logs/*.log` (6 root logs) | 2026-04-21 | Archived to `logs/archive/` |
