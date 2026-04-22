@@ -49,13 +49,18 @@ python -m venv .venv
 6. 5 MB response cap.
 7. Writes (POST/DELETE) never auto-retry.
 
-## Status (2026-04-20)
-- All 25 tools implemented and live-tested against TasteWP site → **41/41 PASS**.
-- Log file populated, no app password leakage.
-- `data/test_site.json` + `data/_seed.py` confirmed gitignored.
-- Ready to publish to GitHub / PyPI when an owner Application Password for the real site is supplied.
+## Status (2026-04-21) — PUBLISHED, LAUNCHING
+- **PyPI:** https://pypi.org/project/wpflow/ v0.1.0 live (`pip install wpflow`).
+- **GitHub public repo:** https://github.com/zedwards1226/wpflow pushed.
+- **Claude Desktop:** config wired with live env vars.
+- Fresh-install smoke test passed 2026-04-21 (clean venv → `wpflow.exe` installed → `import wpflow` OK).
+- 25 tools, 41/41 end-to-end PASS against live TasteWP site.
+- Launch runbook: Steps 1-6 ✅, Steps 7-11 (demo video, screenshots, r/mcp, r/ClaudeAI, MCPize) pending.
 
 ## Next
-- Phase 4 VERIFY — run harness again after any test site refresh.
-- Phase 5 LAUNCH STUB — push public, README + r/mcp + r/ClaudeAI post quoting Signals 3 and 4.
-- v0.2 scope: multi-site, Streamable HTTP transport for hosted SaaS tier, `create_page`, WooCommerce read-only.
+- Zach records 60-90s Loom demo + captures 4 screenshots.
+- Submit r/mcp post (copy polished in `launch/03_reddit_r_mcp.md`).
+- Submit r/ClaudeAI post 4-5h later (`launch/04_reddit_r_claudeai.md`).
+- Submit MCPize listing after video + screenshots.
+- Day 2 = HN, Day 5 = dev.to, Day 6 = X thread.
+- v0.2 scope: multi-site, Streamable HTTP transport for hosted SaaS tier, `create_page`, WooCommerce read-only (waits until Day 7 feedback triage).

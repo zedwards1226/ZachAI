@@ -1,7 +1,7 @@
 # Reddit — r/mcp launch post
 
 **Subreddit:** https://old.reddit.com/r/mcp/
-**When:** Day 0 (launch day), 10-11 AM ET. Never crosspost — r/ClaudeAI gets a different post (file 04).
+**When:** Day 1 (2026-04-21, launch day), 10-11 AM ET. Never crosspost — r/ClaudeAI gets a different post (file 04).
 **Account:** Zach's normal Reddit account (do NOT use a throwaway — Reddit's spam filter eats new accounts posting GitHub links).
 **Flair:** "Show-and-Tell" or "Project" (whichever r/mcp has active at post time).
 

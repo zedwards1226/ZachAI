@@ -1,7 +1,7 @@
 # Hacker News — Show HN post
 
 **Url to post at:** https://news.ycombinator.com/submit
-**When:** Day 1 (NOT Day 0 — Reddit first, gather one round of feedback and fix anything obvious, then HN).
+**When:** Day 2 (2026-04-22, NOT Day 1 — Reddit first, gather one round of feedback and fix anything obvious, then HN).
 **Best time:** Tuesday-Thursday, 8-9 AM ET. Avoid Monday (dominated by "weekend projects") and Friday (traffic drop).
 **Account:** Use your existing HN account with karma >50 if possible. New accounts with 0 karma posting Show HN + a GitHub link get auto-deprioritized.
 

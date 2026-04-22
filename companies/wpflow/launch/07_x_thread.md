@@ -1,7 +1,7 @@
 # X / Twitter — Day 5 launch thread
 
 **Account:** Zach's X account.
-**When:** Day 5. By now Reddit + HN have created first-wave awareness; X thread amplifies to a different crowd (solopreneurs, WP buyers, non-coders).
+**When:** Day 6 (2026-04-26). By now Reddit + HN have created first-wave awareness; X thread amplifies to a different crowd (solopreneurs, WP buyers, non-coders).
 **Best time:** Tue-Thu, 10 AM or 3 PM ET.
 **Format:** 8 tweets. First is the hook (with the DEMAND_SIGNALS Signal 4 quote), middle 6 are one-tool-one-example, last is the CTA.
 **Media:** attach the demo MP4 **natively** to tweet 1 (not a link). Native video ranks 3-5× higher. Make sure the MP4 autoplays and makes sense muted.

@@ -63,6 +63,7 @@ All tracked files. If a file isn't here, it shouldn't exist.
 - `launch/05_hn_show_hn.md` — Show HN post
 - `launch/06_devto_post.md` — Dev.to technical walkthrough + Medium cross-post
 - `launch/07_x_thread.md` — 8-tweet X/Twitter thread
+- `launch/metrics_day1.md` — Day 1 metrics snapshot (GitHub stars, r/mcp upvotes, PyPI downloads)
 
 ## Tool count
 **25 tools** registered with the MCP server. 41/41 end-to-end tests pass.

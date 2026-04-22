@@ -1,7 +1,7 @@
 # Reddit — r/ClaudeAI launch post
 
 **Subreddit:** https://old.reddit.com/r/ClaudeAI/
-**When:** Day 0, 4-5 hours after the r/mcp post. Never crosspost — this is a **first-principles rewrite** for a different audience (this sub is more "I used Claude and it worked" and less "here's the code").
+**When:** Day 1 (2026-04-21), 4-5 hours after the r/mcp post. Never crosspost — this is a **first-principles rewrite** for a different audience (this sub is more "I used Claude and it worked" and less "here's the code").
 **Flair:** whichever flair r/ClaudeAI uses for "project / community resource" at post time.
 
 ---

@@ -1,7 +1,7 @@
 # Dev.to post — technical walkthrough
 
 **URL:** https://dev.to/new
-**When:** Day 4.
+**When:** Day 5 (2026-04-25).
 **Tags:** `wordpress`, `python`, `mcp`, `claude` (Dev.to caps at 4).
 **Cover image:** the 0:55 freeze-frame from the demo video — the wp-admin "0 untagged posts" moment.
 **Canonical URL:** leave blank on Dev.to; point the Medium cross-post's canonical URL AT the Dev.to URL so Dev.to gets the SEO credit.

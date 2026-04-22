@@ -1,13 +1,27 @@
 # wpflow v0.1.0 — Launch Runbook
 
 **Target:** First 10 paying customers by 2026-04-27.
-**Today:** 2026-04-20. Day 0 of the 7-day launch plan.
+**Today:** 2026-04-21. Day 1 of the 7-day launch plan.
 
 This file is the **order of operations**. Do steps in order. Each step has a verification ("how do I know it worked?") before moving on.
 
 ---
 
-## Pre-Day-0 (do now, in this order)
+## Pre-Day-0 — ✅ COMPLETE (verified 2026-04-21)
+
+Steps 1–6 done. Verified state:
+- ✅ **Step 1** GitHub CLI authenticated (repo push succeeded)
+- ✅ **Step 2** Public repo live: https://github.com/zedwards1226/wpflow (2 commits; README points at `pip install wpflow`)
+- ✅ **Step 3** PyPI account + token (v0.1.0 successfully uploaded)
+- ✅ **Step 4** PyPI upload live: https://pypi.org/project/wpflow/ returns 200, classifiers render
+- ✅ **Step 5** Fresh-install smoke test passed 2026-04-21: `pip install wpflow` in clean venv installed `wpflow.exe` at `C:/Temp/wpflow-fresh/Scripts/wpflow.exe` + `import wpflow` succeeds
+- ✅ **Step 6** Claude Desktop config wired with live env vars (site URL, admin user, app password, log level)
+
+Credential-leak grep over `C:\wpflow-public` returned 0 matches for `graduatenote|Gzb5|ojiz|83KE|upfZ|bOnj|WJf4`.
+
+---
+
+## Pre-Day-0 reference (historical, keep for future releases)
 
 ### Step 1 — Log into GitHub CLI
 
@@ -90,7 +104,9 @@ Restart Claude Desktop. Ask Claude: *"Use wpflow to verify the connection."* You
 
 ---
 
-## Day 0 (2026-04-20) — Public launch
+## Day 1 (2026-04-21) — Public launch
+
+> **Note:** originally scoped as "Day 0 = 2026-04-20." Real launch day slipped to 2026-04-21 because Steps 1-6 finished late Day 0. Day numbering below shifted by +1 day; 7-day deadline is still 2026-04-27.
 
 ### Step 7 — Record the demo video
 
@@ -151,7 +167,7 @@ Log these numbers in a file `launch/metrics_day0.md`:
 
 ---
 
-## Day 1 — Hacker News
+## Day 2 (2026-04-22) — Hacker News
 
 ### Step 12 — Show HN
 
@@ -159,37 +175,37 @@ Open **`05_hn_show_hn.md`**, post to https://news.ycombinator.com/submit. Stay a
 
 ---
 
-## Day 2 — Reply to Messages #1-5 from MONETIZATION.md §5
+## Day 3 (2026-04-23) — Reply to Messages #1-5 from MONETIZATION.md §5
 
 5 per-person Reddit DMs / comment replies. Scripts are already in `MONETIZATION.md` §5, reply-#1 through reply-#5. Track replies in `launch/outreach.csv`.
 
 ---
 
-## Day 3 — Reply to Messages #6-10, update posts with feedback
+## Day 4 (2026-04-24) — Reply to Messages #6-10, update posts with feedback
 
 Same drill, messages #6-10. Go through any new issues opened in GitHub overnight — respond to every one today.
 
 ---
 
-## Day 4 — Dev.to + Medium
+## Day 5 (2026-04-25) — Dev.to + Medium
 
 Open **`06_devto_post.md`**. Post to Dev.to first. Cross-post to Medium with the canonical URL pointing back to Dev.to (for SEO). Share both links to X/Twitter.
 
 ---
 
-## Day 5 — X / Twitter thread
+## Day 6 (2026-04-26) — X / Twitter thread
 
 Open **`07_x_thread.md`**. Schedule or post. Native MP4 upload on tweet 1. 60-minute reply window.
 
 ---
 
-## Day 6 — Ship the "wow" demo (live scenario, not scripted)
+## Day 6-7 — Ship the "wow" demo (live scenario, not scripted)
 
 Record a new Loom — 90 seconds — of Claude doing a real content-ops task on a real site. The demo video from Day 0 was scripted; this one is "first take, unedited" to build trust. Post to the r/ClaudeAI thread as a follow-up comment, cross-post to Twitter, embed in the MCPize listing.
 
 ---
 
-## Day 7 — Collect feedback, ship v0.1.1
+## Day 7 (2026-04-27) — Collect feedback, ship v0.1.1
 
 Scan all channels. Tag every comment / issue as bug / feature / docs / confusion. Ship a v0.1.1 with the most-requested doc clarifications (likely: clearer app-password step + a rename of `create_term` UI copy to "add category or tag").
 
