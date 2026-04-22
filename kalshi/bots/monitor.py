@@ -81,12 +81,12 @@ _last_alert = {}
 
 
 def send_telegram(msg: str):
-    """Send a message to Telegram. Silent on failure."""
+    """Send a message to Telegram. Logs HTTP status on every attempt."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         log.debug("Telegram not configured — skipping notification")
         return
     try:
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={
                 "chat_id": TELEGRAM_CHAT_ID,
@@ -95,6 +95,9 @@ def send_telegram(msg: str):
             },
             timeout=10,
         )
+        log.info("Telegram send status=%s text_len=%d", resp.status_code, len(msg))
+        if resp.status_code != 200:
+            log.warning("Telegram non-200: %s", resp.text[:200])
     except Exception as e:
         log.warning("Telegram send failed: %s", e)
 
@@ -370,6 +373,22 @@ def send_daily_digest(when: str = "eod"):
         f"<b>Right now</b>",
         f"  {open_text}",
     ]
+
+    # Heartbeat — always include today's scan counts so a zero-trade day
+    # still produces a non-silent digest. Silence != bot died.
+    try:
+        from database import get_today_signal_stats
+        hb = get_today_signal_stats()
+        skip_reason = f" — top skip: {hb['top_skip_reason']}" if hb.get("top_skip_reason") else ""
+        lines.append("")
+        lines.append(
+            f"<b>Heartbeat</b> — scanned {hb['scanned']}, opened {hb['opened']}, "
+            f"skipped {hb['skipped']}{skip_reason}"
+        )
+    except Exception as e:
+        log.warning("Heartbeat stats failed: %s", e)
+        lines.append("")
+        lines.append("<b>Heartbeat</b> — (stats unavailable, bot is alive)")
 
     if pos.get("positions"):
         lines.append("")

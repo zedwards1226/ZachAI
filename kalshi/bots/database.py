@@ -428,6 +428,36 @@ def get_today_stats() -> dict:
     }
 
 
+def get_today_signal_stats() -> dict:
+    """Today's signal scan counts — powers the daily heartbeat.
+
+    Returns total evaluated, actionable (opened trade), and skipped (with
+    the top skip reason). Zero-trade days still produce a non-zero scanned
+    count so Telegram silence can't be mistaken for 'bot died.'
+    """
+    with get_conn() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE date(timestamp)=date('now','localtime')"
+        ).fetchone()[0]
+        opened = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE date(timestamp)=date('now','localtime') AND actionable=1"
+        ).fetchone()[0]
+        skipped = total - opened
+        top_reason_row = conn.execute(
+            """SELECT reason_skipped, COUNT(*) c
+                 FROM signals
+                WHERE date(timestamp)=date('now','localtime')
+                  AND actionable=0 AND reason_skipped IS NOT NULL
+                GROUP BY reason_skipped ORDER BY c DESC LIMIT 1"""
+        ).fetchone()
+    return {
+        "scanned": total,
+        "opened": opened,
+        "skipped": skipped,
+        "top_skip_reason": top_reason_row[0] if top_reason_row else None,
+    }
+
+
 def get_city_performance() -> list:
     """Lifetime performance per city — drives the city scoreboard."""
     with get_conn() as conn:
