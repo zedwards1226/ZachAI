@@ -82,6 +82,18 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 
 ---
 
+## SANDBOX (experiments — strict isolation, no auto-start)
+| File | Purpose |
+|------|---------|
+| `sandbox/CLAUDE.md` | Sandbox governance + hard rules |
+| `sandbox/ACTIVE_FILES.md` | Per-experiment manifest |
+| `sandbox/README.md` | How to start an experiment |
+| `sandbox/requirements.txt` | Sandbox-only pip deps |
+| `sandbox/.gitignore` | Protects per-experiment .env + test DBs |
+| `sandbox/_template/` | Copy-this starter for new experiments |
+
+---
+
 ## INFRASTRUCTURE
 | File | Purpose |
 |------|---------|
@@ -127,6 +139,7 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 | `trading/__pycache__/paper_trader.cpython-314.pyc` | 2026-04-21 | Stale .pyc from paper_trader.py (retired 2026-04-17) |
 | `dropship/` | 2026-04-21 | Empty pre-project scaffold — replaced by `companies/precisionfittedparts/` |
 | `companies/_research/` | 2026-04-21 | Phase-2 research docs — captured in session memory |
+| `companies/precisionfittedparts/` | 2026-04-21 | Empty pre-project scaffold — Zach moved on; not tracked in git |
 | `.claude/worktrees/` (8 of 9) | 2026-04-21 | Worktrees violate CLAUDE.md rule — only current `thirsty-yonath-616d04` retained; `jolly-jang-3934ff` file-locked, pending reboot |
 | Duplicate serve.py (Store Python PID 15068) + 4 wpflow.exe duplicates | 2026-04-21 | Orphan processes from MCP restart loop — dashboard restarted clean via `WeatherAlpha_Dashboard.vbs` |
 | `logs/*.log` (6 root logs) | 2026-04-21 | Archived to `logs/archive/` |

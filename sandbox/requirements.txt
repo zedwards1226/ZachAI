@@ -1,0 +1,4 @@
+# Sandbox-only deps. Keep minimal — each experiment can add more in its own subfolder.
+requests
+python-dotenv
+pytz
