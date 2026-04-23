@@ -5,9 +5,10 @@ Orchestrates: fetch ensemble forecasts -> find markets -> compute edge -> check 
 Uses 31-member GFS ensemble for probability (not normal distribution).
 """
 import logging
+import time
 from datetime import date, datetime
 
-from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, PROB_SHRINK_TO_MARKET, SHIN_Z
+from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, SHIN_Z
 from calibration import get_shrinkage
 from edge import shin_adjust
 from database import (
@@ -19,7 +20,7 @@ from database import (
 from weather import fetch_all_forecasts
 from kalshi_client import get_client
 from edge import prob_exceeds, prob_between, compute_edge, best_side, effective_edge, parse_strike_from_ticker
-from kelly import size_stake, size_stake_no
+from kelly import size_stake
 from guardrails import all_checks
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,50 @@ MIN_VOLUME = 0
 def get_capital() -> float:
     summary = get_summary()
     return STARTING_CAPITAL + summary["total_pnl_usd"]
+
+
+def reconcile_after_exception(*, client, client_order_id: str,
+                              insert_kwargs: dict, stake: float,
+                              exc: Exception) -> int | None:
+    """
+    After place_order raised, check if the order actually landed on Kalshi.
+    If it did, insert a trade row + update guardrails to match reality.
+    Returns the trade_id on successful reconcile, None otherwise.
+
+    Skips the probe entirely in PAPER_MODE (paper orders never touch Kalshi).
+    Swallows probe errors so a failed reconcile attempt never crashes the scan.
+    """
+    if PAPER_MODE:
+        return None
+    try:
+        landed = client.get_orders(client_order_id=client_order_id)
+    except Exception as rec_exc:
+        log.error("Reconcile probe failed (%s): %s", client_order_id, rec_exc)
+        return None
+    if not landed:
+        return None
+    landed_order = landed[0]
+    log.warning(
+        "RECONCILE: order landed on Kalshi despite exception "
+        "(client_order_id=%s, status=%s, order_id=%s)",
+        client_order_id, landed_order.get("status"), landed_order.get("order_id"),
+    )
+    trade_id = insert_trade(
+        **insert_kwargs,
+        notes=f"RECONCILED after exception: {exc}. kalshi_status={landed_order.get('status')}",
+    )
+    if not trade_id or trade_id == -1:
+        return None
+    gs = get_guardrail_state()
+    update_guardrail_state(
+        daily_trades=gs["daily_trades"] + 1,
+        daily_pnl_usd=gs["daily_pnl_usd"],
+        consecutive_losses=gs["consecutive_losses"],
+        capital_at_risk_usd=gs["capital_at_risk_usd"] + stake,
+        halted=gs["halted"],
+        halt_reason=gs["halt_reason"],
+    )
+    return trade_id
 
 
 def scan_and_trade() -> list[dict]:
@@ -269,12 +314,16 @@ def scan_and_trade() -> list[dict]:
             continue
 
         # 10. Place order
+        # Deterministic client_order_id so we can reconcile if the network drops
+        # between us sending the request and receiving a response.
+        client_order_id = f"wa-{city_code}-{best['ticker']}-{int(time.time())}"
         try:
             order = client.place_order(
                 ticker=best["ticker"],
                 side=side,
                 contracts=sizing["contracts"],
                 price_cents=price_cents,
+                client_order_id=client_order_id,
             )
             trade_id = insert_trade(
                 city=city_code,
@@ -332,13 +381,34 @@ def scan_and_trade() -> list[dict]:
 
         except Exception as exc:
             log.error("Order failed [%s %s]: %s", city_code, best["ticker"], exc)
-            actions.append({
-                "city": city_code,
-                "ticker": best["ticker"],
-                "action": "error",
-                "error": str(exc),
-            })
-            insert_signal(**_sig, reason_skipped=f"order error: {exc}")
+            # Reconcile: the exception may have fired AFTER Kalshi accepted the order
+            # (network drop between request and response). Otherwise we'd have a
+            # phantom position — real order on Kalshi, no row in our DB.
+            insert_kwargs = dict(
+                city=city_code, market_id=best["ticker"], side=side.upper(),
+                contracts=sizing["contracts"], price_cents=price_cents,
+                edge=best["abs_edge"], kelly_frac=sizing["frac_kelly"],
+                stake_usd=stake, paper=PAPER_MODE, floor_f=best["floor_f"],
+                cap_f=best["cap_f"], strike_type=best["strike_type"],
+            )
+            reconciled_trade_id = reconcile_after_exception(
+                client=client, client_order_id=client_order_id,
+                insert_kwargs=insert_kwargs, stake=stake, exc=exc,
+            )
+            if reconciled_trade_id:
+                actions.append({
+                    "city": city_code, "ticker": best["ticker"],
+                    "action": "reconciled", "side": side.upper(),
+                    "contracts": sizing["contracts"], "price": price_cents,
+                    "trade_id": reconciled_trade_id, "original_error": str(exc),
+                })
+                insert_signal(**_sig, actionable=True, trade_id=reconciled_trade_id)
+            else:
+                actions.append({
+                    "city": city_code, "ticker": best["ticker"],
+                    "action": "error", "error": str(exc),
+                })
+                insert_signal(**_sig, reason_skipped=f"order error: {exc}")
 
     snapshot_pnl(capital, get_guardrail_state().get("capital_at_risk_usd", 0))
     log.info("=== Scan complete -- %d actions ===", len(actions))
@@ -347,13 +417,13 @@ def scan_and_trade() -> list[dict]:
 
 def _fetch_actual_high(city_code: str, dt: date) -> float | None:
     """Fetch the actual recorded high temp (degF) for a city on a given date via Open-Meteo archive."""
-    import requests
+    from weather import _get_with_retry
     city = CITIES.get(city_code)
     if not city:
         return None
     try:
         ds = dt.isoformat()
-        r = requests.get(
+        r = _get_with_retry(
             "https://archive-api.open-meteo.com/v1/archive",
             params={
                 "latitude": city["lat"], "longitude": city["lon"],
@@ -364,7 +434,6 @@ def _fetch_actual_high(city_code: str, dt: date) -> float | None:
             },
             timeout=10,
         )
-        r.raise_for_status()
         return r.json()["daily"]["temperature_2m_max"][0]
     except Exception as exc:
         log.warning("Archive weather fetch failed for %s %s: %s", city_code, dt, exc)

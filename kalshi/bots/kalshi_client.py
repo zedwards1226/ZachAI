@@ -162,13 +162,14 @@ class KalshiClient:
         if PAPER_MODE:
             log.info("[PAPER] %s %s x%d @ %d¢", ticker, side.upper(), contracts, price_cents)
             return {
-                "order_id":  f"PAPER-{ticker}-{side}-{contracts}",
-                "ticker":    ticker,
-                "side":      side,
-                "contracts": contracts,
-                "price":     price_cents,
-                "status":    "paper_filled",
-                "paper":     True,
+                "order_id":        f"PAPER-{ticker}-{side}-{contracts}",
+                "ticker":          ticker,
+                "side":            side,
+                "contracts":       contracts,
+                "price":           price_cents,
+                "status":          "paper_filled",
+                "client_order_id": client_order_id,
+                "paper":           True,
             }
         if not self._ready:
             raise RuntimeError("Kalshi client not authenticated")
@@ -183,7 +184,34 @@ class KalshiClient:
             "no_price":        price_cents if side == "no"  else 100 - price_cents,
             "client_order_id": client_order_id,
         }
-        return self._post("/portfolio/orders", body)
+        response = self._post("/portfolio/orders", body)
+        order    = response.get("order") or response
+        valid_status = {"resting", "executed", "canceled", "open", "pending"}
+        if not order.get("order_id") and order.get("status") not in valid_status:
+            raise RuntimeError(f"Kalshi rejected order (ticker={ticker}): {response}")
+        return order
+
+    def get_orders(self, client_order_id: str | None = None,
+                   ticker: str | None = None) -> list[dict]:
+        """
+        Fetch orders from Kalshi. Used to reconcile after network errors where
+        place_order raised but the order may have reached the exchange.
+        Filters client-side by client_order_id if given.
+        """
+        if not self._ready:
+            return []
+        params: dict = {"limit": 100}
+        if ticker:
+            params["ticker"] = ticker
+        try:
+            data   = self._get("/portfolio/orders", params=params)
+            orders = data.get("orders", [])
+            if client_order_id:
+                orders = [o for o in orders if o.get("client_order_id") == client_order_id]
+            return orders
+        except Exception as exc:
+            log.warning("get_orders failed: %s", exc)
+            return []
 
 
 # Singleton

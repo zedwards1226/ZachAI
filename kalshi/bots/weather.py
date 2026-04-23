@@ -4,6 +4,7 @@ Combines GFS (31 members) + ICON-EPS (21 members) = ~52 members total.
 Larger ensemble -> tighter probability estimates -> better Brier score.
 """
 import os
+import time
 import requests
 import logging
 from datetime import date, timedelta
@@ -13,6 +14,28 @@ log = logging.getLogger(__name__)
 
 ENSEMBLE_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+
+
+def _get_with_retry(url: str, params: dict, *, timeout: int = 15,
+                    attempts: int = 3) -> requests.Response:
+    """
+    HTTP GET with exponential backoff. Raises the final exception only if all
+    attempts fail. A single flake should not kill the whole scan cycle.
+    """
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except Exception as exc:
+            last_exc = exc
+            if i < attempts - 1:
+                backoff = 2 ** i  # 1s, 2s, 4s
+                log.warning("Open-Meteo request failed (attempt %d/%d): %s — retrying in %ds",
+                            i + 1, attempts, exc, backoff)
+                time.sleep(backoff)
+    raise last_exc if last_exc else RuntimeError("Open-Meteo: no response and no exception")
 # Comma-separated Open-Meteo model IDs. Default: GFS + ICON for 52 members.
 # Override with ENSEMBLE_MODELS env var if you want to pin a single model.
 ENSEMBLE_MODELS = os.getenv("ENSEMBLE_MODELS", "gfs_seamless,icon_seamless")
@@ -54,8 +77,7 @@ def fetch_ensemble_forecast(city_code: str, target_date: date | None = None) -> 
         "models": ENSEMBLE_MODELS,
     }
 
-    resp = requests.get(ENSEMBLE_URL, params=params, timeout=15)
-    resp.raise_for_status()
+    resp = _get_with_retry(ENSEMBLE_URL, params, timeout=15)
     data = resp.json()
 
     daily = data.get("daily", {})
@@ -121,8 +143,7 @@ def _fetch_deterministic(city_code: str) -> dict:
         "timezone": "auto",
         "forecast_days": 1,
     }
-    resp = requests.get(FORECAST_URL, params=params, timeout=10)
-    resp.raise_for_status()
+    resp = _get_with_retry(FORECAST_URL, params, timeout=10)
     data = resp.json()
 
     daily = data["daily"]

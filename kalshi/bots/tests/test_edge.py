@@ -6,20 +6,20 @@ from edge import prob_exceeds, compute_edge, best_side, effective_edge, parse_st
 
 
 def test_prob_exceeds_above():
-    # Forecast high 80F, strike 75F → high probability of exceeding
-    p = prob_exceeds(80, 75)
+    # All ensemble members above strike 75F → high probability of exceeding
+    p = prob_exceeds([80, 81, 79, 82, 80], 75)
     assert p > 0.85, f"Expected >0.85, got {p}"
 
 
 def test_prob_exceeds_below():
-    # Forecast high 65F, strike 80F → low probability of exceeding
-    p = prob_exceeds(65, 80)
+    # All ensemble members below strike 80F → low probability of exceeding
+    p = prob_exceeds([65, 64, 66, 63, 67], 80)
     assert p < 0.05, f"Expected <0.05, got {p}"
 
 
 def test_prob_exceeds_at_strike():
-    # At the strike, should be ~0.5
-    p = prob_exceeds(75, 75)
+    # 4 of 8 strictly above 75 → 0.5
+    p = prob_exceeds([76, 77, 78, 79, 74, 73, 72, 71], 75)
     assert 0.45 < p < 0.55, f"Expected ~0.5, got {p}"
 
 

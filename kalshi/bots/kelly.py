@@ -63,11 +63,3 @@ def size_stake(our_prob: float, price_cents: int, capital_usd: float) -> dict:
         "contracts":   contracts,
         "price_cents": price_cents,
     }
-
-
-def size_stake_no(our_prob_yes: float, no_price_cents: int, capital_usd: float) -> dict:
-    """
-    For betting NO: our_prob_no = 1 - our_prob_yes
-    """
-    our_prob_no = 1.0 - our_prob_yes
-    return size_stake(our_prob_no, no_price_cents, capital_usd)

@@ -20,6 +20,9 @@ Any file under `C:\ZachAI\kalshi\` that is NOT in this list should be deleted.
 - `bots/tests/__init__.py`
 - `bots/tests/test_edge.py`
 - `bots/tests/test_kelly.py`
+- `bots/tests/test_kalshi_client.py` — order placement validation + get_orders reconciliation probe
+- `bots/tests/test_weather_retry.py` — Open-Meteo retry wrapper
+- `bots/tests/test_trader_orderpath.py` — phantom-position reconciliation after place_order raises
 
 ## Dashboard (Flask proxy :3001)
 - `dashboard/backend/serve.py` — Auto-start via `scripts/WeatherAlpha_Dashboard.vbs`
