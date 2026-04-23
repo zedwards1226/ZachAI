@@ -122,7 +122,7 @@ def write_state(agent_name: str, data: dict) -> None:
 
 def read_all_states() -> dict[str, dict]:
     """Read all agent state files. Returns {agent_name: data}."""
-    agents = ["structure", "memory", "sentinel", "sweep", "signal_log"]
+    agents = ["structure", "memory", "sentinel", "signal_log"]
     result = {}
     for name in agents:
         result[name] = read_state(name)

@@ -54,7 +54,6 @@ def _install_mocks(monkeypatch):
                       "price_location": "above_vwap",
                       "nearest_level": {}},
         "memory": {"morning_bias": "BEARISH_BIAS"},
-        "sweep": {},
     })
     monkeypatch.setattr(combiner, "_check_hard_blocks", lambda *a, **kw: None)
     # Force the cascade gate to fail so poll() takes the skip branch and

@@ -18,7 +18,6 @@ NQ/MNQ futures ORB scalp system. Captures 15-min opening range (9:30-9:45 ET), w
 - **briefing** — 8:50 AM (Telegram morning report)
 - **briefing_heartbeat** — 8:55 AM (Telegram ping confirming morning agents ran)
 - **combiner_heartbeat** — 9:31 AM (Telegram ping at market open)
-- **sweep** — every 15s during 9:00-11:00 (closed bars only, batched alerts)
 - **combiner** — every 15s during 9:30-15:00 (ORB scoring + trade execution)
 - **trade_monitor** — every 30s (stop/TP reconciliation, time exits)
 - **memory** — 6:00 PM daily
@@ -42,8 +41,6 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 | HTF bias confirms | +2 |
 | Bias conflicts | −2 |
 | Second break after failed first (72% edge) | +2 |
-| Liquidity sweep confirms | +2 |
-| Sweep in trade direction (trap) | −2 |
 | Open air (no level within 20pts) | +1 |
 | Approaching wall | −2 |
 | At a level (no room) | −5 |

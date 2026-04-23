@@ -17,7 +17,6 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `agents/sentinel.py` — 8 AM initial + 60s poll (news/truth watch)
 - `agents/structure.py` — 8:45 AM (daily levels, VIX, ATR)
 - `agents/briefing.py` — 8:50 AM (morning Telegram report)
-- `agents/sweep.py` — 15s poll during 9:00–11:00 (sweep detection)
 - `agents/combiner.py` — 15s poll during 9:30–15:00 (ORB scoring + trades)
 - `agents/preflight.py` — 7:00 AM (stack verification)
 - `agents/memory.py` — 7:30 AM + 6:00 PM (daily memory + EOD)

@@ -358,7 +358,6 @@ def _score_trade(direction: Direction, is_second_break: bool,
     structure = states.get("structure", {})
     memory = states.get("memory", {})
     sentinel = states.get("sentinel", {})
-    sweep = states.get("sweep", {})
 
     # +3: ORB candle direction aligns (Finding 3: 77-80% accuracy)
     if orb.candle_direction == CandleDirection.BULLISH and direction == Direction.LONG:
@@ -384,18 +383,6 @@ def _score_trade(direction: Direction, is_second_break: bool,
     if is_second_break:
         b.second_break = 2
         b.details["second_break"] = "Second break after failed first (72% edge)"
-
-    # +2: Sweep confirmed opposite direction
-    sweep_bias = sweep.get("bias", "")
-    if sweep_bias:
-        if (sweep_bias == "BULLISH" and direction == Direction.LONG) or \
-           (sweep_bias == "BEARISH" and direction == Direction.SHORT):
-            b.sweep_opposite = 2
-            b.details["sweep"] = f"Sweep bias {sweep_bias} confirms {direction.value}"
-        elif (sweep_bias == "BULLISH" and direction == Direction.SHORT) or \
-             (sweep_bias == "BEARISH" and direction == Direction.LONG):
-            b.sweep_trap = -2
-            b.details["sweep_trap"] = f"Sweep in {direction.value} direction (trap warning)"
 
     # +1: Structure OPEN_AIR — recomputed against breakout price AND trade direction.
     # Only levels in front of the trade count as obstacles; levels already broken

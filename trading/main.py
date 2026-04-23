@@ -158,18 +158,6 @@ async def run_sentinel_poll():
         logger.error("Sentinel poll failed: %s", e, exc_info=True)
 
 
-async def run_sweep_poll():
-    try:
-        if not is_trading_day():
-            return
-        from agents.sweep import poll
-        await poll()
-    except ImportError:
-        pass  # Not built yet
-    except Exception as e:
-        logger.error("Sweep poll failed: %s", e, exc_info=True)
-
-
 async def run_combiner_poll():
     try:
         if not is_trading_day():
@@ -329,11 +317,6 @@ async def main():
     # ─── Interval Polls (check clock internally) ───
     # max_instances=1 + coalesce=True prevents overlapping runs if a poll
     # stalls (e.g. CDP hang) — late runs are dropped instead of piling up.
-
-    # Sweep detector: every 15 seconds
-    scheduler.add_job(run_sweep_poll, "interval", seconds=15,
-                      id="sweep_poll", name="Sweep Poll",
-                      max_instances=1, coalesce=True)
 
     # Sentinel continuous: every 60 seconds
     scheduler.add_job(run_sentinel_poll, "interval", seconds=60,

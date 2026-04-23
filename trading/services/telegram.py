@@ -243,30 +243,6 @@ async def notify_sentinel_alert(alert_type: str, details: str) -> bool:
     return await send(msg)
 
 
-async def notify_sweep(direction: str, level: float, sweep_type: str) -> bool:
-    """Send liquidity sweep / genuine-break alert.
-
-    direction is "BULLISH" or "BEARISH" (from sweep.py), which describes the
-    trade setup direction implied by the event — NOT the direction price moved.
-    A BEARISH sweep means bulls got trapped above, price reversed down, bias
-    is short. A BULLISH break means price broke up and held, bias is long.
-    """
-    is_break = "GENUINE_BREAK" in sweep_type or "BATCH" in sweep_type
-    action = "broke through and held" if is_break else "ran the stops and reversed"
-    trade_side = "LONG" if direction == "BULLISH" else "SHORT"
-    flow = (
-        "smart money pushing higher" if direction == "BULLISH"
-        else "smart money distributing"
-    )
-    msg = (
-        f"🌊 <b>LIQUIDITY SWEEP</b>\n\n"
-        f"Price {action} at <b>{level:.2f}</b> ({sweep_type}).\n"
-        f"This is a <b>{direction.lower()}</b> signal — {flow}.\n\n"
-        f"<i>Watching for a {trade_side} setup.</i>"
-    )
-    return await send(msg)
-
-
 async def notify_weekly_report(report_text: str) -> bool:
     """Send the Sunday weekly journal report."""
     return await send(f"📈 <b>WEEKLY TRADING REPORT</b>\n\n{report_text}")

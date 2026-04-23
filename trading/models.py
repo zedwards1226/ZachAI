@@ -91,7 +91,6 @@ class ScoreBreakdown(BaseModel):
     orb_candle_direction: int = 0
     htf_bias: int = 0
     second_break: int = 0
-    sweep_opposite: int = 0
     open_air: int = 0
     rvol: int = 0
     vwap_alignment: int = 0
@@ -101,7 +100,6 @@ class ScoreBreakdown(BaseModel):
     no_truth_block: int = 0
     approaching_wall: int = 0
     bias_conflict: int = 0
-    sweep_trap: int = 0
     news_block: int = 0
     truth_block: int = 0
     at_level: int = 0
@@ -111,10 +109,10 @@ class ScoreBreakdown(BaseModel):
     def compute_total(self) -> int:
         self.total = (
             self.orb_candle_direction + self.htf_bias + self.second_break
-            + self.sweep_opposite + self.open_air + self.rvol
+            + self.open_air + self.rvol
             + self.vwap_alignment + self.vix_regime + self.prior_day_direction
             + self.no_news_block + self.no_truth_block
-            + self.approaching_wall + self.bias_conflict + self.sweep_trap
+            + self.approaching_wall + self.bias_conflict
             + self.news_block + self.truth_block + self.at_level
         )
         return self.total
