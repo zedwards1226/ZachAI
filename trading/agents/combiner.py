@@ -190,6 +190,22 @@ async def poll() -> Optional[dict]:
         _breakout_processed = False
         return None
 
+    # Direction flip: price went straight from above OR to below OR (or vice
+    # versa) without a bar closing inside the range. Treat as first-break-failed
+    # plus a new breakout event so the second-break setup can fire on fast
+    # reversals (e.g. 2026-04-23: failed long → hard short leg, missed before fix).
+    if (_breakout_processed and _first_break_direction is not None
+            and breakout_direction != _first_break_direction):
+        if not _first_break_failed:
+            _first_break_failed = True
+        logger.info(
+            "First break FAILED via direction flip (%s → %s) — "
+            "price reversed through OR without pausing inside",
+            _first_break_direction.value, breakout_direction.value,
+        )
+        _breakout_processed = False
+        _persist_session()
+
     # If we already acted on this breakout event, don't re-score every 15s.
     # A new decision only happens after price returns inside the range and
     # breaks out again (which resets _breakout_processed above).
@@ -305,6 +321,7 @@ async def poll() -> Optional[dict]:
         score=score, size=size.value,
         entry=price, stop=stop, t1=target_1, t2=target_2,
         breakdown=breakdown.model_dump(),
+        orb_high=_orb.high, orb_low=_orb.low,
     )
 
     # Place paper trade on TradingView
