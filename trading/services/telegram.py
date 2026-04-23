@@ -77,7 +77,9 @@ async def notify_briefing(text: str) -> bool:
 
 async def notify_trade_entry(direction: str, score: int, size: str,
                              entry: float, stop: float, t1: float, t2: float,
-                             breakdown: dict) -> bool:
+                             breakdown: dict,
+                             orb_high: float, orb_low: float,
+                             setup_type: str = "ORB") -> bool:
     """Send trade entry notification with full score breakdown.
 
     Plain-English version: spells out targets, converts risk/reward into
@@ -110,10 +112,37 @@ async def notify_trade_entry(direction: str, score: int, size: str,
     direction_word = "buying" if direction == "LONG" else "selling short"
     arrow = "📈" if direction == "LONG" else "📉"
 
+    if setup_type == "SWEEP_REV":
+        swept_level = orb_high if direction == "LONG" else orb_low
+        margin = abs(entry - swept_level)
+        level_ref = f"Swept level ({swept_level:.2f})"
+    elif direction == "LONG":
+        margin = entry - orb_high
+        level_ref = f"ORB high ({orb_high:.2f})"
+        direction_text = "above"
+    else:
+        margin = orb_low - entry
+        level_ref = f"ORB low ({orb_low:.2f})"
+        direction_text = "below"
+    if margin < 3.0:
+        margin_label = "MARGINAL"
+    elif margin <= 10.0:
+        margin_label = "CLEAN"
+    else:
+        margin_label = "STRONG"
+
+    if setup_type == "SWEEP_REV":
+        headline = f"🌊 <b>NEW SWEEP-REVERSAL TRADE — {direction_word.upper()}</b>"
+        level_line = f"{level_ref} — reversed by {margin:.2f} pts — <b>{margin_label}</b>"
+    else:
+        headline = f"{arrow} <b>NEW TRADE — {direction_word.upper()}</b>"
+        level_line = f"Broke {direction_text} {level_ref} by {margin:.2f} pts — <b>{margin_label}</b>"
+
     msg = (
-        f"{arrow} <b>NEW TRADE — {direction_word.upper()}</b>\n\n"
+        f"{headline}\n\n"
         f"<b>Confidence score:</b> {score}/10 → {size} position\n"
         f"<i>(higher score = stronger setup; size scales with score)</i>\n\n"
+        f"{level_line}\n\n"
         f"<b>The plan:</b>\n"
         f"  Entry price: {entry:.2f}\n"
         f"  Stop loss: {stop:.2f}  (if hit, we lose ${risk_dollars:.0f})\n"
@@ -162,12 +191,18 @@ async def notify_trade_exit(direction: str, entry: float, exit_price: float,
 
 
 async def notify_skip(direction: str, score: int, reason: str) -> bool:
-    """Send notification when a trade is skipped (setup not strong enough)."""
+    """Send notification when a trade is skipped by a cascade gate.
+
+    The system uses 3 hard AND-gates (ORB candle, HTF bias, level proximity),
+    not a score threshold. Skip means ONE gate failed; score is kept for
+    context only.
+    """
     direction_word = "long" if direction == "LONG" else "short"
+    gate_name = reason.replace("cascade:", "").replace("_", " ")
     msg = (
         f"⏭️ <b>SKIPPED A {direction_word.upper()} SETUP</b>\n\n"
-        f"Confidence score was {score}/10 — below our minimum to take the trade.\n"
-        f"Main reason: {reason}\n\n"
+        f"A safety gate blocked the trade: <b>{gate_name}</b>\n"
+        f"<i>(score {score}/10, kept for review — not the reason for skipping)</i>\n\n"
         f"<i>No trade placed. Watching for the next setup.</i>"
     )
     return await send(msg)
@@ -209,14 +244,25 @@ async def notify_sentinel_alert(alert_type: str, details: str) -> bool:
 
 
 async def notify_sweep(direction: str, level: float, sweep_type: str) -> bool:
-    """Send liquidity sweep alert — price ran a key level then reversed."""
-    direction_word = "bullish" if direction == "LONG" else "bearish"
+    """Send liquidity sweep / genuine-break alert.
+
+    direction is "BULLISH" or "BEARISH" (from sweep.py), which describes the
+    trade setup direction implied by the event — NOT the direction price moved.
+    A BEARISH sweep means bulls got trapped above, price reversed down, bias
+    is short. A BULLISH break means price broke up and held, bias is long.
+    """
+    is_break = "GENUINE_BREAK" in sweep_type or "BATCH" in sweep_type
+    action = "broke through and held" if is_break else "ran the stops and reversed"
+    trade_side = "LONG" if direction == "BULLISH" else "SHORT"
+    flow = (
+        "smart money pushing higher" if direction == "BULLISH"
+        else "smart money distributing"
+    )
     msg = (
         f"🌊 <b>LIQUIDITY SWEEP</b>\n\n"
-        f"Price just ran the stops at <b>{level:.2f}</b> ({sweep_type}) "
-        f"and reversed.\n"
-        f"This is a {direction_word} signal — smart money likely accumulating.\n\n"
-        f"<i>Watching for a setup to trade in the {direction.lower()} direction.</i>"
+        f"Price {action} at <b>{level:.2f}</b> ({sweep_type}).\n"
+        f"This is a <b>{direction.lower()}</b> signal — {flow}.\n\n"
+        f"<i>Watching for a {trade_side} setup.</i>"
     )
     return await send(msg)
 
