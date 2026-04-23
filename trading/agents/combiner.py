@@ -251,7 +251,7 @@ async def poll() -> Optional[dict]:
     # AND-gated booleans, not confluence scoring. Score/RVOL/VWAP/VIX etc.
     # still recorded to signal_history for later ML-based meta-labeling.
     score = breakdown.total  # kept for logging/metadata only
-    gate_failed = _check_cascade(breakout_direction, _orb, states, price)
+    gate_failed = _check_cascade(breakout_direction, _orb, states, price, is_second_break)
     if gate_failed:
         logger.info("Trade skipped: %s (gate failed: %s)",
                     breakout_direction.value, gate_failed)
@@ -454,26 +454,34 @@ def _score_trade(direction: Direction, is_second_break: bool,
 
 
 def _check_cascade(direction: Direction, orb: ORBRange,
-                   states: dict, price: float) -> Optional[str]:
+                   states: dict, price: float,
+                   is_second_break: bool = False) -> Optional[str]:
     """Hard 4-gate entry filter. Returns None if all gates pass, else the failing gate name.
 
     Gate 1: ORB candle direction matches trade direction.
     Gate 2: HTF bias matches trade direction OR bias is NEUTRAL.
     Gate 3: Not AT a strong level (prior day/week H/L/C) in trade direction.
     Gate 4: News hard-blocks handled separately in _check_hard_blocks() upstream.
-    """
-    # Gate 1 — ORB candle
-    if direction == Direction.LONG and orb.candle_direction != CandleDirection.BULLISH:
-        return "orb_candle_wrong_direction"
-    if direction == Direction.SHORT and orb.candle_direction != CandleDirection.BEARISH:
-        return "orb_candle_wrong_direction"
 
-    # Gate 2 — HTF bias
-    bias = states.get("memory", {}).get("morning_bias", "NEUTRAL")
-    if bias == "BULLISH_BIAS" and direction == Direction.SHORT:
-        return "htf_bias_conflict"
-    if bias == "BEARISH_BIAS" and direction == Direction.LONG:
-        return "htf_bias_conflict"
+    Second-break exception: gates 1 + 2 are direction-based filters that ASSUME
+    the first break is the right read. A confirmed second break (opposite-side
+    reversal after a failed first break) is the market invalidating exactly
+    that read — Zarattini shows these carry 72% edge. Skip those two gates on
+    second breaks; Gate 3 (level proximity) still applies.
+    """
+    if not is_second_break:
+        # Gate 1 — ORB candle
+        if direction == Direction.LONG and orb.candle_direction != CandleDirection.BULLISH:
+            return "orb_candle_wrong_direction"
+        if direction == Direction.SHORT and orb.candle_direction != CandleDirection.BEARISH:
+            return "orb_candle_wrong_direction"
+
+        # Gate 2 — HTF bias
+        bias = states.get("memory", {}).get("morning_bias", "NEUTRAL")
+        if bias == "BULLISH_BIAS" and direction == Direction.SHORT:
+            return "htf_bias_conflict"
+        if bias == "BEARISH_BIAS" and direction == Direction.LONG:
+            return "htf_bias_conflict"
 
     # Gate 3 — not pinned against a strong level ahead
     from agents.structure import recompute_price_location
