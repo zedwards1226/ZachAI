@@ -120,10 +120,10 @@ When Zach says "bye", "done", "closing", or "end session":
 Each project owns a nested `CLAUDE.md` with its operational details. Claude Code auto-loads them when working in that folder.
 
 - **`trading\`** — ORB NQ/MNQ futures system (live, paper mode) → see `trading/CLAUDE.md`
+- **`sweep-bot\`** — Standalone MNQ liquidity sweep trader, runs alongside ORB (live, paper mode) → see `sweep-bot/CLAUDE.md`
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
 - **`companies\tradingagents\`** — FastAPI multi-agent gate (building, paper, not auto-started) → see `companies/tradingagents/CLAUDE.md`
-- **`companies\wpflow\`** — WordPress MCP server (built, launching) → see `companies/wpflow/CLAUDE.md`
 - **`companies\zacks-work-drawings\`** — Flutter Android app: Google Drive PDF viewer for machine wiring diagrams (built) → see `companies/zacks-work-drawings/CLAUDE.md`
 - **`sandbox\`** — experiments workspace, no auto-start, strict isolation from production → see `sandbox/CLAUDE.md`
 
@@ -152,6 +152,7 @@ C:\ZachAI\
 ├── CLAUDE.md (this file — master brain)
 ├── RULES.md / README.md / backup.bat
 ├── trading\ (ORB — has its own CLAUDE.md)
+├── sweep-bot\ (standalone sweep trader — has its own CLAUDE.md)
 ├── kalshi\ (WeatherAlpha — has its own CLAUDE.md)
 ├── telegram-bridge\ (Jarvis bot — has its own CLAUDE.md)
 ├── companies\ (each project has its own CLAUDE.md)
