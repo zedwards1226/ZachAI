@@ -121,11 +121,18 @@ class TVClient:
 
         self.msg_id += 1
         msg_id = self.msg_id
-        future = asyncio.get_event_loop().create_future()
+        # get_running_loop is preferred over the deprecated get_event_loop
+        # inside async contexts (Python 3.10+ emits a DeprecationWarning).
+        future = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = future
 
         payload = {"id": msg_id, "method": method, "params": params}
-        await self.ws.send(json.dumps(payload))
+        try:
+            await self.ws.send(json.dumps(payload))
+        except websockets.ConnectionClosed:
+            self.connected = False
+            self._pending.pop(msg_id, None)
+            raise
 
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
@@ -134,8 +141,29 @@ class TVClient:
 
         return result.get("result", {})
 
+    async def _evaluate_once(self, js: str, *, await_promise: bool, timeout: float) -> Any:
+        """Single Runtime.evaluate round-trip — raises on connection loss."""
+        result = await self._send("Runtime.evaluate", {
+            "expression": js,
+            "returnByValue": True,
+            "awaitPromise": await_promise,
+        }, timeout=timeout)
+        if "exceptionDetails" in result:
+            err = result["exceptionDetails"]
+            raise RuntimeError("JS evaluation error: %s" % err.get("text", str(err)))
+        return result.get("result", {}).get("value")
+
     async def evaluate(self, js: str, timeout: float = 10.0) -> Any:
-        """Evaluate JavaScript in the TradingView page context."""
+        """Evaluate JavaScript in the TradingView page context.
+
+        Auto-heals in two layers:
+          1. Stale-ping: if it's been >5s since the last known-good call,
+             send a trivial `1` to confirm the socket is alive before the
+             real payload; on failure, reconnect.
+          2. Retry-once: if the payload itself fails because the WS dropped
+             (TV page reloaded, chart crashed, CDP target churned), reconnect
+             and retry the same call one time. After that, propagate.
+        """
         # Health check if stale
         now = time.monotonic()
         if now - self._last_ping > 5.0:
@@ -146,31 +174,27 @@ class TVClient:
             except Exception:
                 await self._reconnect()
 
-        result = await self._send("Runtime.evaluate", {
-            "expression": js,
-            "returnByValue": True,
-            "awaitPromise": False,
-        }, timeout=timeout)
-
-        if "exceptionDetails" in result:
-            err = result["exceptionDetails"]
-            raise RuntimeError("JS evaluation error: %s" % err.get("text", str(err)))
-
-        return result.get("result", {}).get("value")
+        try:
+            return await self._evaluate_once(js, await_promise=False, timeout=timeout)
+        except (ConnectionError, websockets.ConnectionClosed) as exc:
+            logger.warning("evaluate lost connection (%s) — reconnecting and retrying once", exc)
+            await self._reconnect()
+            return await self._evaluate_once(js, await_promise=False, timeout=timeout)
 
     async def evaluate_async(self, js: str, timeout: float = 15.0) -> Any:
-        """Evaluate async JavaScript (returns a Promise) in the TradingView page context."""
-        result = await self._send("Runtime.evaluate", {
-            "expression": js,
-            "returnByValue": True,
-            "awaitPromise": True,
-        }, timeout=timeout)
+        """Evaluate async JavaScript (returns a Promise) in the TradingView page context.
 
-        if "exceptionDetails" in result:
-            err = result["exceptionDetails"]
-            raise RuntimeError("JS evaluation error: %s" % err.get("text", str(err)))
-
-        return result.get("result", {}).get("value")
+        Same reconnect-and-retry-once semantics as `evaluate`. Useful for
+        order-placement IIFEs — if TradingView rerendered the trading panel
+        mid-flight we reconnect transparently rather than bubbling a hard
+        failure that marks the trade FAILED_PLACEMENT.
+        """
+        try:
+            return await self._evaluate_once(js, await_promise=True, timeout=timeout)
+        except (ConnectionError, websockets.ConnectionClosed) as exc:
+            logger.warning("evaluate_async lost connection (%s) — reconnecting and retrying once", exc)
+            await self._reconnect()
+            return await self._evaluate_once(js, await_promise=True, timeout=timeout)
 
     async def _reconnect(self, retries: int = 5) -> None:
         """Reconnect with exponential backoff."""
