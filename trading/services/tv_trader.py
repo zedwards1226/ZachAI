@@ -175,8 +175,13 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
       }}
       await sleep(150);
 
-      // Step 2: Click Buy/Sell side (DIVs, not buttons)
+      // Step 2: Click Buy/Sell side (DIVs, not buttons).
+      // Two-pass selector — primary uses the hashed TV class (precise);
+      // fallback relies on the semantic `buy-`/`sell-` prefix + panel
+      // position, so a TV UI update that rotates the hash doesn't break
+      // order placement. sideMatch tells Python which path hit.
       var sideFound = false;
+      var sideMatch = 'none';
       var els = document.querySelectorAll('*');
       for (var i = 0; i < els.length; i++) {{
         var cls = (els[i].className || '').toString();
@@ -184,10 +189,28 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
         if (cls.includes('{side_class}') && cls.includes('OnZ1FRe5') && rect.width > 50) {{
           els[i].click();
           sideFound = true;
+          sideMatch = 'hashed';
           break;
         }}
       }}
-      if (!sideFound) return {{clicked: false, reason: 'side_not_found'}};
+      if (!sideFound) {{
+        for (var i = 0; i < els.length; i++) {{
+          var cls = (els[i].className || '').toString();
+          var rect = els[i].getBoundingClientRect();
+          // Trade-panel tile shape: right-hand column, clickable DIV,
+          // moderate width/height (not a container or a thin border).
+          if (cls.includes('{side_class}') &&
+              rect.x > 350 &&
+              rect.width > 50 && rect.width < 400 &&
+              rect.height > 20 && rect.height < 150) {{
+            els[i].click();
+            sideFound = true;
+            sideMatch = 'semantic';
+            break;
+          }}
+        }}
+      }}
+      if (!sideFound) return {{clicked: false, reason: 'side_not_found', sideMatch: sideMatch}};
       await sleep(100);
 
       // Step 3: Click Market order type
@@ -277,7 +300,7 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
           var t = btns[i].textContent.trim();
           if (t.includes('{side_word}') && t.includes('MNQ')) {{
             btns[i].click();
-            return {{clicked: true, text: t, pricesSet: pricesSet}};
+            return {{clicked: true, text: t, pricesSet: pricesSet, sideMatch: sideMatch}};
           }}
         }}
         // Fallback: "Start creating order" button (TradingView shows this before final submit)
@@ -288,7 +311,7 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
             return null; // needs second click
           }}
         }}
-        return {{clicked: false, reason: 'submit_not_found', pricesSet: pricesSet}};
+        return {{clicked: false, reason: 'submit_not_found', pricesSet: pricesSet, sideMatch: sideMatch}};
       }};
 
       var result = findAndClickSubmit();
@@ -297,13 +320,28 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
       // "Start creating order" was clicked — wait for actual submit button
       await sleep(200);
       result = findAndClickSubmit();
-      return result || {{clicked: false, reason: 'submit_not_found_after_retry', pricesSet: pricesSet}};
+      return result || {{clicked: false, reason: 'submit_not_found_after_retry', pricesSet: pricesSet, sideMatch: sideMatch}};
     }})()
     """
     try:
         result = await tv.evaluate_async(js)
         if result and result.get("clicked"):
             logger.info("Trading panel order submitted: %s", result.get("text"))
+            # If the semantic fallback hit, the hashed selector is stale —
+            # alert so Zach can refresh the TV class hash in the source.
+            if result.get("sideMatch") == "semantic":
+                logger.warning("DOM fallback used — TradingView class hash rotated")
+                try:
+                    await telegram.send(
+                        "⚠️ <b>TV DOM drift detected</b>\n"
+                        "Order placed using the semantic fallback selector — the "
+                        "hashed <code>OnZ1FRe5</code> class is stale. TradingView "
+                        "likely shipped a UI update. Refresh the hash in "
+                        "<code>services/tv_trader.py</code> when convenient; orders "
+                        "still work via fallback in the meantime."
+                    )
+                except Exception:
+                    pass
             return True, ""
         else:
             reason = (result or {}).get("reason", "unknown")
@@ -352,8 +390,9 @@ async def close_via_trading_panel(tv, direction: str) -> bool:
       }}
       await sleep(150);
 
-      // Step 2: Click opposite side
+      // Step 2: Click opposite side — same two-pass selector as place_bracket.
       var sideFound = false;
+      var sideMatch = 'none';
       var els = document.querySelectorAll('*');
       for (var i = 0; i < els.length; i++) {{
         var cls = (els[i].className || '').toString();
@@ -361,10 +400,26 @@ async def close_via_trading_panel(tv, direction: str) -> bool:
         if (cls.includes('{side_class}') && cls.includes('OnZ1FRe5') && rect.width > 50) {{
           els[i].click();
           sideFound = true;
+          sideMatch = 'hashed';
           break;
         }}
       }}
-      if (!sideFound) return {{clicked: false, reason: 'side_not_found'}};
+      if (!sideFound) {{
+        for (var i = 0; i < els.length; i++) {{
+          var cls = (els[i].className || '').toString();
+          var rect = els[i].getBoundingClientRect();
+          if (cls.includes('{side_class}') &&
+              rect.x > 350 &&
+              rect.width > 50 && rect.width < 400 &&
+              rect.height > 20 && rect.height < 150) {{
+            els[i].click();
+            sideFound = true;
+            sideMatch = 'semantic';
+            break;
+          }}
+        }}
+      }}
+      if (!sideFound) return {{clicked: false, reason: 'side_not_found', sideMatch: sideMatch}};
       await sleep(100);
 
       // Step 3: Click Market
@@ -393,7 +448,7 @@ async def close_via_trading_panel(tv, direction: str) -> bool:
           var t = btns[i].textContent.trim();
           if (t.includes('{side_word}') && t.includes('MNQ')) {{
             btns[i].click();
-            return {{clicked: true, text: t}};
+            return {{clicked: true, text: t, sideMatch: sideMatch}};
           }}
         }}
         for (var i = 0; i < btns.length; i++) {{
@@ -403,20 +458,22 @@ async def close_via_trading_panel(tv, direction: str) -> bool:
             return null;
           }}
         }}
-        return {{clicked: false, reason: 'submit_not_found'}};
+        return {{clicked: false, reason: 'submit_not_found', sideMatch: sideMatch}};
       }};
 
       var result = findAndClick();
       if (result) return result;
       await sleep(200);
       result = findAndClick();
-      return result || {{clicked: false, reason: 'submit_not_found_after_retry'}};
+      return result || {{clicked: false, reason: 'submit_not_found_after_retry', sideMatch: sideMatch}};
     }})()
     """
     try:
         result = await tv.evaluate_async(js)
         if result and result.get("clicked"):
             logger.info("Position closed via trading panel: %s", result.get("text"))
+            if result.get("sideMatch") == "semantic":
+                logger.warning("DOM fallback used on close — TradingView class hash rotated")
             return True
         logger.warning("Close order failed: %s", result)
         return False
