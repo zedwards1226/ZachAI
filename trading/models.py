@@ -155,13 +155,6 @@ class SweepLevel(BaseModel):
     direction: str
 
 
-class FVG(BaseModel):
-    fvg_type: str  # "bullish" or "bearish"
-    high: float
-    low: float
-    date: str
-
-
 class LiquidityPool(BaseModel):
     pool_type: str  # "equal_highs" or "equal_lows"
     level: float

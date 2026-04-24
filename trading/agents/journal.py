@@ -66,9 +66,15 @@ def init_db() -> None:
                 vix_at_entry    REAL,
                 rvol_at_entry   REAL,
                 notes           TEXT,
+                setup_type      TEXT DEFAULT 'ORB',
                 created_at      TEXT NOT NULL
             )
         """)
+        try:
+            conn.execute("ALTER TABLE trades ADD COLUMN setup_type TEXT DEFAULT 'ORB'")
+            conn.execute("UPDATE trades SET setup_type='ORB' WHERE setup_type IS NULL")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS daily_summary (
                 date            TEXT PRIMARY KEY,
@@ -98,13 +104,41 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_signal_history_date ON signal_history(date)"
         )
+        # Learning agent audit log. Every nightly run writes at least one row
+        # (proposal, digest, or heartbeat) so silence = something broken.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent_journal (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                date            TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                entry_type      TEXT NOT NULL,
+                subject         TEXT,
+                knob            TEXT,
+                current_value   REAL,
+                proposed_value  REAL,
+                sample_size     INTEGER,
+                confidence      REAL,
+                reasoning       TEXT,
+                source          TEXT DEFAULT 'agent',
+                status          TEXT DEFAULT 'pending',
+                applied_at      TEXT,
+                data            TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_journal_date ON agent_journal(date)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_journal_status ON agent_journal(status)"
+        )
 
 
 def log_trade_open(direction: str, score: int, breakdown: dict,
                    entry: float, stop: float, target_1: float, target_2: float,
                    size: str, orb_high: float, orb_low: float,
                    orb_candle_dir: str, was_second_break: bool,
-                   vix: Optional[float], rvol: Optional[float]) -> int:
+                   vix: Optional[float], rvol: Optional[float],
+                   setup_type: str = "ORB") -> int:
     """Log a new trade entry. Returns the trade ID."""
     now = datetime.now(ET)
     with get_conn() as conn:
@@ -112,15 +146,15 @@ def log_trade_open(direction: str, score: int, breakdown: dict,
             INSERT INTO trades (date, time, direction, score, breakdown, entry, stop,
                                 target_1, target_2, size, orb_high, orb_low,
                                 orb_candle_direction, was_second_break,
-                                vix_at_entry, rvol_at_entry, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                vix_at_entry, rvol_at_entry, setup_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"),
             direction, score, json.dumps(breakdown),
             entry, stop, target_1, target_2, size,
             orb_high, orb_low, orb_candle_dir,
             1 if was_second_break else 0,
-            vix, rvol, now.isoformat(),
+            vix, rvol, setup_type, now.isoformat(),
         ))
         trade_id = cur.lastrowid
         logger.info("Trade logged: id=%d, %s score=%d entry=%.2f", trade_id, direction, score, entry)
@@ -372,3 +406,94 @@ async def weekly_report() -> bool:
 
     report = "\n".join(lines)
     return await telegram.notify_weekly_report(report)
+
+
+# ─── Agent Journal (learning agent audit trail) ──────────────────────
+
+def agent_journal_write(entry_type: str, reasoning: str,
+                        subject: Optional[str] = None,
+                        knob: Optional[str] = None,
+                        current_value: Optional[float] = None,
+                        proposed_value: Optional[float] = None,
+                        sample_size: Optional[int] = None,
+                        confidence: Optional[float] = None,
+                        source: str = "agent",
+                        status: str = "pending",
+                        data: Optional[dict] = None) -> int:
+    """Insert a row into agent_journal. Returns the row ID.
+
+    entry_type values: 'heartbeat', 'proposal', 'observation', 'action',
+                       'manual_edit', 'error', 'digest'.
+    """
+    now = datetime.now(ET)
+    with get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO agent_journal (
+                date, created_at, entry_type, subject, knob,
+                current_value, proposed_value, sample_size, confidence,
+                reasoning, source, status, data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            now.strftime("%Y-%m-%d"), now.isoformat(), entry_type, subject, knob,
+            current_value, proposed_value, sample_size, confidence,
+            reasoning, source, status,
+            json.dumps(data) if data is not None else None,
+        ))
+        return cur.lastrowid
+
+
+def agent_journal_has_today(entry_type: Optional[str] = None) -> bool:
+    """Idempotency guard — True if learning_agent already wrote today."""
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        if entry_type:
+            row = conn.execute(
+                "SELECT 1 FROM agent_journal WHERE date = ? AND entry_type = ? LIMIT 1",
+                (today, entry_type),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT 1 FROM agent_journal WHERE date = ? LIMIT 1",
+                (today,),
+            ).fetchone()
+        return row is not None
+
+
+def get_agent_proposals(status: str = "pending", limit: int = 20) -> list[dict]:
+    """Get agent proposals filtered by status ('pending', 'approved', etc)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM agent_journal "
+            "WHERE entry_type = 'proposal' AND status = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_last_knob_change(knob: str) -> Optional[dict]:
+    """Most recent applied change for a knob (for cooldown enforcement)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM agent_journal "
+            "WHERE knob = ? AND status = 'approved' "
+            "ORDER BY id DESC LIMIT 1",
+            (knob,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def mark_proposal_status(proposal_id: int, status: str) -> None:
+    """Update a proposal row's status (approved / rejected / reverted)."""
+    now = datetime.now(ET)
+    with get_conn() as conn:
+        if status == "approved":
+            conn.execute(
+                "UPDATE agent_journal SET status = ?, applied_at = ? WHERE id = ?",
+                (status, now.isoformat(), proposal_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE agent_journal SET status = ? WHERE id = ?",
+                (status, proposal_id),
+            )

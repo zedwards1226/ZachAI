@@ -1,6 +1,6 @@
 """MEMORY AGENT — Runs at 6:00 PM ET daily.
 
-Analyzes last 3 days of daily candles: trend vs chop, sweep levels, FVGs, direction.
+Analyzes last 3 days of daily candles: trend vs chop, sweep levels, direction.
 Calculates morning bias for next day. Keeps rolling 10-day history.
 Writes output to state/memory.json.
 """
@@ -45,9 +45,6 @@ async def run() -> dict:
         # Detect sweep levels across last 5 days
         sweep_levels = _detect_sweep_levels(daily_bars[-5:])
 
-        # Detect FVGs (fair value gaps) across last 5 days
-        fvgs = _detect_fvgs(daily_bars[-5:])
-
         # Calculate morning bias
         bias, confidence, reasons = _calculate_bias(last_3, daily_bars, sweep_levels)
 
@@ -66,7 +63,6 @@ async def run() -> dict:
             "bias_reasons": reasons,
             "recent_days": last_3,
             "sweep_levels": sweep_levels,
-            "fvgs": fvgs,
             "rolling_10day": {
                 "avg_range": round(sum(ranges) / len(ranges), 2) if ranges else 0,
                 "trend_days": trend_count,
@@ -164,41 +160,6 @@ def _detect_sweep_levels(bars: list[dict]) -> list[dict]:
             })
 
     return sweeps
-
-
-def _detect_fvgs(bars: list[dict]) -> list[dict]:
-    """Detect Fair Value Gaps (3-candle gaps with no overlap).
-
-    Bullish FVG: bar[i+1].low > bar[i-1].high (gap up left unfilled)
-    Bearish FVG: bar[i+1].high < bar[i-1].low (gap down left unfilled)
-    """
-    fvgs = []
-    for i in range(1, len(bars) - 1):
-        prev = bars[i - 1]
-        curr = bars[i]
-        nxt = bars[i + 1]
-
-        # Bullish FVG
-        if nxt["low"] > prev["high"]:
-            dt = datetime.fromtimestamp(curr["time"], tz=pytz.utc).astimezone(ET)
-            fvgs.append({
-                "fvg_type": "bullish",
-                "high": round(nxt["low"], 2),
-                "low": round(prev["high"], 2),
-                "date": dt.strftime("%Y-%m-%d"),
-            })
-
-        # Bearish FVG
-        if nxt["high"] < prev["low"]:
-            dt = datetime.fromtimestamp(curr["time"], tz=pytz.utc).astimezone(ET)
-            fvgs.append({
-                "fvg_type": "bearish",
-                "high": round(prev["low"], 2),
-                "low": round(nxt["high"], 2),
-                "date": dt.strftime("%Y-%m-%d"),
-            })
-
-    return fvgs
 
 
 def _calculate_bias(last_3: list[dict], all_bars: list[dict],

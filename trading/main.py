@@ -185,6 +185,22 @@ async def run_weekly_report():
         logger.error("Weekly report failed: %s", e, exc_info=True)
 
 
+async def run_learning_agent():
+    try:
+        from agents.learning_agent import run
+        await run()
+    except Exception as e:
+        logger.error("Learning agent failed: %s", e, exc_info=True)
+
+
+async def run_learning_weekly():
+    try:
+        from agents.learning_agent import run_weekly_digest
+        await run_weekly_digest()
+    except Exception as e:
+        logger.error("Learning weekly digest failed: %s", e, exc_info=True)
+
+
 async def run_preflight():
     try:
         if not is_trading_day():
@@ -337,6 +353,15 @@ async def main():
     scheduler.add_job(run_weekly_report, "cron", day_of_week="sun",
                       hour=7, minute=0,
                       id="journal_weekly", name="Weekly Report")
+
+    # Learning agent: 6:30 PM ET daily (after memory agent finishes at 6:00)
+    scheduler.add_job(run_learning_agent, "cron", hour=18, minute=30,
+                      id="learning_agent", name="Learning Agent (Nightly)")
+
+    # Learning agent weekly digest: Sunday 7:05 AM ET
+    scheduler.add_job(run_learning_weekly, "cron", day_of_week="sun",
+                      hour=7, minute=5,
+                      id="learning_weekly", name="Learning Agent (Weekly)")
 
     # Daily journal backup: 6:00 AM ET
     scheduler.add_job(run_journal_backup, "cron", hour=6, minute=0,

@@ -21,6 +21,8 @@ NQ/MNQ futures ORB scalp system. Captures 15-min opening range (9:30-9:45 ET), w
 - **combiner** — every 15s during 9:30-15:00 (ORB scoring + trade execution)
 - **trade_monitor** — every 30s (stop/TP reconciliation, time exits)
 - **memory** — 6:00 PM daily
+- **learning_agent** — 6:30 PM daily (reviews trades, proposes knob changes, Telegram heartbeat)
+- **learning_weekly** — Sunday 7:05 AM (weekly learning-agent digest)
 - **journal_backup** — 6:00 AM daily (copy journal.db, keep 30 days)
 - **journal_weekly** — Sunday 7:00 AM (weekly report)
 
@@ -69,6 +71,16 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 - No local `.pine` files — Pine Scripts live ONLY in TradingView editor
 - `paper_trades.json` and `trades_journal.db` are gitignored
 - **Auto-merge exception:** any task touching `trading/services/tv_trader.py` must commit and push but notify Zach BEFORE merging (it affects live order execution)
+
+## LEARNING AGENT
+- Runs nightly at 6:30 PM ET — reviews last 30 days of trades and proposes tweaks to `SCORE_FULL_SIZE`, `SCORE_HALF_SIZE`, `RVOL_THRESHOLD`.
+- Proposals land in `agent_journal` table (SQLite) as `status='pending'`. They DO NOT auto-apply.
+- Nightly heartbeat fires even when <20 trades ("X/20 trades accumulated — no proposal yet") so silence = something broken, not low activity.
+- Approved proposals live in `state/learned_config.json`. `config_loader.py` overlays these onto `config.py` at import time.
+- **Manual edits to `state/learned_config.json` are detected via SHA256 drift vs `state/learned_config.meta.json`, then logged to `agent_journal` with `source='manual'`.** Do not bypass — keeps the audit trail clean.
+- Guardrails: ±1 pt step on scores, ±0.1 on RVOL; 10-trading-day cooldown per knob; bounds clamped to `LEARNABLE_KNOBS` in `config_loader.py`.
+- Dry-run: `python -m agents.learning_agent --dry-run` prints proposals without writing or sending Telegram.
+- PR #2 (deferred) adds `/approve_orb_agent`, `/reject_orb_agent`, `/revert_orb_agent` Telegram handlers. Until it ships, approve by editing `state/learned_config.json` manually — config_loader will log the drift.
 
 ## TRADINGVIEW MCP NAVIGATION CHEATSHEET
 

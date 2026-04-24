@@ -20,7 +20,9 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `agents/combiner.py` — 15s poll during 9:30–15:00 (ORB scoring + trades)
 - `agents/preflight.py` — 7:00 AM (stack verification)
 - `agents/memory.py` — 7:30 AM + 6:00 PM (daily memory + EOD)
-- `agents/journal.py` — journal DB + weekly report
+- `agents/journal.py` — journal DB + weekly report + agent_journal audit table
+- `agents/learning_agent.py` — 6:30 PM daily + Sun 7:05 AM weekly; reviews trades, proposes knob changes
+- `agents/config_loader.py` — loads `state/learned_config.json` overrides on top of `config.py` + manual-edit detection
 
 ## Services
 - `services/__init__.py`
@@ -39,7 +41,9 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `state/orb.pid` — single-instance lock
 - `state/state.json` — runtime state
 - `state/backups/journal_*.db` — daily journal DB backup (keeps 30 days)
-- `journal.db` — SQLite journal
+- `state/learned_config.json` — learning agent's approved knob overrides (manual edits detected + logged)
+- `state/learned_config.meta.json` — checksum + snapshot for manual-edit detection
+- `journal.db` — SQLite journal (includes `agent_journal` audit table)
 - `logs/trading.log*` — rotated daily, 14-day retention
 
 ## Scheduler jobs (source of truth: `main.py`)
@@ -57,5 +61,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 | `combiner_poll` | every 15s | ORB scoring + trade execution |
 | `trade_monitor` | every 30s | Stop/TP reconciliation |
 | `memory` | 6:00 PM ET | EOD memory |
+| `learning_agent` | 6:30 PM ET | Nightly trade review + Telegram digest (heartbeat even if <20 trades) |
+| `learning_weekly` | Sun 7:05 AM | Weekly learning-agent digest |
 | `journal_backup` | 6:00 AM ET | Copy journal.db to `state/backups/` |
 | `journal_weekly` | Sun 7:00 AM | Weekly report |

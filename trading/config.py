@@ -128,3 +128,25 @@ def get_hard_close_time(dt=None) -> tuple:
     if dt.strftime("%Y-%m-%d") in HALF_DAYS:
         return (HALF_DAY_CLOSE_HOUR, HALF_DAY_CLOSE_MINUTE)
     return (HARD_CLOSE_HOUR, HARD_CLOSE_MINUTE)
+
+
+# ─── Learned config overrides (applied at import time) ─────────────
+# The ORB learning agent may propose threshold changes. Approved ones
+# land in state/learned_config.json, which this block overlays onto the
+# defaults above. Other modules that do `from config import X` pick up
+# the overridden value automatically.
+#
+# Manual edits to state/learned_config.json are detected by the learning
+# agent on its next run and logged to agent_journal with source='manual'.
+LEARNED_OVERRIDES: dict = {}
+try:
+    from agents import config_loader as _config_loader
+    _overrides = _config_loader.load_overrides()
+    for _k, _v in _overrides.items():
+        globals()[_k] = _v
+    LEARNED_OVERRIDES = dict(_overrides)
+except Exception:  # noqa: BLE001 — overrides must never break config import
+    import logging as _logging
+    _logging.getLogger(__name__).exception(
+        "Failed to apply learned_config overrides; using defaults"
+    )

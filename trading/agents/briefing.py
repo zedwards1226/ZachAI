@@ -10,9 +10,10 @@ from datetime import datetime
 
 import pytz
 
-from config import TIMEZONE, SCORE_FULL_SIZE, SCORE_HALF_SIZE
+from config import TIMEZONE, SCORE_FULL_SIZE, SCORE_HALF_SIZE, LEARNED_OVERRIDES
 from services.state_manager import read_state, is_state_today
 from services import telegram
+from agents import journal
 
 logger = logging.getLogger(__name__)
 ET = pytz.timezone(TIMEZONE)
@@ -96,13 +97,6 @@ async def run() -> bool:
                 arrow = "↑" if d.get("direction") == "BULLISH" else "↓"
                 day_strs.append(f"{d.get('day_type', '?')} {arrow}")
             lines.append(f"Last 3: {' | '.join(day_strs)}")
-
-        fvgs = memory.get("fvgs", [])
-        if fvgs:
-            for fvg in fvgs[:2]:
-                lines.append(
-                    f"FVG: {fvg['fvg_type']} {_fmt(fvg.get('low'))}-{_fmt(fvg.get('high'))}"
-                )
 
         rolling = memory.get("rolling_10day", {})
         if rolling:
@@ -199,6 +193,23 @@ async def run() -> bool:
     else:
         lines.append("Hard blocks: None active ✓")
 
+    # --- LEARNING AGENT STATUS ---
+    if LEARNED_OVERRIDES or _pending_proposals():
+        lines.append("")
+        lines.append("━━━ <b>LEARNING AGENT</b> ━━━")
+        if LEARNED_OVERRIDES:
+            lines.append("Active overrides:")
+            for k, v in sorted(LEARNED_OVERRIDES.items()):
+                lines.append(f"  • {k} = {v}")
+        pending = _pending_proposals()
+        if pending:
+            lines.append(f"Pending proposals: {len(pending)}")
+            for p in pending[:3]:
+                lines.append(
+                    f"  ⏳ #{p['id']} {p['knob']}: "
+                    f"{p['current_value']} → {p['proposed_value']}"
+                )
+
     # Send
     message = "\n".join(lines)
     success = await telegram.notify_briefing(message)
@@ -217,3 +228,12 @@ def _fmt(val) -> str:
         return f"{float(val):,.2f}"
     except (ValueError, TypeError):
         return str(val)
+
+
+def _pending_proposals() -> list[dict]:
+    """Safe fetch of pending learning-agent proposals for briefing display."""
+    try:
+        return journal.get_agent_proposals(status="pending", limit=5)
+    except Exception:
+        logger.exception("Failed to read pending proposals for briefing")
+        return []
