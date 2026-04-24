@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from config import FLASK_HOST, FLASK_PORT, PAPER_MODE, KALSHI_DEMO
+from config import FLASK_HOST, FLASK_PORT, PAPER_MODE, KALSHI_DEMO, INTERNAL_API_SECRET
 from database import (
     init_db, get_trades, get_latest_forecasts, get_pnl_history,
     get_summary, get_guardrail_state, log_decision, get_decision_log,
@@ -43,7 +43,21 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app, origins="*")
+# CORS: only the dashboard + Vite dev server need cross-origin access.
+CORS(app, origins=["http://localhost:3001", "http://127.0.0.1:3001",
+                   "http://localhost:5173", "http://127.0.0.1:5173"])
+
+
+@app.before_request
+def _require_internal_secret():
+    """Gate every POST (and other state-changing methods) on the shared
+    secret. GETs are read-only and stay open so the dashboard proxy and
+    health checks keep working without extra wiring."""
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        import hmac
+        sent = request.headers.get("X-Internal-Secret", "")
+        if not hmac.compare_digest(sent, INTERNAL_API_SECRET):
+            return jsonify({"error": "forbidden"}), 403
 
 # Module-level scan state tracker
 _scan_status = {

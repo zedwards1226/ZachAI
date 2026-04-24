@@ -11,6 +11,10 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 
+# Pull INTERNAL_API_SECRET from the bot's config so proxy + API share one value.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bots"))
+from config import INTERNAL_API_SECRET  # noqa: E402
+
 from flask import Flask, send_from_directory, request, Response
 from flask_cors import CORS
 
@@ -19,7 +23,7 @@ BOT_API_URL = "http://127.0.0.1:5000"
 SERVE_PORT  = 3001
 
 app = Flask(__name__, static_folder=None)
-CORS(app)
+CORS(app, origins=["http://localhost:3001", "http://127.0.0.1:3001"])
 
 
 @app.route("/api/<path:subpath>", methods=["GET", "POST", "PUT", "DELETE"])
@@ -32,6 +36,12 @@ def proxy_api(subpath):
     try:
         body    = request.get_data() or None
         headers = {k: v for k, v in request.headers if k != "Host"}
+        # Inject shared secret server-side so the browser never sees it.
+        # Strip any client-supplied value first — clients can't grant themselves access.
+        headers.pop("X-Internal-Secret", None)
+        headers.pop("x-internal-secret", None)
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            headers["X-Internal-Secret"] = INTERNAL_API_SECRET
         req     = urllib.request.Request(url, data=body, headers=headers, method=request.method)
         with urllib.request.urlopen(req, timeout=15) as resp:
             return Response(resp.read(), status=resp.status,

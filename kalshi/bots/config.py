@@ -71,10 +71,22 @@ CITIES = {
     "MEM": {"name": "Memphis",       "lat": 35.1495, "lon": -90.0490,  "kalshi_series": "KXHIGHMEM"},
 }
 
-# Flask
+# Flask — bind to loopback only. Public dashboard is served by the
+# proxy on :3001, which forwards to 127.0.0.1:5000 server-side and
+# injects INTERNAL_API_SECRET so write endpoints can't be hit from
+# the LAN.
 FLASK_PORT = int(os.getenv("PORT", "5000"))
-FLASK_HOST = "0.0.0.0"
+FLASK_HOST = os.getenv("FLASK_HOST", "127.0.0.1")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "weatheralpha.db")
+
+# Shared secret required on every POST to the bot API. The dashboard
+# proxy injects it server-side; direct callers (curl/scripts) must
+# send it via X-Internal-Secret. Auto-generated if unset so paper
+# mode still runs, but a stable value should live in .env.
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+if not INTERNAL_API_SECRET:
+    import secrets
+    INTERNAL_API_SECRET = secrets.token_urlsafe(32)
 
 # Ensemble model config (replaces old FORECAST_SIGMA_F = 3.5 normal distribution)
 # Probability is now computed by counting GFS ensemble members, not Gaussian CDF.
