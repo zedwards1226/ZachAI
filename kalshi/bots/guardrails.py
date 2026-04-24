@@ -123,16 +123,19 @@ def check_bet_size(stake: float) -> tuple[bool, str]:
 def check_market_disagreement(our_prob_yes: float, yes_price_cents: int,
                               strike_type: str | None = None) -> tuple[bool, str]:
     """
-    Skip only when the MARKET prices YES much higher than our model (gap > 30c).
-    This blocks NO bets where the market is telling us temps are rising faster than GFS shows.
+    Skip NO bets where the MARKET prices YES much higher than our model (gap > 30c).
+    Example: market YES=58¢, our YES=10¢ → gap=48¢ → market sees temps landing in
+    the band, we don't → block the NO bet.
+
     When our model is MORE bullish than the market, that's our edge — don't block it.
 
-    NOTE: skip this check entirely for `between` markets. Narrow temp bands have
-    mathematically tiny YES prob (e.g. 3%) regardless of market pricing, so the
-    gap will ALWAYS exceed 30¢ and every between-market NO bet would be blocked.
-    This check was designed for threshold (`greater`) markets.
+    BETWEEN markets: only bypass when the market itself prices YES as a true
+    longshot (< 10¢). Bands that price YES at 40-60¢ (typical for daily-high
+    brackets around the forecast) STILL need this check — the previous blanket
+    bypass let through exactly the losing trades it was meant to prevent.
     """
-    if strike_type == "between":
+    # Real longshot band — bypass (market agrees with us it won't hit)
+    if strike_type == "between" and yes_price_cents < 10:
         return True, "ok"
     kalshi_implied = yes_price_cents / 100.0
     gap = kalshi_implied - our_prob_yes  # positive = market thinks YES more likely than we do
