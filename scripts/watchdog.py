@@ -396,49 +396,23 @@ def check_dashboard():
 
 def check_guardrail_sync():
     """
-    CRITICAL: Compare guardrail_state.capital_at_risk_usd against
-    actual SUM(stake_usd) of open trades. Auto-resync if they differ.
-    Also sync daily_trades counter.
+    Sanity-check the daily_trades counter against actual trade rows.
+    Auto-resync on drift. capital_at_risk is no longer cached — the bot
+    computes it live from open trades, so there's nothing to resync.
     """
     try:
         gs = _db_get_guardrail_state()
-        open_trades = _db_get_open_trades()
-        actual_risk = round(sum(t["stake_usd"] for t in open_trades), 2)
-        recorded_risk = round(gs.get("capital_at_risk_usd", 0), 2)
-
-        # Also check daily trade count
         actual_daily = _db_count_today_trades()
         recorded_daily = gs.get("daily_trades", 0)
 
-        synced_something = False
-        details = []
-
-        # Capital at risk sync
-        if abs(actual_risk - recorded_risk) > 0.01:
-            log.warning("Guardrail DESYNC: capital_at_risk recorded=$%.2f actual=$%.2f",
-                        recorded_risk, actual_risk)
-            _db_update_guardrail_field("capital_at_risk_usd", actual_risk)
-            details.append(f"capital_at_risk: ${recorded_risk:.2f} → ${actual_risk:.2f}")
-            synced_something = True
-
-        # Daily trades sync
         if actual_daily != recorded_daily:
             log.warning("Guardrail DESYNC: daily_trades recorded=%d actual=%d",
                         recorded_daily, actual_daily)
             _db_update_guardrail_field("daily_trades", actual_daily)
-            details.append(f"daily_trades: {recorded_daily} → {actual_daily}")
-            synced_something = True
-
-        if synced_something:
             now = datetime.now().strftime("%H:%M:%S")
-            summary = _db_get_summary()
-            capital = STARTING_CAPITAL + summary["total_pnl_usd"]
-            risk_pct = (actual_risk / capital * 100) if capital > 0 else 0
-            detail_str = "\n".join(f"  • {d}" for d in details)
             tg_alert("guardrail_sync",
-                     f"⚠️ <b>RESYNCED:</b> Guardrail counters were wrong\n"
-                     f"{detail_str}\n"
-                     f"📊 Capital at risk: ${actual_risk:.2f} / ${capital:.2f} ({risk_pct:.0f}%)\n"
+                     f"⚠️ <b>RESYNCED:</b> Guardrail counter was wrong\n"
+                     f"  • daily_trades: {recorded_daily} → {actual_daily}\n"
                      f"⏰ {now}")
         return True
     except Exception as e:

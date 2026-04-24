@@ -12,7 +12,7 @@ import pytz
 
 from config import SCAN_INTERVAL_MINUTES, TIMEZONE
 from trader import scan_and_trade, resolve_expired_trades
-from database import snapshot_pnl, get_summary, get_guardrail_state
+from database import snapshot_pnl, get_summary, get_open_trades
 from config import STARTING_CAPITAL
 from monitor import send_daily_digest
 from learning_agent import run_review as run_agent_review
@@ -40,8 +40,11 @@ def _snapshot_job():
     try:
         summary = get_summary()
         capital = STARTING_CAPITAL + summary["total_pnl_usd"]
-        gs      = get_guardrail_state()
-        snapshot_pnl(capital, gs.get("capital_at_risk_usd", 0))
+        # Live-compute open risk from actual trades — the cached
+        # guardrail counter gets zeroed at midnight and triggered
+        # spurious RESYNC alerts.
+        open_risk = round(sum(t["stake_usd"] for t in get_open_trades()), 2)
+        snapshot_pnl(capital, open_risk)
     except Exception as exc:
         log.error("Snapshot job failed: %s", exc, exc_info=True)
 

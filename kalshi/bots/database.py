@@ -286,18 +286,21 @@ def update_guardrail_state(**fields) -> None:
     today = date.today().isoformat()
     state = get_guardrail_state(today)
     state.update(fields)
+    # capital_at_risk_usd is no longer a trusted counter — it's computed
+    # live from open trades. Drop it from the write payload so stale
+    # values never round-trip.
+    state.pop("capital_at_risk_usd", None)
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO guardrail_state
                 (date, daily_trades, daily_pnl_usd, consecutive_losses,
-                 capital_at_risk_usd, halted, halt_reason)
+                 halted, halt_reason)
             VALUES (:date, :daily_trades, :daily_pnl_usd, :consecutive_losses,
-                    :capital_at_risk_usd, :halted, :halt_reason)
+                    :halted, :halt_reason)
             ON CONFLICT(date) DO UPDATE SET
                 daily_trades        = excluded.daily_trades,
                 daily_pnl_usd       = excluded.daily_pnl_usd,
                 consecutive_losses  = excluded.consecutive_losses,
-                capital_at_risk_usd = excluded.capital_at_risk_usd,
                 halted              = excluded.halted,
                 halt_reason         = excluded.halt_reason
         """, state)

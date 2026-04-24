@@ -14,7 +14,7 @@ from edge import shin_adjust
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
-    has_trade_for_market_today, has_open_trade_for_city,
+    has_trade_for_market_today, has_open_trade_for_city, get_open_trades,
     insert_signal, settle_signal_by_trade
 )
 from weather import fetch_all_forecasts
@@ -71,7 +71,6 @@ def reconcile_after_exception(*, client, client_order_id: str,
         daily_trades=gs["daily_trades"] + 1,
         daily_pnl_usd=gs["daily_pnl_usd"],
         consecutive_losses=gs["consecutive_losses"],
-        capital_at_risk_usd=gs["capital_at_risk_usd"] + stake,
         halted=gs["halted"],
         halt_reason=gs["halt_reason"],
     )
@@ -353,7 +352,6 @@ def scan_and_trade() -> list[dict]:
                 daily_trades=gs["daily_trades"] + 1,
                 daily_pnl_usd=gs["daily_pnl_usd"],
                 consecutive_losses=gs["consecutive_losses"],
-                capital_at_risk_usd=gs["capital_at_risk_usd"] + stake,
                 halted=gs["halted"],
                 halt_reason=gs["halt_reason"],
             )
@@ -410,7 +408,9 @@ def scan_and_trade() -> list[dict]:
                 })
                 insert_signal(**_sig, reason_skipped=f"order error: {exc}")
 
-    snapshot_pnl(capital, get_guardrail_state().get("capital_at_risk_usd", 0))
+    # Live-compute open risk — no more trusting the cached counter.
+    open_risk = round(sum(t["stake_usd"] for t in get_open_trades()), 2)
+    snapshot_pnl(capital, open_risk)
     log.info("=== Scan complete -- %d actions ===", len(actions))
     return actions
 
@@ -532,7 +532,6 @@ def resolve_expired_trades() -> None:
             update_guardrail_state(
                 daily_pnl_usd=gs["daily_pnl_usd"] + pnl,
                 consecutive_losses=0 if won else gs["consecutive_losses"] + 1,
-                capital_at_risk_usd=max(0, gs["capital_at_risk_usd"] - trade["stake_usd"]),
                 halted=gs["halted"],
                 halt_reason=gs["halt_reason"],
                 daily_trades=gs["daily_trades"],
@@ -559,7 +558,6 @@ def resolve_expired_trades() -> None:
                     update_guardrail_state(
                         daily_pnl_usd=gs["daily_pnl_usd"] + pnl,
                         consecutive_losses=0 if won else gs["consecutive_losses"] + 1,
-                        capital_at_risk_usd=max(0, gs["capital_at_risk_usd"] - trade["stake_usd"]),
                         halted=gs["halted"],
                         halt_reason=gs["halt_reason"],
                         daily_trades=gs["daily_trades"],

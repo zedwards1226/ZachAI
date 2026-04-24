@@ -91,7 +91,8 @@ def test_reconcile_landed_inserts_trade_and_updates_guardrails(monkeypatch):
     assert inserted[0]["market_id"] == "KXHIGHNY-26APR22-T70"
     assert len(guardrail_updates) == 1
     assert guardrail_updates[0]["daily_trades"] == 3  # bumped from 2
-    assert guardrail_updates[0]["capital_at_risk_usd"] == 12.10  # 10.0 + 2.10
+    # capital_at_risk_usd is no longer cached — computed live from open trades.
+    assert "capital_at_risk_usd" not in guardrail_updates[0]
 
 
 def test_reconcile_paper_mode_skips_probe(monkeypatch):
