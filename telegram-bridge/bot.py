@@ -38,6 +38,25 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024   # Telegram bot API cap
 
+# Jarvis persona — injected into every Claude Code run so replies feel
+# like Zach's operator, not generic Claude.
+JARVIS_SYSTEM_PROMPT = (
+    "You are Jarvis, Zach Edwards's personal AI operator running on his "
+    "Windows PC at C:\\ZachAI. You talk directly to Zach over Telegram. "
+    "Keep replies SHORT and conversational (1-4 sentences unless he asks "
+    "for detail or code). No markdown headers, no bullet lists for simple "
+    "answers. Do not announce what you're about to do — just do it. "
+    "You manage his trading bots (ORB futures, Kalshi weather), his "
+    "Telegram bridge, and his company projects. If Zach sends a photo, "
+    "read it and describe what you see. If he sends a file, read it and "
+    "summarize. Never say you can't do something — try first."
+)
+
+# Zach explicitly says "opus" anywhere in the message → switch to Opus 4.7.
+# No other magic words. Default stays fast (haiku).
+def _wants_opus(text: str) -> bool:
+    return "opus" in text.lower()
+
 # ── Globals (set during startup) ──────────────────────────────────────────────
 _bot_loop: asyncio.AbstractEventLoop | None = None
 _bot_app  = None
@@ -259,13 +278,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def _stream_claude(cmd: list[str], chat_id: int,
                          edit_cb, on_session_id) -> tuple[int, str]:
     """Spawn claude CLI, stream stream-json events, return (rc, final_text)."""
+    log.info("claude cmd: %s", " ".join(cmd[:-1]) + " <prompt>")
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd="C:\\ZachAI",
+        limit=10 * 1024 * 1024,  # 10 MB — stream-json lines can be huge
     )
     final_text = ""
+    last_result_text = ""
     async for line in proc.stdout:
         try:
             ev = json.loads(line.decode(errors="replace"))
@@ -281,14 +303,24 @@ async def _stream_claude(cmd: list[str], chat_id: int,
                 if part.get("type") == "text":
                     final_text += part.get("text", "")
                     await edit_cb(final_text)
-        elif t == "result" and not final_text:
-            final_text = ev.get("result", "") or ""
+        elif t == "result":
+            last_result_text = ev.get("result", "") or ""
+            if ev.get("is_error"):
+                log.warning("claude result is_error=true: %s", last_result_text[:300])
     await proc.wait()
-    return proc.returncode, final_text
+    rc = proc.returncode
+    if not final_text:
+        final_text = last_result_text
+    if rc != 0 or not final_text:
+        err = (await proc.stderr.read()).decode(errors="replace")[-2000:]
+        log.warning("claude rc=%s stderr=%s final_len=%d result=%s",
+                    rc, err, len(final_text), last_result_text[:300])
+    return rc, final_text
 
 
 async def run_claude(task_id: str, prompt: str, chat_id: int,
-                     attachments: list[Path] | None = None) -> None:
+                     attachments: list[Path] | None = None,
+                     fast: bool = False) -> None:
     upsert_task(task_id, prompt=prompt[:300], status="running",
                 start_time=_now(), output="")
     active_tasks[task_id] = {"prompt": prompt, "status": "running", "output": ""}
@@ -315,16 +347,20 @@ async def run_claude(task_id: str, prompt: str, chat_id: int,
     typing_task = asyncio.create_task(_keep_typing())
 
     last_edit = 0.0
+    last_shown = ""
     async def _maybe_edit(text: str, *, force: bool = False):
-        nonlocal last_edit
+        nonlocal last_edit, last_shown
         now = time.time()
         if not force and now - last_edit < 2.5:
             return
+        body = text[-3800:] if text else "🧠 Thinking…"
+        if body == last_shown:
+            return
         last_edit = now
+        last_shown = body
         try:
             await _bot_app.bot.edit_message_text(
-                chat_id=chat_id, message_id=msg_id,
-                text=(text[-3800:] if text else "🧠 Thinking…"),
+                chat_id=chat_id, message_id=msg_id, text=body,
             )
         except Exception:
             pass
@@ -333,12 +369,23 @@ async def run_claude(task_id: str, prompt: str, chat_id: int,
         chat_sessions[chat_id] = sid
 
     try:
+        # Default: Sonnet 4.6 (reliable vision + fast enough for chat).
+        # Opus 4.7 only when Zach explicitly says "opus" in his message.
+        model = "claude-opus-4-7" if not fast else "claude-sonnet-4-6"
         cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
-               "-p", "--output-format", "stream-json", "--verbose"]
-        prior = chat_sessions.get(chat_id)
+               "-p", "--output-format", "stream-json", "--verbose",
+               "--append-system-prompt", JARVIS_SYSTEM_PROMPT,
+               "--model", model,
+               "--add-dir", str(UPLOAD_DIR)]
+        # Skip session resume when attachments are present — fresh context
+        # prevents Claude from replying to stale conversation state and
+        # makes sure he reads the new file.
+        prior = None if (attachments or fast) else chat_sessions.get(chat_id)
         if prior:
             cmd += ["--resume", prior]
-        cmd.append(prompt)
+        # "--" terminates variadic flags (--tools, --add-dir) so the
+        # prompt isn't swallowed as extra tool/dir args.
+        cmd += ["--", prompt]
 
         rc, final_text = await _stream_claude(cmd, chat_id, _maybe_edit, _set_session)
 
@@ -500,7 +547,10 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
         return
     log_message("in", text)
     task_id = str(uuid.uuid4())[:8]
-    asyncio.create_task(run_claude(task_id, text, update.effective_chat.id))
+    # Default: fast haiku. Switch to Opus only when Zach says "opus".
+    use_fast = not _wants_opus(text)
+    asyncio.create_task(run_claude(task_id, text, update.effective_chat.id,
+                                   fast=use_fast))
 
 async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
@@ -515,11 +565,19 @@ async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Couldn't save photo (too big or download failed).")
         return
     caption = (update.message.caption or "").strip()
-    prompt = caption or "User sent a photo — read it and respond."
+    if caption:
+        prompt = caption
+    else:
+        prompt = (
+            "Use the Read tool ONLY on the image path above, then describe "
+            "what you see in 2-3 short sentences. Do not run git, do not "
+            "explore the repo, do not open any other files. Just read the "
+            "image and reply."
+        )
     log_message("in", f"[photo] {path.name} caption={caption!r}")
     task_id = str(uuid.uuid4())[:8]
     asyncio.create_task(run_claude(task_id, prompt, update.effective_chat.id,
-                                   attachments=[path]))
+                                   attachments=[path], fast=True))
 
 async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
@@ -539,11 +597,18 @@ async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("Download failed.")
         return
     caption = (update.message.caption or "").strip()
-    prompt = caption or f"User sent a file ({path.name}) — read it and respond."
+    if caption:
+        prompt = caption
+    else:
+        prompt = (
+            f"Use the Read tool ONLY on the file path above ({path.name}), "
+            f"then summarize it briefly. Do not run git, do not explore the "
+            f"repo, do not open any other files."
+        )
     log_message("in", f"[document] {path.name} caption={caption!r}")
     task_id = str(uuid.uuid4())[:8]
     asyncio.create_task(run_claude(task_id, prompt, update.effective_chat.id,
-                                   attachments=[path]))
+                                   attachments=[path], fast=True))
 
 # ── Startup / main ────────────────────────────────────────────────────────────
 
