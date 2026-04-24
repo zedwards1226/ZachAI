@@ -14,7 +14,11 @@ from typing import Any
 if sys.platform == "win32":
     import msvcrt
 
-from config import STATE_DIR
+import pytz
+
+from config import STATE_DIR, TIMEZONE
+
+_ET = pytz.timezone(TIMEZONE)
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +148,15 @@ def is_state_fresh(agent_name: str, max_age_seconds: float) -> bool:
 
 
 def is_state_today(agent_name: str) -> bool:
-    """Check if a state file has today's date."""
+    """Check if a state file has today's ET date.
+
+    Uses America/New_York, not local machine time — PC clock is CDT
+    so naive `datetime.now()` would roll the date an hour early from
+    the market's perspective.
+    """
     data = read_state(agent_name)
     state_date = data.get("date")
     if not state_date:
         return False
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(_ET).strftime("%Y-%m-%d")
     return state_date == today

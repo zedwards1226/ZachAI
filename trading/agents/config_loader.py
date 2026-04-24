@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -38,6 +40,27 @@ LEARNABLE_KNOBS: dict[str, dict] = {
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write text to `path` atomically via tempfile + os.replace.
+
+    Kill-between-writes safety: without this, a crash between the config
+    and meta writes leaves a stale checksum and triggers spurious
+    manual_edit alerts forever.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _coerce(key: str, val) -> Optional[float]:
@@ -153,14 +176,12 @@ def apply_proposal(updates: dict, source: str = "agent") -> dict:
         current[key] = _coerce(key, val)
 
     text = json.dumps(current, indent=2, sort_keys=True)
-    _CONFIG_PATH.write_text(text, encoding="utf-8")
-    _META_PATH.write_text(
-        json.dumps(
-            {"checksum": _sha256(text), "last_source": source, "snapshot": current},
-            indent=2, sort_keys=True,
-        ),
-        encoding="utf-8",
+    meta_text = json.dumps(
+        {"checksum": _sha256(text), "last_source": source, "snapshot": current},
+        indent=2, sort_keys=True,
     )
+    _atomic_write(_CONFIG_PATH, text)
+    _atomic_write(_META_PATH, meta_text)
     logger.info("learned_config updated (source=%s): %s", source, updates)
     return current
 
@@ -182,12 +203,12 @@ def acknowledge_current() -> None:
             snapshot = {}
     except (OSError, json.JSONDecodeError):
         return
-    _META_PATH.write_text(
+    _atomic_write(
+        _META_PATH,
         json.dumps(
             {"checksum": _sha256(text), "last_source": "manual", "snapshot": snapshot},
             indent=2, sort_keys=True,
         ),
-        encoding="utf-8",
     )
 
 
@@ -202,13 +223,11 @@ def revert_key(key: str) -> None:
     if key in current:
         del current[key]
         text = json.dumps(current, indent=2, sort_keys=True)
-        _CONFIG_PATH.write_text(text, encoding="utf-8")
-        _META_PATH.write_text(
-            json.dumps(
-                {"checksum": _sha256(text), "last_source": "revert",
-                 "snapshot": current},
-                indent=2, sort_keys=True,
-            ),
-            encoding="utf-8",
+        meta_text = json.dumps(
+            {"checksum": _sha256(text), "last_source": "revert",
+             "snapshot": current},
+            indent=2, sort_keys=True,
         )
+        _atomic_write(_CONFIG_PATH, text)
+        _atomic_write(_META_PATH, meta_text)
         logger.info("learned_config reverted: %s removed", key)

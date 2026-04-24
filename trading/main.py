@@ -212,16 +212,29 @@ async def run_preflight():
 
 
 async def run_journal_backup():
-    """Daily backup of journal.db — keeps last 30 days."""
+    """Daily backup of journal.db — keeps last 30 days.
+
+    Uses SQLite's online-backup API instead of shutil.copy2 because the
+    DB runs in WAL mode: a raw file copy can grab the main .db without
+    the paired -wal file and produce a torn, unusable snapshot. The
+    backup API serialises a consistent snapshot into a fresh file.
+    """
     try:
-        import shutil
+        import sqlite3
         from config import JOURNAL_DB
         backup_dir = STATE_DIR / "backups"
         backup_dir.mkdir(exist_ok=True)
         today = datetime.now(ET).strftime("%Y-%m-%d")
         backup_path = backup_dir / f"journal_{today}.db"
         if not backup_path.exists() and JOURNAL_DB.exists():
-            shutil.copy2(str(JOURNAL_DB), str(backup_path))
+            src = sqlite3.connect(str(JOURNAL_DB))
+            dst = sqlite3.connect(str(backup_path))
+            try:
+                with dst:
+                    src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
             logger.info("Journal backed up to %s", backup_path)
             # Clean up backups older than 30 days
             backups = sorted(backup_dir.glob("journal_*.db"))

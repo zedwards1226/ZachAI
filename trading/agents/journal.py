@@ -26,7 +26,13 @@ ET = pytz.timezone(TIMEZONE)
 
 @contextmanager
 def get_conn():
-    """Get a SQLite connection with WAL mode."""
+    """Get a SQLite connection with WAL mode.
+
+    Commits on clean exit, rolls back on exception. Without the
+    rollback, a mid-write failure would leave the connection in an
+    aborted transaction state and the next write on the same path
+    would error.
+    """
     conn = sqlite3.connect(str(JOURNAL_DB))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -34,6 +40,9 @@ def get_conn():
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -443,7 +452,13 @@ def agent_journal_write(entry_type: str, reasoning: str,
 
 
 def agent_journal_has_today(entry_type: Optional[str] = None) -> bool:
-    """Idempotency guard — True if learning_agent already wrote today."""
+    """Idempotency guard — True if learning_agent already wrote today.
+
+    When `entry_type` is None, matches against terminal row types only
+    ('heartbeat' or 'digest') — the markers of a *completed* run.
+    Partial rows (manual_edit, error, proposal) do NOT block a retry,
+    so a mid-run crash doesn't permanently suppress the agent.
+    """
     today = datetime.now(ET).strftime("%Y-%m-%d")
     with get_conn() as conn:
         if entry_type:
@@ -453,7 +468,8 @@ def agent_journal_has_today(entry_type: Optional[str] = None) -> bool:
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT 1 FROM agent_journal WHERE date = ? LIMIT 1",
+                "SELECT 1 FROM agent_journal "
+                "WHERE date = ? AND entry_type IN ('heartbeat', 'digest') LIMIT 1",
                 (today,),
             ).fetchone()
         return row is not None
@@ -472,11 +488,15 @@ def get_agent_proposals(status: str = "pending", limit: int = 20) -> list[dict]:
 
 
 def get_last_knob_change(knob: str) -> Optional[dict]:
-    """Most recent applied change for a knob (for cooldown enforcement)."""
+    """Most recent applied change for a knob (for cooldown enforcement).
+
+    Requires both status='approved' AND applied_at IS NOT NULL so an
+    approved-but-never-applied row doesn't spuriously trigger cooldown.
+    """
     with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM agent_journal "
-            "WHERE knob = ? AND status = 'approved' "
+            "WHERE knob = ? AND status = 'approved' AND applied_at IS NOT NULL "
             "ORDER BY id DESC LIMIT 1",
             (knob,),
         ).fetchone()

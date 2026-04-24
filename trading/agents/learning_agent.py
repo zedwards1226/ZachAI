@@ -96,19 +96,27 @@ def _in_cooldown(knob: str) -> tuple[bool, Optional[str]]:
     """Check if knob was changed within the cooldown window.
 
     Returns (True, 'YYYY-MM-DD') if cooling down, else (False, None).
+
+    **Fail-safe on parse error:** a malformed `applied_at` forces
+    cooldown=True rather than silently bypassing the guard. Better to
+    over-suppress one proposal than accidentally thrash a knob because
+    of a corrupted audit row.
     """
     last = journal.get_last_knob_change(knob)
     if not last or not last.get("applied_at"):
         return False, None
+    raw = last["applied_at"]
     try:
-        applied = datetime.fromisoformat(last["applied_at"])
+        applied = datetime.fromisoformat(raw)
     except (ValueError, TypeError):
-        return False, None
+        logger.warning("Cooldown: unparseable applied_at %r for %s — "
+                       "enforcing cooldown to be safe", raw, knob)
+        return True, str(raw)[:10]
     if applied.tzinfo is None:
         applied = ET.localize(applied)
     days_since = (datetime.now(ET) - applied).days
     if days_since < COOLDOWN_DAYS:
-        return True, last["applied_at"][:10]
+        return True, raw[:10]
     return False, None
 
 
