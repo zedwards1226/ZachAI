@@ -8,7 +8,7 @@ Approval requests from Claude Code hooks come in over HTTP on port 8765,
 are forwarded as inline-keyboard Telegram messages, and block until answered.
 """
 
-import os, json, logging, subprocess, sys, asyncio, threading, uuid
+import os, json, logging, subprocess, sys, asyncio, threading, uuid, time
 from pathlib import Path
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -33,6 +33,10 @@ load_dotenv(BASE_DIR / ".env")
 BOT_TOKEN        = os.getenv("TELEGRAM_BOT_TOKEN")
 APPROVAL_PORT    = 8765
 PROGRESS_SECS    = 90   # send a progress chunk every N seconds
+
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024   # Telegram bot API cap
 
 # ── Globals (set during startup) ──────────────────────────────────────────────
 _bot_loop: asyncio.AbstractEventLoop | None = None
@@ -84,6 +88,20 @@ def log_message(direction: str, text: str) -> None:
     })
     s["messages"] = s["messages"][-100:]
     save_state(s)
+
+async def _download_telegram_file(file_obj, suggested_name: str) -> Path | None:
+    """Download a Telegram File to UPLOAD_DIR. Returns path or None on failure."""
+    try:
+        if file_obj.file_size and file_obj.file_size > MAX_UPLOAD_BYTES:
+            return None
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        safe = "".join(c for c in suggested_name if c.isalnum() or c in "._-") or "file"
+        path = UPLOAD_DIR / f"{ts}_{safe}"
+        await file_obj.download_to_drive(custom_path=str(path))
+        return path
+    except Exception as exc:
+        log.exception("download failed: %s", exc)
+        return None
 
 def upsert_task(task_id: str, **fields) -> None:
     s = load_state()
@@ -238,12 +256,54 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # ── Claude runner ─────────────────────────────────────────────────────────────
 
-async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
-    upsert_task(task_id, prompt=prompt, status="running",
+async def _stream_claude(cmd: list[str], chat_id: int,
+                         edit_cb, on_session_id) -> tuple[int, str]:
+    """Spawn claude CLI, stream stream-json events, return (rc, final_text)."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd="C:\\ZachAI",
+    )
+    final_text = ""
+    async for line in proc.stdout:
+        try:
+            ev = json.loads(line.decode(errors="replace"))
+        except Exception:
+            continue
+        t = ev.get("type")
+        if t == "system" and ev.get("subtype") == "init":
+            sid = ev.get("session_id")
+            if sid:
+                on_session_id(sid)
+        elif t == "assistant":
+            for part in ev.get("message", {}).get("content", []):
+                if part.get("type") == "text":
+                    final_text += part.get("text", "")
+                    await edit_cb(final_text)
+        elif t == "result" and not final_text:
+            final_text = ev.get("result", "") or ""
+    await proc.wait()
+    return proc.returncode, final_text
+
+
+async def run_claude(task_id: str, prompt: str, chat_id: int,
+                     attachments: list[Path] | None = None) -> None:
+    upsert_task(task_id, prompt=prompt[:300], status="running",
                 start_time=_now(), output="")
     active_tasks[task_id] = {"prompt": prompt, "status": "running", "output": ""}
 
-    # Keep Telegram "typing..." indicator alive while Claude runs
+    # Prepend attachment paths so Claude knows to read them
+    if attachments:
+        paths_block = "\n".join(f"- {p}" for p in attachments)
+        prompt = (
+            f"[User sent attachment(s). Read them before responding.]\n"
+            f"{paths_block}\n\n{prompt}"
+        )
+
+    status_msg = await _bot_app.bot.send_message(chat_id=chat_id, text="🧠 Thinking…")
+    msg_id = status_msg.message_id
+
     typing_active = True
     async def _keep_typing():
         while typing_active:
@@ -254,68 +314,50 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
             await asyncio.sleep(4)
     typing_task = asyncio.create_task(_keep_typing())
 
+    last_edit = 0.0
+    async def _maybe_edit(text: str, *, force: bool = False):
+        nonlocal last_edit
+        now = time.time()
+        if not force and now - last_edit < 2.5:
+            return
+        last_edit = now
+        try:
+            await _bot_app.bot.edit_message_text(
+                chat_id=chat_id, message_id=msg_id,
+                text=(text[-3800:] if text else "🧠 Thinking…"),
+            )
+        except Exception:
+            pass
+
+    def _set_session(sid: str):
+        chat_sessions[chat_id] = sid
+
     try:
-        # Build command — resume prior session if one exists for this chat
-        cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd", "-p", "--output-format", "json"]
-        prior_session = chat_sessions.get(chat_id)
-        if prior_session:
-            cmd += ["--resume", prior_session]
+        cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
+               "-p", "--output-format", "stream-json", "--verbose"]
+        prior = chat_sessions.get(chat_id)
+        if prior:
+            cmd += ["--resume", prior]
         cmd.append(prompt)
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout = asyncio.subprocess.PIPE,
-            stderr = asyncio.subprocess.PIPE,
-            cwd    = "C:\\ZachAI",
-        )
-        active_tasks[task_id]["process"] = proc
+        rc, final_text = await _stream_claude(cmd, chat_id, _maybe_edit, _set_session)
 
-        stdout_bytes, _ = await proc.communicate()
-        rc = proc.returncode
-
-        # If resume failed (bad/expired session), retry fresh
-        if rc != 0 and prior_session:
-            log.warning("Session %s resume failed (rc=%d), starting fresh", prior_session, rc)
+        # Resume failed? retry fresh once.
+        if rc != 0 and prior and not final_text:
+            log.warning("resume failed (rc=%d), retrying fresh", rc)
             chat_sessions.pop(chat_id, None)
-            fresh_cmd = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
-                         "-p", "--output-format", "json", prompt]
-            proc2 = await asyncio.create_subprocess_exec(
-                *fresh_cmd,
-                stdout = asyncio.subprocess.PIPE,
-                stderr = asyncio.subprocess.PIPE,
-                cwd    = "C:\\ZachAI",
-            )
-            stdout_bytes, _ = await proc2.communicate()
-            rc = proc2.returncode
+            cmd2 = [r"C:\Users\zedwa\AppData\Roaming\npm\claude.cmd",
+                    "-p", "--output-format", "stream-json", "--verbose", prompt]
+            rc, final_text = await _stream_claude(cmd2, chat_id, _maybe_edit, _set_session)
 
         typing_active = False
         typing_task.cancel()
 
-        # Extract clean text from JSON — strips all tool use / status lines
-        # Also capture session_id for multi-turn continuity
-        raw_out = stdout_bytes.decode(errors="replace").strip()
-        final = raw_out
-        try:
-            data = json.loads(raw_out)
-            final = data.get("result") or data.get("message") or raw_out
-            # Store session_id so next message continues this conversation
-            new_session = data.get("session_id")
-            if new_session:
-                chat_sessions[chat_id] = new_session
-        except Exception:
-            pass
-
-        if len(final) > 3800:
-            final = "…" + final[-3800:]
-
+        final_text = (final_text or "(no output)")[-3800:]
         status = "completed" if rc == 0 else "failed"
-        upsert_task(task_id, status=status, output=final)
+        upsert_task(task_id, status=status, output=final_text)
         active_tasks.pop(task_id, None)
-
-        await _bot_app.bot.send_message(
-            chat_id    = chat_id,
-            text       = final[-3500:] or "(no output)",
-        )
+        await _maybe_edit(final_text, force=True)
 
     except Exception as exc:
         typing_active = False
@@ -323,10 +365,11 @@ async def run_claude(task_id: str, prompt: str, chat_id: int) -> None:
         log.exception("Claude task error: %s", exc)
         upsert_task(task_id, status="failed")
         active_tasks.pop(task_id, None)
-        await _bot_app.bot.send_message(
-            chat_id = chat_id,
-            text    = f"Error: {exc}",
-        )
+        try:
+            await _bot_app.bot.edit_message_text(
+                chat_id=chat_id, message_id=msg_id, text=f"Error: {exc}")
+        except Exception:
+            pass
 
 # ── Command handlers ──────────────────────────────────────────────────────────
 
@@ -459,6 +502,49 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     task_id = str(uuid.uuid4())[:8]
     asyncio.create_task(run_claude(task_id, text, update.effective_chat.id))
 
+async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        return
+    photos = update.message.photo
+    if not photos:
+        return
+    biggest = photos[-1]
+    tg_file = await biggest.get_file()
+    path = await _download_telegram_file(tg_file, f"photo_{biggest.file_unique_id}.jpg")
+    if not path:
+        await update.message.reply_text("Couldn't save photo (too big or download failed).")
+        return
+    caption = (update.message.caption or "").strip()
+    prompt = caption or "User sent a photo — read it and respond."
+    log_message("in", f"[photo] {path.name} caption={caption!r}")
+    task_id = str(uuid.uuid4())[:8]
+    asyncio.create_task(run_claude(task_id, prompt, update.effective_chat.id,
+                                   attachments=[path]))
+
+async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        return
+    doc = update.message.document
+    if not doc:
+        return
+    if doc.file_size and doc.file_size > MAX_UPLOAD_BYTES:
+        await update.message.reply_text(
+            f"File too big ({doc.file_size // 1024 // 1024} MB > 20 MB). "
+            f"Trim it or drop it in C:\\ZachAI\\ directly."
+        )
+        return
+    tg_file = await doc.get_file()
+    path = await _download_telegram_file(tg_file, doc.file_name or "file")
+    if not path:
+        await update.message.reply_text("Download failed.")
+        return
+    caption = (update.message.caption or "").strip()
+    prompt = caption or f"User sent a file ({path.name}) — read it and respond."
+    log_message("in", f"[document] {path.name} caption={caption!r}")
+    task_id = str(uuid.uuid4())[:8]
+    asyncio.create_task(run_claude(task_id, prompt, update.effective_chat.id,
+                                   attachments=[path]))
+
 # ── Startup / main ────────────────────────────────────────────────────────────
 
 async def _post_init(application: Application) -> None:
@@ -494,6 +580,8 @@ def main() -> None:
     app.add_handler(CommandHandler("new",    cmd_new))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
     import asyncio as _asyncio
     _asyncio.set_event_loop(_asyncio.new_event_loop())
