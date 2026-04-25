@@ -117,7 +117,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('trading')
 
   const [localLog, setLocalLog] = useState([
-    mkEntry('system', 'WeatherAlpha War Room online'),
+    mkEntry('system', "Zack's Weather Bot War Room online"),
   ])
   const addLog = useCallback((type, msg) => {
     setLocalLog(prev => [mkEntry(type, msg), ...prev].slice(0, 200))
@@ -127,7 +127,12 @@ export default function App() {
   const scanningRef = useRef(false)
 
   const logEntries = logData?.entries
-    ? logData.entries.map((e, i) => ({ ...e, id: e.id ?? `be-${i}`, ts: e.ts ?? e.timestamp }))
+    ? logData.entries.map((e, i) => ({
+        ...e,
+        id: e.id ?? `be-${i}`,
+        ts: e.ts ?? e.timestamp,
+        msg: e.msg ?? e.message ?? e.reason ?? '',
+      }))
     : localLog
 
   const runScan = useCallback(async () => {
@@ -236,8 +241,8 @@ export default function App() {
 
       {/* HERO STRIP */}
       <div
-        className="flex items-stretch gap-2 px-3 py-3 border-b overflow-x-auto shrink-0"
-        style={{ borderColor: '#2a2a3a', scrollbarWidth: 'thin' }}
+        className="flex items-stretch flex-wrap gap-2 px-3 py-3 border-b shrink-0"
+        style={{ borderColor: '#2a2a3a' }}
       >
         <HeroCard
           label="BANKROLL"
@@ -438,7 +443,7 @@ export default function App() {
         className="hidden md:flex items-center justify-between px-4 py-1.5 border-t shrink-0 text-[10px]"
         style={{ borderColor: '#2a2a3a', background: '#0a0a10', color: '#64748b' }}
       >
-        <span>WeatherAlpha War Room · Kalshi Weather Markets · Paper Mode</span>
+        <span>Zack's Weather Bot War Room · Kalshi Weather Markets · Paper Mode</span>
         <span className="stat-value">{new Date().toLocaleString()}</span>
         <div className="flex items-center gap-1.5">
           <div

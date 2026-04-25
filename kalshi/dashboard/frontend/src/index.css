@@ -190,7 +190,7 @@ html, body, #root {
 }
 @media (min-width: 768px) {
   .terminal-grid {
-    grid-template-columns: 1fr 1.8fr;
+    grid-template-columns: 240px 1fr 220px;
   }
 }
 @media (min-width: 1200px) {

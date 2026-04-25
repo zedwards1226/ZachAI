@@ -34,20 +34,20 @@ export default function Header({
         >
           {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
-        <div className="flex items-center gap-2">
-          <Zap size={20} style={{ color: '#818cf8' }} />
+        <div className="flex items-center gap-2 min-w-0">
+          <Zap size={20} style={{ color: '#818cf8' }} className="shrink-0" />
           <span
-            className="font-bold tracking-tight"
+            className="font-bold tracking-tight truncate"
             style={{ fontFamily: 'Inter', fontSize: 18, letterSpacing: '-0.02em', color: '#f8fafc' }}
           >
-            WeatherAlpha
+            Zack's Weather Bot
           </span>
-          <span className="text-[10px] font-medium" style={{ color: '#64748b' }}>
+          <span className="text-[10px] font-medium hidden sm:inline" style={{ color: '#64748b' }}>
             WAR ROOM
           </span>
         </div>
         <span
-          className="text-[10px] font-semibold px-2 py-0.5 rounded"
+          className="text-[10px] font-semibold px-2 py-0.5 rounded shrink-0"
           style={{
             background: 'rgba(251, 191, 36, 0.12)',
             color: '#fbbf24',
@@ -97,7 +97,7 @@ export default function Header({
       </div>
 
       <div className="flex items-center gap-5">
-        <div className="hidden sm:block text-right leading-tight">
+        <div className="hidden lg:block text-right leading-tight">
           <div className="text-[9px] text-text-muted font-semibold tracking-widest">TODAY</div>
           <div
             className="stat-value font-bold text-[13px]"
@@ -106,7 +106,7 @@ export default function Header({
             {todayPos ? '+' : ''}${Math.abs(todayPnl ?? 0).toFixed(2)}
           </div>
         </div>
-        <div className="hidden sm:block text-right leading-tight">
+        <div className="hidden lg:block text-right leading-tight">
           <div className="text-[9px] text-text-muted font-semibold tracking-widest">LIFETIME</div>
           <div
             className="stat-value font-bold text-[13px]"
@@ -140,7 +140,7 @@ export default function Header({
           </div>
           {pingMs && (
             <span
-              className="stat-value text-[10px] px-1.5 py-0.5 rounded"
+              className="stat-value text-[10px] px-1.5 py-0.5 rounded hidden sm:inline"
               style={{
                 color: pingColor,
                 background: `${pingColor}18`,
