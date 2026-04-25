@@ -62,16 +62,27 @@ FAIL_THRESH = 2  # consecutive API failures before restart
 
 # ── Telegram config ───────────────────────────────────────────────────────────
 def _load_telegram():
-    """Load token from trading/.env, fall back to env vars."""
-    env_path = Path(r"C:\ZachAI\trading\.env")
-    token = chat_id = None
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
+    """Load WeatherAlpha bot token from kalshi/.env, fall back to trading/.env, then env vars.
+
+    Watchdog alerts belong on @zacksweather_bot (kalshi/.env), not @ORD_trading_bot.
+    """
+    def _read_env(path: Path):
+        token = chat_id = None
+        if not path.exists():
+            return token, chat_id
+        for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line.startswith("TELEGRAM_BOT_TOKEN="):
-                token = line.split("=", 1)[1].strip()
+                token = line.split("=", 1)[1].strip() or None
             elif line.startswith("TELEGRAM_CHAT_ID="):
-                chat_id = line.split("=", 1)[1].strip()
+                chat_id = line.split("=", 1)[1].strip() or None
+        return token, chat_id
+
+    token, chat_id = _read_env(Path(r"C:\ZachAI\kalshi\.env"))
+    if not token or not chat_id:
+        fallback_token, fallback_chat = _read_env(Path(r"C:\ZachAI\trading\.env"))
+        token = token or fallback_token
+        chat_id = chat_id or fallback_chat
     return (
         os.environ.get("TELEGRAM_BOT_TOKEN", token),
         os.environ.get("TELEGRAM_CHAT_ID", chat_id),
