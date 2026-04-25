@@ -379,8 +379,9 @@ async def run_claude(task_id: str, prompt: str, chat_id: int,
                "--add-dir", str(UPLOAD_DIR)]
         # Skip session resume when attachments are present — fresh context
         # prevents Claude from replying to stale conversation state and
-        # makes sure he reads the new file.
-        prior = None if (attachments or fast) else chat_sessions.get(chat_id)
+        # makes sure he reads the new file. Resume always allowed otherwise,
+        # including fast (Sonnet) mode — model handles --resume fine.
+        prior = None if attachments else chat_sessions.get(chat_id)
         if prior:
             cmd += ["--resume", prior]
         # "--" terminates variadic flags (--tools, --add-dir) so the
