@@ -16,7 +16,25 @@
   "patterns": {
     "mcp_build_recipe": "Recon (market/demand/money parallel agents) -> Synthesis (cross-reference overlap) -> Architect + Data-Ingestor parallel -> Builder sequential -> Install + smoke -> GTM",
     "mcp_auth_gotchas": "WordPress Application Passwords skip OAuth review gates; TasteWP is fronted by Cloudflare so any Python client must send a browser UA header (urllib default is blocked with 403 error 1010); httpx default UA works",
-    "mcp_pricing_anchor": "21st.dev Magic at $20/mo hit $10K MRR in 6 weeks — prosumer $9-29/mo is the proven standalone-SaaS MCP band"
+    "mcp_pricing_anchor": "21st.dev Magic at $20/mo hit $10K MRR in 6 weeks — prosumer $9-29/mo is the proven standalone-SaaS MCP band",
+    "backtest_before_ship": "Before adding any guardrail/blocking rule, run a SQL backtest on resolved trades for that exact slice. Audit-suggested rules from agents or plans can look right but contradict actual P&L. Example: sub-20¢ entry block looked obvious from 1W-12L record but the 1 win was $95 at 5¢, making the slice net +$0.50 — blocking would have cost $62.",
+    "verify_agent_claims": "Audit agents hallucinate confidently. Always Read the cited file/lines before acting on findings. Examples: agent flagged 'no HTTP timeouts in kalshi_client.py' (already had timeout=10 everywhere) and 'split transaction race in get_guardrail_state' (already wrapped in `with get_conn()` context manager).",
+    "dead_markets_not_dead_code": "When an integration produces zero results + repeating errors, the underlying market/series may not exist. Don't add retry/backoff to nothing — verify the resource exists first. Kalshi MEM (KXHIGHMEM) was 255 rate-limit errors with zero trades because Kalshi doesn't publish that series."
   },
-  "last_updated": "2026-04-20"
+  "kalshi_audit_2026_04_24": {
+    "shipped_fixes": [
+      "MEM city removed (no KXHIGHMEM markets)",
+      "TEST market guard in resolver",
+      "watchdog counter reset on probe exception",
+      "narrow reconcile-probe exception (RequestException, ValueError)",
+      "named-pop replacement for fragile checks.pop(0)",
+      "threading.Lock on calibration cache refresh",
+      "BLOCK_STRIKE_TYPES env + check_blocked_strike (default 'less')"
+    ],
+    "killed_by_backtest": [
+      "sub-20¢ entry block (would have lost $62)",
+      "YES-side strike guard (redundant once 'less' blocked)"
+    ]
+  },
+  "last_updated": "2026-04-24"
 }

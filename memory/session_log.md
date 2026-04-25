@@ -2,6 +2,55 @@
 
 ---
 
+## 2026-04-24 (Evening — Kalshi audit + Tier 1/2/3 fixes + 'less' strike block)
+
+**Worked on:**
+- Dispatched audit agents on `kalshi/` to find bugs, dead code, what's working vs broken
+- Built 3-tier triage plan in `lets-go-over-the-glimmering-frost.md` (renamed "Zack's Weather Bot")
+- Tier 1: Removed MEM city from `config.py` (Kalshi doesn't publish KXHIGHMEM, 255+ rate-limit errors, zero trades)
+- Tier 1: Added TEST market guard in `trader.py` resolver loop (`if "TEST" in mkt_id.upper(): continue`)
+- Tier 2: Audited watchdog restart path — fixed restart loop bug where `_api_failures` counter never reset on probe exception
+- Tier 2: Narrowed reconcile-probe exception in `trader.py` to `(RequestException, ValueError)` (auth errors will now surface in live mode instead of being swallowed)
+- Tier 2: Replaced fragile `checks.pop(0)` in `guardrails.py` with conditional append — paper mode no longer depends on list index
+- Tier 3: Added `threading.Lock` around calibration cache refresh — concurrent threads can't double-trigger the DB query
+- Tier 3 SKIPPED (verified false alarms): `kalshi_client.py` already has `timeout=10` everywhere; `get_guardrail_state` already wraps INSERT+SELECT in single transaction via `with get_conn()`
+- Backtested deferred trade-gating rules from prior plan — only 'less' strike block survived data check
+- Added `BLOCK_STRIKE_TYPES` config + `check_blocked_strike()` guardrail (default "less")
+- Refreshed `kalshi/ACTIVE_FILES.md` — added calibration.py, learning_agent.py, missing tests; fixed stale .bat→.vbs and kalshi.db→weatheralpha.db paths
+
+**Decisions made:**
+- DROPPED MEM permanently rather than adding backoff — Kalshi doesn't list the series, backoff just delays the same dead end
+- KILLED sub-20¢ entry block — backtest showed slice was net +$0.50 (one $95 win at 5¢ YES-greater offset 12 small losses); blocking would have cost ~$62
+- KILLED YES-side strike guard — redundant once 'less' block is in place
+- ONLY 'less' strike block shipped: lifetime 0W-10L, -$80.94, zero offsetting wins → pure loss pattern
+- Honesty over plan adherence: when audit findings contradicted original triage, said so and updated rather than shipping speculative changes
+
+**What worked:**
+- All targeted fixes landed clean, no test breakage
+- Backtest before ship caught two rules that would have lost money
+- Audit agents surfaced real bugs (MEM, watchdog counter) plus two false alarms (timeouts, transactions) — verified each before acting
+
+**Commits pushed to master:**
+- `aacc95f` — kalshi+watchdog: post-audit triage fixes (MEM removal, reconcile narrow, calibration lock, watchdog counter reset, pop(0) replacement, TEST guard)
+- `39bc0af` — kalshi: block 'less' strike type (0W-10L lifetime pattern)
+
+**Structural changes:**
+- `kalshi/config.py` CITIES dict: 6 → 5 cities (MEM removed)
+- New env: `BLOCK_STRIKE_TYPES` (default "less")
+- `kalshi/ACTIVE_FILES.md` refreshed and accurate
+
+**Lessons (added to jarvis_brain):**
+- BACKTEST BEFORE SHIP — audit-suggested rules can look correct but contradict actual P&L slices. Always run a SQL check on resolved trades before adding a guardrail.
+- VERIFY AGENT CLAIMS — audit agents flagged "no HTTP timeouts" and "split-transaction race" that were both already correct in code. Read the file before acting on agent findings.
+- DEAD MARKETS, NOT DEAD CODE — when an integration produces zero results + repeating errors, the market may not exist. Don't add retry/backoff to nothing.
+
+**Next steps:**
+1. Watch 24h paper run — confirm zero "Cannot parse market_id" errors, zero MEM rate-limits
+2. After 30 more resolved trades, revisit YES-side over-confidence pattern with fresh data
+3. If Brier score for YES side stays > 0.4 after 'less' block, consider raising MIN_EDGE_YES from 0.15
+
+---
+
 ## 2026-04-21 (Evening — cleanup + ORB fix + Kalshi visibility)
 
 **Worked on:**
