@@ -68,7 +68,9 @@ CITIES = {
     "MIA": {"name": "Miami",         "lat": 25.7617, "lon": -80.1918, "kalshi_series": "KXHIGHMIA"},
     "LAX": {"name": "Los Angeles",   "lat": 34.0522, "lon": -118.2437, "kalshi_series": "KXHIGHLAX"},
     "DEN": {"name": "Denver",        "lat": 39.7392, "lon": -104.9903, "kalshi_series": "KXHIGHDEN"},
-    "MEM": {"name": "Memphis",       "lat": 35.1495, "lon": -90.0490,  "kalshi_series": "KXHIGHMEM"},
+    # MEM removed 2026-04-24: Kalshi doesn't publish KXHIGHMEM markets,
+    # 255+ rate-limit errors in monitor.log with zero trades placed.
+    # Re-add with backoff if Kalshi adds Memphis to weather markets.
 }
 
 # Flask — bind to loopback only. Public dashboard is served by the

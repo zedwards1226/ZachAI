@@ -339,13 +339,22 @@ def check_bot_api() -> bool:
                  f"⏰ Time: {now}")
         ok = _kill_and_restart(BOT_SCRIPT, "app.py", "Bot API")
         time.sleep(8)
-        if ok and requests.get(HEALTH_URL, timeout=5).status_code == 200:
+        post_ok = False
+        if ok:
+            try:
+                post_ok = requests.get(HEALTH_URL, timeout=5).status_code == 200
+            except Exception as probe_exc:
+                log.warning("Post-restart health probe raised: %s", probe_exc)
+        if post_ok:
             _api_failures = 0
             tg_resolved("bot_api",
                         f"✅ <b>RESOLVED:</b> Bot API restarted successfully\n"
                         f"⏰ {datetime.now().strftime('%H:%M:%S')}")
             return True
         else:
+            # Reset counter so the next tick re-evaluates from scratch instead of
+            # immediately spamming another restart cycle.
+            _api_failures = 0
             tg_alert("bot_api_fail",
                      f"🚨 <b>CRITICAL:</b> Bot API FAILED to restart\n"
                      f"⏰ {now}\nManual intervention needed!")

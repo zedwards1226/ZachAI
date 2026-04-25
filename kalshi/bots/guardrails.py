@@ -178,8 +178,12 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
     state   = get_guardrail_state()
     reasons = []
 
-    checks = [
-        check_trade_window(),     # always checked; bypassed by override or in-window
+    checks = []
+    # Trade-window check: skipped in paper mode by default (paper trades run anytime).
+    # Live mode + paper-with-override-on still enforce the window.
+    if not paper or _window_override:
+        checks.append(check_trade_window())
+    checks.extend([
         check_halt(state),
         check_price_cents(price_cents),
         check_edge(edge),
@@ -188,7 +192,7 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
         check_daily_loss(state),
         check_consecutive_losses(state),
         check_capital_at_risk(state, stake, capital),
-    ]
+    ])
 
     if our_prob_yes is not None and yes_price_cents is not None:
         checks.append(check_market_disagreement(our_prob_yes, yes_price_cents, strike_type))
@@ -196,10 +200,6 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
         checks.append(check_ensemble_spread(ensemble_spread_f))
     if city is not None:
         checks.append(check_city_cooldown(city))
-
-    # Paper mode: skip window check unless override is explicitly OFF (default: allow anytime)
-    if paper and not _window_override:
-        checks.pop(0)  # remove window check — paper trades run anytime by default
 
     for passed, reason in checks:
         if not passed:

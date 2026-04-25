@@ -8,6 +8,8 @@ import logging
 import time
 from datetime import date, datetime
 
+import requests
+
 from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, SHIN_Z
 from calibration import get_shrinkage
 from edge import shin_adjust
@@ -49,7 +51,10 @@ def reconcile_after_exception(*, client, client_order_id: str,
         return None
     try:
         landed = client.get_orders(client_order_id=client_order_id)
-    except Exception as rec_exc:
+    except (requests.exceptions.RequestException, ValueError) as rec_exc:
+        # Network/HTTP/JSON-decode errors during the probe are recoverable —
+        # next scan will reconcile. Anything else (auth, schema mismatch,
+        # programmer error) should propagate so we hear about it.
         log.error("Reconcile probe failed (%s): %s", client_order_id, rec_exc)
         return None
     if not landed:
@@ -485,9 +490,13 @@ def resolve_expired_trades() -> None:
 
     for trade in open_trades:
         if PAPER_MODE:
-            parsed = _parse_market_id(trade["market_id"])
+            mkt_id = trade["market_id"]
+            if "TEST" in mkt_id.upper():
+                # Test fixtures should never reach the resolver. Skip silently.
+                continue
+            parsed = _parse_market_id(mkt_id)
             if not parsed:
-                log.warning("Cannot parse market_id for resolution: %s", trade["market_id"])
+                log.warning("Cannot parse market_id for resolution: %s", mkt_id)
                 continue
             city_code, market_date, strike_type, strike_f = parsed
 

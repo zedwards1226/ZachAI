@@ -15,6 +15,7 @@ factor doesn't swing wildly off a 2-trade sample.
 """
 import logging
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 _CACHE: dict[tuple[str, str], float] = {}
 _CACHE_TS: float = 0.0
 _CACHE_TTL_SECS = 3600
+_CACHE_LOCK = threading.Lock()
 
 
 def _db_path() -> Path:
@@ -83,20 +85,29 @@ def _refresh_cache() -> None:
         )
 
 
+def _maybe_refresh() -> None:
+    """Refresh cache if stale, holding the lock so concurrent callers don't
+    both trigger a duplicate DB query."""
+    if time.time() - _CACHE_TS <= _CACHE_TTL_SECS:
+        return
+    with _CACHE_LOCK:
+        # Re-check inside the lock; another thread may have refreshed first.
+        if time.time() - _CACHE_TS > _CACHE_TTL_SECS:
+            _refresh_cache()
+
+
 def get_shrinkage(city: str, side: str) -> float:
     """
     Return per-(city, side) probability shrinkage in [0.05, 0.9].
     Falls back to the global PROB_SHRINK_TO_MARKET when sample is too small.
     """
-    if time.time() - _CACHE_TS > _CACHE_TTL_SECS:
-        _refresh_cache()
+    _maybe_refresh()
     return _CACHE.get((city, side.upper()), PROB_SHRINK_TO_MARKET)
 
 
 def dump_table() -> list[dict]:
     """Return the current shrinkage table for /api/calibration debugging."""
-    if time.time() - _CACHE_TS > _CACHE_TTL_SECS:
-        _refresh_cache()
+    _maybe_refresh()
     return [
         {"city": k[0], "side": k[1], "shrinkage": v}
         for k, v in sorted(_CACHE.items())
