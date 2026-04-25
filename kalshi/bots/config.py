@@ -54,6 +54,16 @@ SHIN_Z = float(os.getenv("SHIN_Z", "0.05"))
 MIN_PRICE_CENTS = int(os.getenv("MIN_PRICE_CENTS", "5"))     # skip illiquid penny contracts
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "100"))        # Kalshi weather depth is ~50-200
 
+# Strike-type blocklist informed by lifetime resolved-trade audit (2026-04-24).
+# 'less' strikes were 0W-10L, -$80.94. Backtest of remaining slices showed all
+# other strike+side combos either profitable or mixed; only 'less' is a pure
+# loss pattern with zero offsetting wins. Override via env to re-enable.
+BLOCK_STRIKE_TYPES = [
+    s.strip().lower()
+    for s in os.getenv("BLOCK_STRIKE_TYPES", "less").split(",")
+    if s.strip()
+]
+
 # Schedule (all times CST = America/Chicago)
 TRADE_WINDOW_START_HOUR = 6
 TRADE_WINDOW_END_HOUR = 10

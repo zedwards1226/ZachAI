@@ -8,7 +8,7 @@ import pytz
 from config import (
     MAX_BET, MAX_DAILY_TRADES, MAX_DAILY_LOSS, MAX_CAPITAL_AT_RISK,
     MAX_CONSECUTIVE_LOSSES, MIN_EDGE, MIN_PRICE_CENTS, TRADE_WINDOW_START_HOUR,
-    TRADE_WINDOW_END_HOUR, TIMEZONE, STARTING_CAPITAL
+    TRADE_WINDOW_END_HOUR, TIMEZONE, STARTING_CAPITAL, BLOCK_STRIKE_TYPES
 )
 from database import get_guardrail_state, get_summary, city_is_paused
 
@@ -147,6 +147,16 @@ def check_market_disagreement(our_prob_yes: float, yes_price_cents: int,
     return True, "ok"
 
 
+def check_blocked_strike(strike_type: str | None) -> tuple[bool, str]:
+    """Block strike types from BLOCK_STRIKE_TYPES (default: 'less').
+    Lifetime audit: 'less' strikes were 0W-10L / -$80.94 with zero winners."""
+    if strike_type and strike_type.lower() in BLOCK_STRIKE_TYPES:
+        return False, (
+            f"Strike type '{strike_type}' is blocked (lifetime 0W-10L pattern)"
+        )
+    return True, "ok"
+
+
 def check_ensemble_spread(spread_f: float) -> tuple[bool, str]:
     """
     Skip if GFS ensemble members are too spread out (>12°F).
@@ -194,6 +204,7 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
         check_capital_at_risk(state, stake, capital),
     ])
 
+    checks.append(check_blocked_strike(strike_type))
     if our_prob_yes is not None and yes_price_cents is not None:
         checks.append(check_market_disagreement(our_prob_yes, yes_price_cents, strike_type))
     if ensemble_spread_f is not None:
