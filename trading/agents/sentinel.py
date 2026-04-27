@@ -466,6 +466,20 @@ def _parse_truth_html(html: str, now: datetime) -> list[dict]:
     return posts
 
 
+def is_blocked() -> tuple[bool, str]:
+    """Return (blocked, reason) based on current sentinel state.
+
+    Shared helper for both ORB and sweep-bot so they check the same
+    news/truth block flags without each bot re-implementing the read.
+    """
+    state = read_state("sentinel") or {}
+    if state.get("news_block"):
+        return True, state.get("block_reason") or "News block active"
+    if state.get("truth_block"):
+        return True, state.get("block_reason") or "Truth Social block active"
+    return False, ""
+
+
 # ─── Helpers ────────────────────────────────────────────────────
 
 # Keywords that indicate BREAKING/URGENT events from news RSS headlines.
