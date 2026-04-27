@@ -77,9 +77,7 @@ SENTINEL_POLL_WINDOW = ((9, 30), (11, 0))
 
 # Sentinel Keywords
 TRUTH_HIGH_IMPACT_KEYWORDS = [
-    "tariff", "trade", "china", "ban", "sanctions", "tax", "fed",
-    "interest rate", "market", "executive order", "emergency",
-    "rates", "treasury", "stock", "crash", "recession",
+    "fomc", "fed", "interest rate", "rates", "treasury",
 ]
 
 # Timezone
