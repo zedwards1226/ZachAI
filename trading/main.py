@@ -114,6 +114,8 @@ def setup_logging() -> None:
 
 async def run_structure():
     try:
+        if not is_trading_day():
+            return
         from agents.structure import run
         await run()
     except Exception as e:
@@ -130,6 +132,8 @@ async def run_memory():
 
 async def run_briefing():
     try:
+        if not is_trading_day():
+            return
         from agents.briefing import run
         await run()
     except Exception as e:
@@ -138,6 +142,8 @@ async def run_briefing():
 
 async def run_sentinel_initial():
     try:
+        if not is_trading_day():
+            return
         from agents.sentinel import run_initial
         await run_initial()
     except ImportError:
