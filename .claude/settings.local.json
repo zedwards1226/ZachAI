@@ -23,5 +23,17 @@
       "mcp__playwright__browser_click",
       "mcp__playwright__browser_close"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python C:\\ZachAI\\.claude\\hooks\\session_start_datetime.py"
+          }
+        ]
+      }
+    ]
   }
 }
