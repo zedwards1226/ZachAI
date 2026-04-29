@@ -164,3 +164,71 @@
 - ICT channel: @innercircletrader, ID `UCtjxa77NqamhVC8atV85Rog`, created 2012-02-28
 - Google Cloud project: ict-research-493911
 - Quota: 10k units/day, transcript pulls ~200 units per channel = plenty
+
+## 2026-04-26 (Sun PM) — Post-restart system check + ORB weekend bug
+- Restarted PC; relaunched all services. ORB, Jarvis, WeatherAlpha bot+dashboard+monitor, watchdogs, TradingView CDP all up.
+- Killed 3 duplicate procs that VBS launched twice (Jarvis bot, watchdog, dashboard).
+- WeatherAlpha dashboard died on its own once after restart; relaunched, back on :3001.
+- **Sweep-bot: user said "we havent built that yet" — saved feedback memory feedback_no_sweep_bot.md, do NOT auto-launch start_sweep_bot.vbs going forward.**
+- **WeatherAlpha tunnel BROKEN: WeatherAlpha_Tunnel.vbs points to C:\ZachAI\cloudflared.exe but file is missing. Last tunnel ran 2026-04-23. Awaiting Zach's call on whether to re-download cloudflared or run lhr.life manually.**
+- **ORB weekend bug FIXED (commit 1edb42a):** run_briefing, run_sentinel_initial, run_structure all lacked is_trading_day() guards — fired on Sun and sent full economic report. Added guards to all three. Pushed to master.
+- Confirmed Telegram routing IS already separate by-bot: ORB token ends Uk5UDo, WeatherAlpha ends 0NE8fw. Both DM same chat 6592347446 but appear as distinct conversations in Zach's app.
+- WeatherAlpha paper P&L (Apr 14 → Apr 26): $80 → $252.93, +216%. 35 trades, 18W/14L/3 open, win rate 56.3%, profit factor 2.48. Best: DEN T57 +$95. Going live in "few more weeks" per Zach.
+- Tomorrow (Mon 4/27) is a trading day, ORB scheduler armed for 8:45/8:50 AM ET.
+
+## 2026-04-28 (Tue) — ORB regroup → risk + management build → cleanup
+**System status checks**
+- ORB watchdog had been down since prior day's restart. Relaunched via `wscript C:\ZachAI\scripts\ORBWatchdog.vbs`, all green.
+- Discovered TradingView CDP :9222 not listening despite TV running. Root cause: boot-time `TradingView.vbs` in user Startup folder pointed to stale `TradingView.Desktop_3.0.0.7652_x64` path; actual installed version is `3.1.0.7818`. Replaced with version-stable launcher using `shell:AppsFolder\TradingView.Desktop_n534cwy3pjxzj!TradingView.Desktop` AUMID. CDP confirmed responding HTTP 200 after manual relaunch.
+
+**ORB cascade regroup (commit 1a2a7af)**
+- Researched Zarattini 2023 + retail Pine scripts — owner's "15-min box, close outside, take direction" intuition is mainstream-correct. Bot's 4-gate cascade was over-restrictive.
+- Last 90 days: 7 signals → 2 trades. 5 skips: 3 by Gate 1 (ORB candle dir), 2 by Gate 2 (HTF bias). Gate 1 had data backing (77-80% edge per tradingstats.net 2026); Gate 2 + Gate 3 had no published edge.
+- Owner directive: "no guardrails, see how he manages the trade." Stripped all cascade gates entirely. `_check_cascade()` returns None unconditionally. Hard blocks (VIX>30, CPI/NFP/FOMC) and circuit breaker (3 consec losses) preserved.
+- `MAX_TRADES_PER_SESSION` reduced 3 → 2 (strict ORB: first break + optional second-break per Zarattini).
+
+**Risk + trade management build (commit e45a766)**
+- Audit found dead constants and gaps: `WEEKLY_LOSS_LIMIT_PCT=0.07` defined but never enforced, no per-trade $ cap, no daily $ cap, no paper-mode env guard, T2 was metadata-only (never actual TV TP).
+- Added: per-trade cap $100, daily cap $150, weekly cap $350. Helpers: `journal.get_today_pnl()` + `get_week_pnl()`. Module flags `_logged_daily_cap` / `_logged_weekly_cap` to prevent Telegram spam every 15s.
+- Trade management overhaul: TV bracket TP changed from T1 → T2 (1.5× ORB). T1 (0.5× ORB) becomes BE trigger — virtual_stop = entry once price hits T1. If price drifts back through entry, monitor sends market close (scratch).
+- News intervention: high-impact headline within `NEWS_INTERVENTION_WINDOW_SEC=90` AND post-trade-open → close.
+- VIX intervention: `vix_now >= vix_at_open * 1.20` → close. Captures vix_at_open in active_orders dict.
+- Paper-mode hard guard: `place_bracket_order` raises `RuntimeError` if `PAPER_MODE != "true"`. Added `PAPER_MODE=true` to `trading/.env`. Verified by setting false → RuntimeError raised, no order placed, journal row marked FAILED_PLACEMENT.
+- Added `telegram.notify_be_move`. Pre-deploy backtest: 2 historical taken trades become 4 expected with new rules (2× lift, within target).
+
+**Cleanup (commits 03b0a38, 0f65ce6, fccb356, 41b7ee0)**
+- Deleted `scripts/start_sweep_bot.vbs` — only ORB connects to TV CDP now.
+- Master CLAUDE.md: marked sweep-bot DEFERRED. Per Zach: "we going build that later after we master the orb and its stable."
+- `sweep-bot/CLAUDE.md` rewritten with STATUS — DEFERRED header, design intent preserved as reactivation reference.
+- Removed disabled ATR comments from `_check_hard_blocks`. Dropped unused imports (`SCORE_FULL_SIZE`, `SCORE_HALF_SIZE`, `ORB_ATR_*`) from combiner.
+
+**Master CLAUDE.md tightening (commit 41b7ee0)**
+- JARVIS IDENTITY trimmed (cut role-list bloat, kept verify-before-done).
+- AUTONOMY: added "verification still applies" line.
+- New MODEL SELECTION section (Sonnet default, Haiku trivial, Opus hard/escalation).
+- New FAILURE ESCALATION (3-strike rule → log session_log.md → change approach OR escalate via Telegram).
+- SESSION START ls scoped to ACTIVE BUILD DIRS only.
+- AGENT STACK moved to bottom as "FUTURE — NOT YET BUILT".
+- Per-project CLAUDE.md audit: only `sweep-bot/CLAUDE.md` had drift; all others (trading, kalshi, telegram-bridge, sandbox, tradingagents, zacks-work-drawings, tradingview-mcp-jackson) clean.
+
+**Bot status review at end of session**
+- WeatherAlpha (paper, ON): 37 trades, 21W/15L, 58.3% WR, +$174.19. Bot IS learning — `learning_agent.py` runs nightly 18:30 ET. Active cooldowns: CHI until Apr 29 23:30 (4 consec), NYC + DEN until Apr 30 23:30. Lifetime "less" strike-type blocked (0W-10L across all cities). Brier 0.31 (mediocre).
+- MIA edge analysis: 9-0, +$128.15. **Partly structural** — all 9 trades short NO on B-strikes (narrow temperature bands, structurally low-prob). 8/9 had positive model edge. Defensible true WR: 75-90%, not 100%.
+- CHI loss diagnosis: 0-4 + 1 open, -$34.36. Pattern: all T-strikes, all YES side. 4 of 5 trades had |forecast - strike| ≤ 1°F (inside Open-Meteo's ±2-3°F noise). Apr 19 + Apr 27 trades bet AGAINST own model point estimate. Learning agent already caught it — blocked "less" strikes lifetime, paused CHI 48h. Owner: leave it, let agent self-correct.
+
+**Live money question — DECISION: NO**
+- Three hard stops in CLAUDE.md make this Zach's call only. Data against: 37 trades too small (need 100+), Brier 0.31 mediocre, ORB rules ripped open today (zero live trades on new rule set), risk caps untested in production. Documented staged go-live criteria. Won't revisit until ORB has 30+ trades on new rules and Kalshi shows stable WR over 100+ trades.
+
+**Tomorrow (Wed 4/29) — first live test of new ORB rule set**
+- ORB main running on new code (PID 1504), watchdog green, CDP responding.
+- Watch for: bracket TP=T2 (not T1) on first signal, BE alert on T1, news/VIX intervention paths.
+- Today's pnl=$0, week pnl=$40.25 — no risk caps active.
+- Kalshi: MIA + LAX active. CHI/NYC/DEN sidelined.
+
+**Commits (all on master, pushed):** 1a2a7af, e45a766, 03b0a38, 0f65ce6, 41b7ee0, fccb356
+
+**Open items for next session:**
+1. Verify new ORB rules fire correctly on first signal tomorrow.
+2. After first close: confirm `journal.get_today_pnl()` matches sum of journal trades + risk-cap flags tracking correctly.
+3. Do not escalate to live money — staged criteria are the gate.
+4. WeatherAlpha tunnel still broken (cloudflared.exe missing from prior session) — not addressed today, separate task.
