@@ -443,45 +443,20 @@ def _score_trade(direction: Direction, is_second_break: bool,
 def _check_cascade(direction: Direction, orb: ORBRange,
                    states: dict, price: float,
                    is_second_break: bool = False) -> Optional[str]:
-    """Hard entry filter. Returns None if all gates pass, else the failing gate name.
+    """Entry filter — DISABLED 2026-04-28 for exit-management evaluation phase.
 
-    Gate 1: ORB candle direction matches trade direction (tradingstats.net 2026: 77-80% edge).
-    Gate 2: VWAP alignment — long requires price above VWAP, short below (mainstream filter).
-    Gate 3: ATR floor — ORB range must be at least ORB_ATR_MIN_PCT of ATR_14 (Zarattini ~0.30).
+    All cascade gates removed to collect data on stop/target/trail behavior across
+    a wider sample. Hard blocks (VIX>30, CPI/NFP/FOMC) still apply via
+    _check_hard_blocks(). MAX_TRADES_PER_SESSION=2 caps daily activity to mainstream
+    ORB rules (first break + optional second break). Circuit breaker
+    (MAX_CONSECUTIVE_LOSSES=3) still pauses the day after 3 losers.
 
-    HTF bias and level proximity are NOT hard gates — they're soft signals that flow
-    into ScoreBreakdown only (still recorded for ML labeling). Removed as hard skips
-    after data review showed they killed 2/7 signals over 90 days with no published
-    edge backing them (Zarattini paper uses zero filters beyond box close).
+    HTF bias, VWAP alignment, ATR floor, level proximity, ORB candle direction —
+    all still flow into ScoreBreakdown via _score_trade() for journaling and
+    eventual ML labeling, but none hard-skip a trade.
 
-    Second-break exception: Gate 1 is a direction filter that assumes the first
-    break is the right read. Confirmed second breaks (Zarattini 72% edge) waive
-    Gate 1 only — VWAP and ATR are regime filters and always apply.
+    To restore filtering, re-add gate logic above the `return None`.
     """
-    if not is_second_break:
-        # Gate 1 — ORB candle direction (kept: 77-80% data-backed edge)
-        if direction == Direction.LONG and orb.candle_direction != CandleDirection.BULLISH:
-            return "orb_candle_wrong_direction"
-        if direction == Direction.SHORT and orb.candle_direction != CandleDirection.BEARISH:
-            return "orb_candle_wrong_direction"
-
-    structure = states.get("structure", {})
-
-    # Gate 2 — VWAP alignment (skipped if VWAP not yet populated)
-    vwap = structure.get("vwap")
-    if vwap is not None:
-        if direction == Direction.LONG and price < vwap:
-            return f"below_vwap_long:{price:.2f}<{vwap:.2f}"
-        if direction == Direction.SHORT and price > vwap:
-            return f"above_vwap_short:{price:.2f}>{vwap:.2f}"
-
-    # Gate 3 — ATR floor (skip if ORB range too tight to be tradeable)
-    atr = structure.get("atr_14", 0)
-    if atr and orb.range > 0:
-        ratio = orb.range / atr
-        if ratio < ORB_ATR_MIN_PCT:
-            return f"orb_range_too_tight:{ratio:.0%}<{ORB_ATR_MIN_PCT:.0%}"
-
     return None
 
 

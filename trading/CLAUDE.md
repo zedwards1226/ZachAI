@@ -58,17 +58,16 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 - Score **8-9** → half size
 - Score **< 8** → skip + Telegram notify
 
-**Hard blocks** (skip regardless of score):
+**Hard blocks** (skip regardless of anything else):
 - VIX > 30 (`VIX_HARD_BLOCK=30`)
-- Max 3 trades/session (`MAX_TRADES_PER_SESSION=3`)
 - High-impact news day (CPI/NFP/FOMC) within session window
+- Circuit breaker: 3 consecutive losses (`MAX_CONSECUTIVE_LOSSES=3`)
 
-**Cascade gates** (`combiner.py::_check_cascade`, regrouped 2026-04-28 — see plan `fo-research-how-people-graceful-sutherland.md`):
-1. **ORB candle direction match** — long needs bullish ORB candle, short needs bearish (tradingstats.net 2026: 77-80% data edge). Waived on confirmed second breaks (Zarattini double-break).
-2. **VWAP alignment** — long requires price above VWAP, short below. Skipped if VWAP not yet populated.
-3. **ATR floor** — ORB range must be ≥ `ORB_ATR_MIN_PCT` (0.30) of `ATR_14`. Skips ranges too tight to be tradeable.
+**Daily cap:** `MAX_TRADES_PER_SESSION=2` — strict ORB: first break + optional second-break (Zarattini). No third entry.
 
-HTF bias and level proximity are NO LONGER hard skips — they only flow into the score breakdown for ML labeling. Removed after data review (2026-04-21 → 2026-04-28: 7 signals, 5 skipped, 2 of those by HTF bias with no published edge).
+**Cascade gates: DISABLED 2026-04-28** for exit-management evaluation phase. Owner directive: collect raw data on stop/target/trail/time-exit behavior across a wider sample. Every closed-bar breakout fires (subject to hard blocks above and daily cap).
+
+ORB candle direction, HTF bias, VWAP alignment, ATR floor, level proximity — all still flow into `ScoreBreakdown` via `_score_trade()` for journaling and later ML labeling, but none hard-skip. To restore: re-add gate logic in `combiner.py::_check_cascade` above the `return None`.
 
 ## 2026 HIGH-IMPACT CALENDAR (official BLS + Fed dates, hard-coded)
 - **CPI** (8:30 AM): Jan 13, Feb 11, Mar 11, Apr 10, May 12, Jun 10, Jul 14, Aug 12, Sep 11, Oct 14, Nov 10, Dec 10

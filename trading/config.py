@@ -43,7 +43,7 @@ ATR_LOOKBACK_DAYS = 14
 # level regardless of trade direction, dragging average scores down by ~1-2pts.
 SCORE_FULL_SIZE = 8
 SCORE_HALF_SIZE = 5
-MAX_TRADES_PER_SESSION = 3
+MAX_TRADES_PER_SESSION = 2  # Strict ORB: first break + optional second-break (Zarattini)
 
 # Stop/Target (Finding 2: extension-based, 7x Sharpe improvement)
 STOP_EXTENSION_MULT = 1.25  # Stop at 1.25x ORB range beyond opposite boundary
