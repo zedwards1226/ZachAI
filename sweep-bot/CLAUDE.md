@@ -1,28 +1,32 @@
 # sweep-bot — Standalone Liquidity Sweep Trader
 
-Separate process that runs alongside ORB. Watches for SWEEP_CONFIRMED
-events (equal highs / equal lows taken out and reversed) and fires its
-own paper trades. Shares the journal + circuit breaker with ORB but
-has its own independent 3-trade daily budget.
+## STATUS — DEFERRED (2026-04-28)
+**NOT BUILT, NOT RUNNING, NO LAUNCHER.** This is a scaffold kept for future reference. Per master CLAUDE.md decision (Zach 2026-04-28): "we going build that later after we master the orb and its stable." Until ORB shows consistent profitability, only ORB connects to TradingView CDP — keeps the paper account uncluttered and diagnosis simple.
 
-## MODE
-- **PAPER_MODE: ON** (reuses tv_trader paper path — no config of its own for mode)
-- Live mode gated by the 3 hard stops in master CLAUDE.md
+`scripts/start_sweep_bot.vbs` was deleted (commit 03b0a38). Code remains so we can pick it back up when the time comes — do NOT recreate the launcher or auto-start anything from this folder until the master CLAUDE.md status changes.
 
-## SESSION
+## DESIGN INTENT (when activated, not now)
+Separate process that would run alongside ORB. Watches for SWEEP_CONFIRMED events (equal highs / equal lows taken out and reversed) and fires its own paper trades. Would share the journal + circuit breaker with ORB but with its own independent 3-trade daily budget.
+
+## MODE (when activated)
+- PAPER_MODE: ON — reuses `tv_trader.place_bracket_order`, which now enforces `PAPER_MODE=true` env guard
+- Going live remains one of the 3 hard stops in master CLAUDE.md
+
+## SESSION (when activated)
 - Start: 09:30 ET
 - End: 14:30 ET
 - Poll interval: 15s
 
-## BUDGETS
-- 3 sweep trades/day (independent from ORB's 3 → up to 6 total/day)
+## BUDGETS (when activated)
+- 3 sweep trades/day (independent from ORB's 2 → up to 5 total/day)
 - Shared circuit breaker: 3 consecutive losses across ORB + sweep-bot stops both bots
 
-## STARTUP
-`C:\ZachAI\scripts\start_sweep_bot.vbs` — silent launcher, add to Task Scheduler at 09:20 ET.
-Manual: `python C:\ZachAI\sweep-bot\main.py`
+## STARTUP (when activated — currently disabled)
+Launcher to recreate: `scripts/start_sweep_bot.vbs` (deleted, see commit 03b0a38 for prior contents).
+Manual run for debugging only: `python C:\ZachAI\sweep-bot\main.py`
 Dry-run: `python main.py --dry-run`
 One-shot: `python main.py --once`
+**Reactivation gate:** before recreating the launcher, confirm with Zach that ORB has reached consistent profitability and add sweep-bot back to master CLAUDE.md PROJECT ROSTER as active.
 
 ## ARCHITECTURE
 - Reads `C:\ZachAI\trading\state\sweep.json` (sweep.py in ORB process is the single writer).
