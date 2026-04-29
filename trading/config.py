@@ -67,6 +67,14 @@ DAILY_LOSS_LIMIT_DOLLARS = 150     # 3% — pause day if today's net P&L falls b
 VIX_INTERVENTION_PCT = 0.20        # Close trade if VIX rises 20%+ from trade-open VIX
 NEWS_INTERVENTION_WINDOW_SEC = 90  # High-impact headline within last N seconds = close trade
 
+# Trailing stop after T1 hit. virtual_stop = price - (TRAIL_DISTANCE_RATIO × ORB range)
+# 0.5 × ORB matches the T1 distance — gives trade room equal to the breakeven trigger band
+TRAIL_DISTANCE_RATIO = 0.5
+
+# Position-state heuristic: if available funds drop below this fraction of STARTING_CAPITAL,
+# we know a position is open (margin used). Otherwise we assume flat.
+POSITION_OPEN_FUNDS_THRESHOLD = 0.90  # Below 90% of starting capital = position open
+
 # VIX Regime (Finding 7)
 VIX_HARD_BLOCK = 30  # No trading above VIX 30
 VIX_SWEET_SPOT_LOW = 15

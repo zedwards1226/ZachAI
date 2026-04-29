@@ -19,6 +19,7 @@ import pytz
 from config import (
     TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time,
     VIX_INTERVENTION_PCT, NEWS_INTERVENTION_WINDOW_SEC,
+    TRAIL_DISTANCE_RATIO, POSITION_OPEN_FUNDS_THRESHOLD, STARTING_CAPITAL,
 )
 from services.tv_client import get_client
 from services.state_manager import read_state, write_state
@@ -118,14 +119,36 @@ async def place_bracket_order(direction: str, entry_price: float,
     tv = await get_client()
     side = "buy" if direction == "LONG" else "sell"
 
-    # TV bracket TP = T2 (1.5x ORB). Monitor handles the BE move at T1.
-    success, fail_reason = await _place_via_trading_panel(tv, side, stop_price, target_2)
+    # Pre-check 1: refuse to stack a second open position on top of an existing one.
+    # The original phantom-short bug was caused by adding trade #6 while trade #5 still
+    # held its margin — TV silently rejected and the bot tracked a non-existent position.
+    pre_position = await _has_open_position(tv)
+    if pre_position is True:
+        logger.error("Refusing trade %d: TV already has an open position (margin in use)", trade_id)
+        try:
+            journal.mark_failed_placement(trade_id, "position already open on TV")
+        except Exception as e:
+            logger.error("Failed to mark trade %d FAILED_PLACEMENT: %s", trade_id, e)
+        return False
 
-    # Confirm order appeared by checking quote is valid
-    if success:
-        confirmed = await _confirm_order_placed(tv, timeout=5.0)
-        if not confirmed:
-            logger.warning("Order confirmation timed out for trade %d — proceeding anyway", trade_id)
+    # Capture pre-submission toast snapshot — needed to diff for the acceptance check.
+    before_toasts = await _capture_toast_snapshot(tv)
+
+    # TV bracket TP = T2 (1.5x ORB). Monitor handles the BE move at T1.
+    submitted, fail_reason = await _place_via_trading_panel(tv, side, stop_price, target_2)
+
+    success = False
+    if submitted:
+        # Verify TV actually accepted the order (didn't reject it for funds, etc.)
+        accepted, accept_reason = await _check_order_acceptance(tv, before_toasts, timeout=4.0)
+        if accepted:
+            success = True
+            logger.debug("Order accepted by TV: %s", accept_reason)
+        else:
+            success = False
+            fail_reason = f"tv_{accept_reason}"
+            logger.error("TV did not accept the order: %s — NOT tracking in active_orders",
+                         accept_reason)
 
     if success:
         # Capture VIX-at-open for mid-trade VIX intervention
@@ -157,21 +180,105 @@ async def place_bracket_order(direction: str, entry_price: float,
     return success
 
 
-async def _confirm_order_placed(tv, timeout: float = 5.0) -> bool:
-    """Poll TradingView for a few seconds to confirm an order was accepted."""
+async def _capture_toast_snapshot(tv) -> str:
+    """Snapshot the current trading-notification toast text. Used to diff for new toasts."""
+    js = """
+    (function() {
+      var groups = document.querySelectorAll('[data-name*="toast"], [class*="toast"]');
+      var s = '';
+      for (var i = 0; i < groups.length; i++) {
+        s += '|' + (groups[i].textContent || '');
+      }
+      return s;
+    })()
+    """
+    try:
+        r = await tv.evaluate(js)
+        return r if isinstance(r, str) else ""
+    except Exception:
+        return ""
+
+
+async def _check_order_outcome(tv, before_snapshot: str, timeout: float = 4.0) -> str:
+    """After submitting an order, wait for TV's confirmation toast and classify it.
+
+    Returns one of: 'executed', 'placed', 'rejected_funds', 'rejected', 'unknown'.
+    Uses the diff against before_snapshot so old toasts don't pollute the result.
+    """
     import asyncio
     import time as _time
     start = _time.monotonic()
     while _time.monotonic() - start < timeout:
-        try:
-            quote = await tv.get_quote()
-            price = quote.get("last") or quote.get("close", 0)
-            if price > 0:
-                return True
-        except Exception:
+        after = await _capture_toast_snapshot(tv)
+        new_text = after.replace(before_snapshot, "") if before_snapshot else after
+        if "Market order rejected" in new_text:
+            if "Not enough funds" in new_text or "margin exceeds" in new_text:
+                return "rejected_funds"
+            return "rejected"
+        if "Market order executed" in new_text:
+            return "executed"
+        if "Market order placed" in new_text:
+            # Don't return placed yet — wait to see if it executes or is rejected
             pass
-        await asyncio.sleep(1.0)
-    return False
+        await asyncio.sleep(0.5)
+    return "unknown"
+
+
+async def _has_open_position(tv) -> Optional[bool]:
+    """Best-effort check: does TV show an open MNQ position?
+
+    Returns True if confident a position is open, False if confident flat,
+    None if can't determine. Uses available-funds heuristic: positions consume
+    margin (~$2,720 per MNQ contract) so available drops well below the
+    starting balance when a position is open.
+    """
+    js = """
+    (function() {
+      var allText = document.body.innerText || '';
+      // Strong direct signal: "Avg Fill Price" only appears when a position row is rendered
+      if (allText.includes('Avg Fill Price')) return {has: true, signal: 'avg_fill_price'};
+      // Margin display "X / Y" — Y is available funds for new orders
+      var m = allText.match(/Margin[\\s\\S]{1,30}?([\\d,]+\\.\\d+)\\s*\\/\\s*([\\d,]+\\.\\d+)/);
+      if (m) {
+        var avail = parseFloat(m[2].replace(/,/g, ''));
+        return {has: null, signal: 'margin_display', avail: avail};
+      }
+      return {has: null, signal: 'unknown', avail: null};
+    })()
+    """
+    try:
+        r = await tv.evaluate(js) or {}
+    except Exception:
+        return None
+    if r.get("has") is True:
+        return True
+    avail = r.get("avail")
+    if avail is None:
+        return None
+    threshold = STARTING_CAPITAL * POSITION_OPEN_FUNDS_THRESHOLD
+    return avail < threshold
+
+
+async def _check_order_acceptance(tv, before_snapshot: str, timeout: float = 4.0) -> tuple[bool, str]:
+    """Wait for TV order confirmation. Combines toast scan with position-state probe.
+
+    Returns (accepted, reason). reason is 'executed', 'rejected_funds', 'rejected',
+    'unknown'. If the toast scan is inconclusive, falls back to checking whether
+    a position now exists on TV.
+    """
+    outcome = await _check_order_outcome(tv, before_snapshot, timeout)
+    if outcome == "executed":
+        return (True, "executed")
+    if outcome in ("rejected_funds", "rejected"):
+        return (False, outcome)
+    # outcome == 'unknown' — fall back to position-state probe
+    has_pos = await _has_open_position(tv)
+    if has_pos is True:
+        return (True, "position_visible")
+    if has_pos is False:
+        return (False, "no_position_after_submit")
+    # Still unknown — log warning but treat as failure (safer)
+    return (False, "unknown")
 
 
 async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tuple[bool, str]:
@@ -529,7 +636,29 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "",
     if not skip_chart_close:
         try:
             tv = await get_client()
-            await close_via_trading_panel(tv, direction)
+            # Verify there's actually a position to close — guards against the
+            # phantom-position bug where a market sell on a flat account opens a
+            # fresh short instead of closing.
+            has_pos = await _has_open_position(tv)
+            if has_pos is False:
+                logger.warning(
+                    "close_position(trade %d): TV shows no open position — "
+                    "skipping chart close, reconciling journal only",
+                    trade_id,
+                )
+            else:
+                # Either has position or unclear — send close. Capture toasts to
+                # detect rejection.
+                before_toasts = await _capture_toast_snapshot(tv)
+                await close_via_trading_panel(tv, direction)
+                # Best-effort post-close verification (logs only — don't reopen).
+                outcome_text = await _check_order_outcome(tv, before_toasts, timeout=3.0)
+                if outcome_text in ("rejected_funds", "rejected"):
+                    logger.warning(
+                        "close_position(trade %d): TV rejected the close order (%s) — "
+                        "no phantom position created",
+                        trade_id, outcome_text,
+                    )
         except Exception as e:
             logger.warning("Failed to close on chart: %s", e)
 
@@ -651,16 +780,41 @@ async def monitor_trades() -> None:
                 except Exception as e:
                     logger.warning("Telegram notify_be_move failed: %s", e)
 
-        # Virtual BE stop — only active after t1_hit
+        # Continuous trail after T1 hit — lock in profit as price runs further.
+        # trail_distance = TRAIL_DISTANCE_RATIO × ORB range (ORB range = |T2 - T1|).
+        if order.get("t1_hit"):
+            orb_range = abs(t2 - t1)
+            trail_distance = orb_range * TRAIL_DISTANCE_RATIO
+            current_vstop = order.get("virtual_stop", entry)
+            if direction == "LONG":
+                new_vstop = price - trail_distance
+                if new_vstop > current_vstop:
+                    order["virtual_stop"] = new_vstop
+                    _persist_active_orders()
+                    logger.info("Trailed stop UP for trade %d: %.2f -> %.2f (price %.2f, locked +%.1f pts)",
+                                trade_id, current_vstop, new_vstop, price, new_vstop - entry)
+            else:  # SHORT
+                new_vstop = price + trail_distance
+                if new_vstop < current_vstop:
+                    order["virtual_stop"] = new_vstop
+                    _persist_active_orders()
+                    logger.info("Trailed stop DOWN for trade %d: %.2f -> %.2f (price %.2f, locked +%.1f pts)",
+                                trade_id, current_vstop, new_vstop, price, entry - new_vstop)
+
+        # Virtual stop — fires when price drifts back through the (possibly trailed) virtual stop
         if order.get("t1_hit"):
             vstop = order["virtual_stop"]
             be_hit = (direction == "LONG" and price <= vstop) or \
                      (direction == "SHORT" and price >= vstop)
             if be_hit:
-                logger.info("Virtual BE stop for trade %d at %.2f (entry %.2f)",
-                            trade_id, price, entry)
-                await close_position(trade_id, vstop, "BE stop after T1",
-                                     outcome="WIN")
+                # Determine outcome — trail-stop above entry locks a real win;
+                # plain BE stop is scratch (logged as WIN per existing convention).
+                locked_pts = (vstop - entry) if direction == "LONG" else (entry - vstop)
+                outcome = "WIN"
+                reason = "Trail stop after T1" if locked_pts > 0.5 else "BE stop after T1"
+                logger.info("Virtual stop for trade %d at %.2f (vstop %.2f, entry %.2f, locked %+.1f pts)",
+                            trade_id, price, vstop, entry, locked_pts)
+                await close_position(trade_id, vstop, reason, outcome=outcome)
                 continue
 
         # Stop hit — TV bracket auto-closed at original SL. Reconcile (no market order).
