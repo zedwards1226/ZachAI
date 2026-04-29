@@ -60,7 +60,7 @@ ROLLING_WR_ALERT_THRESHOLD = 0.40  # Alert if 20-trade WR drops below 40%
 ROLLING_WR_ALERT_WEEKS = 2  # For 2 consecutive weeks
 
 # Per-trade and per-day risk caps (account size aware — $5,000 paper baseline)
-MAX_RISK_PER_TRADE_DOLLARS = 100   # 2% — skip trade if calculated stop loss > $100
+MAX_RISK_PER_TRADE_DOLLARS = 250   # 5% — bumped 2026-04-29 from $100 ($100 was starving trades on typical 50-150pt ORB ranges; $250 fits the 1.25x stop extension while staying under daily cap)
 DAILY_LOSS_LIMIT_DOLLARS = 150     # 3% — pause day if today's net P&L falls below
 
 # Mid-trade intervention thresholds (used by tv_trader.monitor_trades)
