@@ -17,7 +17,7 @@ from config import (
     SCORE_FULL_SIZE, SCORE_HALF_SIZE,
     STOP_EXTENSION_MULT, TARGET_1_MULT, TARGET_2_MULT,
     MAX_HOLD_MINUTES, MAX_CONSECUTIVE_LOSSES,
-    VIX_HARD_BLOCK, ORB_ATR_MIN_PCT, ORB_ATR_MAX_PCT,
+    VIX_HARD_BLOCK, ORB_ATR_MIN_PCT, ORB_ATR_MAX_PCT,  # ATR_MIN now used in cascade gate
     RVOL_THRESHOLD, VIX_SWEET_SPOT_LOW, VIX_SWEET_SPOT_HIGH,
 )
 from models import (
@@ -443,38 +443,44 @@ def _score_trade(direction: Direction, is_second_break: bool,
 def _check_cascade(direction: Direction, orb: ORBRange,
                    states: dict, price: float,
                    is_second_break: bool = False) -> Optional[str]:
-    """Hard 4-gate entry filter. Returns None if all gates pass, else the failing gate name.
+    """Hard entry filter. Returns None if all gates pass, else the failing gate name.
 
-    Gate 1: ORB candle direction matches trade direction.
-    Gate 2: HTF bias matches trade direction OR bias is NEUTRAL.
-    Gate 3: Not AT a strong level (prior day/week H/L/C) in trade direction.
-    Gate 4: News hard-blocks handled separately in _check_hard_blocks() upstream.
+    Gate 1: ORB candle direction matches trade direction (tradingstats.net 2026: 77-80% edge).
+    Gate 2: VWAP alignment — long requires price above VWAP, short below (mainstream filter).
+    Gate 3: ATR floor — ORB range must be at least ORB_ATR_MIN_PCT of ATR_14 (Zarattini ~0.30).
 
-    Second-break exception: gates 1 + 2 are direction-based filters that ASSUME
-    the first break is the right read. A confirmed second break (opposite-side
-    reversal after a failed first break) is the market invalidating exactly
-    that read — Zarattini shows these carry 72% edge. Skip those two gates on
-    second breaks; Gate 3 (level proximity) still applies.
+    HTF bias and level proximity are NOT hard gates — they're soft signals that flow
+    into ScoreBreakdown only (still recorded for ML labeling). Removed as hard skips
+    after data review showed they killed 2/7 signals over 90 days with no published
+    edge backing them (Zarattini paper uses zero filters beyond box close).
+
+    Second-break exception: Gate 1 is a direction filter that assumes the first
+    break is the right read. Confirmed second breaks (Zarattini 72% edge) waive
+    Gate 1 only — VWAP and ATR are regime filters and always apply.
     """
     if not is_second_break:
-        # Gate 1 — ORB candle
+        # Gate 1 — ORB candle direction (kept: 77-80% data-backed edge)
         if direction == Direction.LONG and orb.candle_direction != CandleDirection.BULLISH:
             return "orb_candle_wrong_direction"
         if direction == Direction.SHORT and orb.candle_direction != CandleDirection.BEARISH:
             return "orb_candle_wrong_direction"
 
-        # Gate 2 — HTF bias
-        bias = states.get("memory", {}).get("morning_bias", "NEUTRAL")
-        if bias == "BULLISH_BIAS" and direction == Direction.SHORT:
-            return "htf_bias_conflict"
-        if bias == "BEARISH_BIAS" and direction == Direction.LONG:
-            return "htf_bias_conflict"
+    structure = states.get("structure", {})
 
-    # Gate 3 — not pinned against a strong level ahead
-    from agents.structure import recompute_price_location
-    loc, nearest = recompute_price_location(price, states.get("structure", {}), direction.value)
-    if loc.value == "AT_LEVEL":
-        return f"at_strong_level_ahead:{nearest.name}"
+    # Gate 2 — VWAP alignment (skipped if VWAP not yet populated)
+    vwap = structure.get("vwap")
+    if vwap is not None:
+        if direction == Direction.LONG and price < vwap:
+            return f"below_vwap_long:{price:.2f}<{vwap:.2f}"
+        if direction == Direction.SHORT and price > vwap:
+            return f"above_vwap_short:{price:.2f}>{vwap:.2f}"
+
+    # Gate 3 — ATR floor (skip if ORB range too tight to be tradeable)
+    atr = structure.get("atr_14", 0)
+    if atr and orb.range > 0:
+        ratio = orb.range / atr
+        if ratio < ORB_ATR_MIN_PCT:
+            return f"orb_range_too_tight:{ratio:.0%}<{ORB_ATR_MIN_PCT:.0%}"
 
     return None
 

@@ -61,6 +61,14 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 **Hard blocks** (skip regardless of score):
 - VIX > 30 (`VIX_HARD_BLOCK=30`)
 - Max 3 trades/session (`MAX_TRADES_PER_SESSION=3`)
+- High-impact news day (CPI/NFP/FOMC) within session window
+
+**Cascade gates** (`combiner.py::_check_cascade`, regrouped 2026-04-28 — see plan `fo-research-how-people-graceful-sutherland.md`):
+1. **ORB candle direction match** — long needs bullish ORB candle, short needs bearish (tradingstats.net 2026: 77-80% data edge). Waived on confirmed second breaks (Zarattini double-break).
+2. **VWAP alignment** — long requires price above VWAP, short below. Skipped if VWAP not yet populated.
+3. **ATR floor** — ORB range must be ≥ `ORB_ATR_MIN_PCT` (0.30) of `ATR_14`. Skips ranges too tight to be tradeable.
+
+HTF bias and level proximity are NO LONGER hard skips — they only flow into the score breakdown for ML labeling. Removed after data review (2026-04-21 → 2026-04-28: 7 signals, 5 skipped, 2 of those by HTF bias with no published edge).
 
 ## 2026 HIGH-IMPACT CALENDAR (official BLS + Fed dates, hard-coded)
 - **CPI** (8:30 AM): Jan 13, Feb 11, Mar 11, Apr 10, May 12, Jun 10, Jul 14, Aug 12, Sep 11, Oct 14, Nov 10, Dec 10
