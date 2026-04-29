@@ -644,11 +644,14 @@ def _get_static_events(now: datetime) -> list[dict]:
         })
 
     if (month, day) in fomc_dates:
+        # FOMC at 2:00pm is OUTSIDE the ORB session window (9:30-11:00 ET).
+        # Morning ORB max-hold of 120min force-closes any 9:45 entry by 11:45 —
+        # 2+ hours before FOMC drops. Tracked for awareness, not as a hard block.
         events.append({
             "time": "2:00pm",
             "event": "FOMC Statement + Rate Decision",
             "impact": "HIGH",
-            "within_session_window": True,
+            "within_session_window": False,
         })
 
     # Thursday jobless claims (recurring, lower impact)
