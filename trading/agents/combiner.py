@@ -14,10 +14,10 @@ import pytz
 from config import (
     TIMEZONE, ORB_MINUTES, ORB_START_HOUR, ORB_START_MINUTE,
     SESSION_END_HOUR, SESSION_END_MINUTE, MAX_TRADES_PER_SESSION,
-    SCORE_FULL_SIZE, SCORE_HALF_SIZE,
     STOP_EXTENSION_MULT, TARGET_1_MULT, TARGET_2_MULT,
     MAX_HOLD_MINUTES, MAX_CONSECUTIVE_LOSSES,
-    VIX_HARD_BLOCK, ORB_ATR_MIN_PCT, ORB_ATR_MAX_PCT,  # ATR_MIN now used in cascade gate
+    VIX_HARD_BLOCK, MULTIPLIER, STARTING_CAPITAL,
+    MAX_RISK_PER_TRADE_DOLLARS, DAILY_LOSS_LIMIT_DOLLARS, WEEKLY_LOSS_LIMIT_PCT,
     RVOL_THRESHOLD, VIX_SWEET_SPOT_LOW, VIX_SWEET_SPOT_HIGH,
 )
 from models import (
@@ -42,6 +42,9 @@ _signals: list[dict] = []
 # Prevents re-scoring / re-executing the same breakout every 15s poll while
 # price stays outside the ORB range. Reset whenever price returns inside.
 _breakout_processed: bool = False
+# Risk-cap notification flags — set on first hit so we don't spam Telegram every 15s
+_logged_daily_cap: bool = False
+_logged_weekly_cap: bool = False
 
 
 def _persist_session() -> None:
@@ -92,6 +95,7 @@ def _reset_session():
     """Reset session state for a new day."""
     global _orb, _first_break_direction, _first_break_failed
     global _trades_today, _session_date, _signals, _breakout_processed
+    global _logged_daily_cap, _logged_weekly_cap
     _orb = None
     _first_break_direction = None
     _first_break_failed = False
@@ -99,6 +103,8 @@ def _reset_session():
     _session_date = datetime.now(ET).strftime("%Y-%m-%d")
     _signals = []
     _breakout_processed = False
+    _logged_daily_cap = False
+    _logged_weekly_cap = False
 
 
 async def poll() -> Optional[dict]:
@@ -123,6 +129,38 @@ async def poll() -> Optional[dict]:
     # Check circuit breaker
     stats = journal.get_today_stats()
     if stats["consecutive_losses"] >= MAX_CONSECUTIVE_LOSSES:
+        return None
+
+    # Daily $ loss cap
+    global _logged_daily_cap, _logged_weekly_cap
+    day_pnl = journal.get_today_pnl()
+    if day_pnl <= -DAILY_LOSS_LIMIT_DOLLARS:
+        if not _logged_daily_cap:
+            logger.info("Daily loss cap hit: $%.2f <= -$%d. Trading paused for today.",
+                        day_pnl, DAILY_LOSS_LIMIT_DOLLARS)
+            try:
+                await telegram.notify_hard_block(
+                    f"Daily loss cap: ${day_pnl:.0f} (limit -${DAILY_LOSS_LIMIT_DOLLARS})"
+                )
+            except Exception as e:
+                logger.warning("Telegram notify_hard_block failed: %s", e)
+            _logged_daily_cap = True
+        return None
+
+    # Weekly $ loss cap (7% of capital by default)
+    week_pnl = journal.get_week_pnl()
+    weekly_limit_dollars = STARTING_CAPITAL * WEEKLY_LOSS_LIMIT_PCT
+    if week_pnl <= -weekly_limit_dollars:
+        if not _logged_weekly_cap:
+            logger.warning("Weekly loss cap hit: $%.2f <= -$%.0f. Trading paused for week.",
+                           week_pnl, weekly_limit_dollars)
+            try:
+                await telegram.notify_hard_block(
+                    f"Weekly loss cap: ${week_pnl:.0f} (-{WEEKLY_LOSS_LIMIT_PCT:.0%} of ${STARTING_CAPITAL})"
+                )
+            except Exception as e:
+                logger.warning("Telegram notify_hard_block failed: %s", e)
+            _logged_weekly_cap = True
         return None
 
     # Check max trades
@@ -278,7 +316,27 @@ async def poll() -> Optional[dict]:
         target_2 = price - (orb_range * TARGET_2_MULT)
 
     risk = abs(price - stop)
-    rr = abs(target_1 - price) / risk if risk > 0 else 0
+    rr = abs(target_2 - price) / risk if risk > 0 else 0  # RR vs T2 (actual TP)
+
+    # Per-trade $ risk cap — skip wide-ORB trades that exceed account-size budget.
+    risk_dollars = risk * MULTIPLIER
+    if risk_dollars > MAX_RISK_PER_TRADE_DOLLARS:
+        logger.info(
+            "Trade skipped: stop $%.0f exceeds per-trade cap $%d (ORB range %.1f too wide)",
+            risk_dollars, MAX_RISK_PER_TRADE_DOLLARS, orb_range,
+        )
+        try:
+            await telegram.notify_skip(
+                breakout_direction.value, score,
+                f"risk_too_wide:${risk_dollars:.0f}>{MAX_RISK_PER_TRADE_DOLLARS}",
+            )
+        except Exception as e:
+            logger.warning("Telegram notify_skip failed: %s", e)
+        _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
+                    block_reason=f"risk_too_wide:${risk_dollars:.0f}")
+        _breakout_processed = True
+        _persist_session()
+        return None
 
     # --- Phase 5: Execute ---
     structure = states.get("structure", {})
@@ -476,15 +534,6 @@ def _check_hard_blocks(states: dict, orb: ORBRange) -> Optional[str]:
             event_name = event.get("event", "").upper()
             if any(kw in event_name for kw in ("CPI", "NFP", "NON-FARM", "FOMC", "FED")):
                 return f"High-impact news day: {event.get('event')} — no ORB trades"
-
-    # ORB range ATR filter — disabled (informational only, does not block trades)
-    # atr = structure.get("atr_14", 0)
-    # if atr and orb.range > 0:
-    #     ratio = orb.range / atr
-    #     if ratio < ORB_ATR_MIN_PCT:
-    #         return f"ORB range too narrow ({ratio:.0%} of ATR, min {ORB_ATR_MIN_PCT:.0%})"
-    #     if ratio > ORB_ATR_MAX_PCT:
-    #         return f"ORB range too wide ({ratio:.0%} of ATR, max {ORB_ATR_MAX_PCT:.0%})"
 
     return None
 

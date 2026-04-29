@@ -55,9 +55,17 @@ SLIPPAGE_PTS = 2  # Deduct 2 pts MNQ ($4) from every trade P&L
 
 # Risk Management (Finding 12: circuit breaker)
 MAX_CONSECUTIVE_LOSSES = 3  # Pause for rest of day
-WEEKLY_LOSS_LIMIT_PCT = 0.07  # 7% of capital = pause for manual review
+WEEKLY_LOSS_LIMIT_PCT = 0.07  # 7% of capital — enforced via combiner.poll()
 ROLLING_WR_ALERT_THRESHOLD = 0.40  # Alert if 20-trade WR drops below 40%
 ROLLING_WR_ALERT_WEEKS = 2  # For 2 consecutive weeks
+
+# Per-trade and per-day risk caps (account size aware — $5,000 paper baseline)
+MAX_RISK_PER_TRADE_DOLLARS = 100   # 2% — skip trade if calculated stop loss > $100
+DAILY_LOSS_LIMIT_DOLLARS = 150     # 3% — pause day if today's net P&L falls below
+
+# Mid-trade intervention thresholds (used by tv_trader.monitor_trades)
+VIX_INTERVENTION_PCT = 0.20        # Close trade if VIX rises 20%+ from trade-open VIX
+NEWS_INTERVENTION_WINDOW_SEC = 90  # High-impact headline within last N seconds = close trade
 
 # VIX Regime (Finding 7)
 VIX_HARD_BLOCK = 30  # No trading above VIX 30

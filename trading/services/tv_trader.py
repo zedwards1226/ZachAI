@@ -10,12 +10,16 @@ so order placement completes in ~300ms instead of ~4 seconds.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import Optional
 
 import pytz
 
-from config import TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time
+from config import (
+    TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time,
+    VIX_INTERVENTION_PCT, NEWS_INTERVENTION_WINDOW_SEC,
+)
 from services.tv_client import get_client
 from services.state_manager import read_state, write_state
 from agents import journal
@@ -96,13 +100,26 @@ async def place_bracket_order(direction: str, entry_price: float,
                               trade_id: int) -> bool:
     """Place a paper trade on TradingView with stop and take profit.
 
+    Bracket TP is target_2 (1.5x ORB). target_1 is the breakeven trigger —
+    when price reaches T1, monitor_trades() flips virtual_stop to entry.
     Single CDP call — opens Trade panel, clicks Buy/Sell, sets Market,
     qty=1, enables TP/SL, sets prices, clicks submit. ~300ms total.
     """
+    # Paper-mode guard — refuse to place orders unless explicitly authorized
+    if os.getenv("PAPER_MODE", "true").lower() != "true":
+        logger.error("PAPER_MODE != true — refusing to place order. "
+                     "Set PAPER_MODE=true in trading/.env to confirm paper trading.")
+        try:
+            journal.mark_failed_placement(trade_id, "PAPER_MODE not authorized")
+        except Exception as e:
+            logger.error("Failed to mark trade %d FAILED_PLACEMENT: %s", trade_id, e)
+        raise RuntimeError("Live trading not authorized — set PAPER_MODE=true in .env")
+
     tv = await get_client()
     side = "buy" if direction == "LONG" else "sell"
 
-    success, fail_reason = await _place_via_trading_panel(tv, side, stop_price, target_1)
+    # TV bracket TP = T2 (1.5x ORB). Monitor handles the BE move at T1.
+    success, fail_reason = await _place_via_trading_panel(tv, side, stop_price, target_2)
 
     # Confirm order appeared by checking quote is valid
     if success:
@@ -111,18 +128,25 @@ async def place_bracket_order(direction: str, entry_price: float,
             logger.warning("Order confirmation timed out for trade %d — proceeding anyway", trade_id)
 
     if success:
+        # Capture VIX-at-open for mid-trade VIX intervention
+        structure = read_state("structure") or {}
+        vix_at_open = structure.get("vix")
+
         _active_orders[trade_id] = {
             "direction": direction,
             "entry": entry_price,
             "stop": stop_price,
-            "target_1": target_1,
-            "target_2": target_2,
+            "target_1": target_1,        # BE trigger — informational only
+            "target_2": target_2,        # Actual TV TP
             "opened_at": datetime.now(ET).isoformat(),
             "t1_hit": False,
+            "virtual_stop": None,        # Set to entry once t1_hit
+            "vix_at_open": vix_at_open,
         }
         _persist_active_orders()
-        logger.info("Paper order placed: %s 1 %s @ ~%.2f  SL=%.2f TP=%.2f",
-                     side.upper(), DEFAULT_SYMBOL, entry_price, stop_price, target_1)
+        logger.info("Paper order placed: %s 1 %s @ ~%.2f  SL=%.2f TP=%.2f (T1 BE-trigger=%.2f, vix_at_open=%s)",
+                     side.upper(), DEFAULT_SYMBOL, entry_price, stop_price, target_2, target_1,
+                     f"{vix_at_open:.1f}" if vix_at_open else "n/a")
     else:
         # Clean the phantom journal row so it doesn't sit OPEN forever.
         try:
@@ -544,9 +568,13 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "",
 async def monitor_trades() -> None:
     """Trade monitor — runs every 30 seconds to manage open positions.
 
-    TV's bracket handles stop-loss and T1 take-profit auto-closes. This
-    monitor reconciles TV's auto-closes into the journal, and sends
-    explicit market closes only for session-end and time-based exits.
+    TV's bracket runs to T2 (1.5x ORB). This monitor adds:
+      - BE move at T1: once price reaches T1, virtual_stop = entry. If price
+        then drifts back through entry, monitor sends a market close.
+      - News intervention: high-impact headline within last 90s -> close.
+      - VIX intervention: VIX up 20%+ from trade-open VIX -> close.
+      - Reconciles TV bracket auto-closes (SL hit, T2 hit) into the journal.
+      - Explicit closes for 2-hour time exit and 3pm hard close.
     """
     if not _active_orders:
         return
@@ -558,11 +586,16 @@ async def monitor_trades() -> None:
     if price == 0:
         return
 
+    # Fresh sentinel + structure state for news/VIX intervention
+    sentinel = read_state("sentinel") or {}
+    structure = read_state("structure") or {}
+
     for trade_id, order in list(_active_orders.items()):
         direction = order["direction"]
         entry = order["entry"]
         stop = order["stop"]
         t1 = order["target_1"]
+        t2 = order["target_2"]
         opened_at = datetime.fromisoformat(order["opened_at"])
 
         # Hard close — 3 PM normally, 1 PM on half days
@@ -573,15 +606,64 @@ async def monitor_trades() -> None:
             await close_position(trade_id, price, f"{close_h}:{close_m:02d} session close")
             continue
 
-        # Check 2-hour time exit — TV bracket stays open, we explicitly close
+        # 2-hour time exit
         minutes_held = (now - opened_at).total_seconds() / 60
         if minutes_held >= MAX_HOLD_MINUTES:
             logger.info("2-hour time exit for trade %d (held %.0f min)", trade_id, minutes_held)
             await close_position(trade_id, price, "2-hour time exit")
             continue
 
-        # Stop hit — TV bracket auto-closed the position at the stop. Reconcile
-        # without sending a market order (which would open an opposite position).
+        # News intervention — high-impact headline mid-trade
+        if _check_news_intervention(sentinel, opened_at, now):
+            headline = _latest_high_impact_headline(sentinel)
+            logger.warning("News intervention for trade %d: %s", trade_id, headline)
+            outcome = _outcome_from_pnl(direction, entry, price)
+            await close_position(trade_id, price,
+                                 f"news intervention: {headline[:60]}",
+                                 outcome=outcome)
+            continue
+
+        # VIX intervention — VIX spike since trade open
+        vix_now = structure.get("vix")
+        vix_at_open = order.get("vix_at_open")
+        if vix_now and vix_at_open and vix_now >= vix_at_open * (1 + VIX_INTERVENTION_PCT):
+            logger.warning("VIX intervention for trade %d: %.1f -> %.1f (+%.0f%%)",
+                           trade_id, vix_at_open, vix_now,
+                           (vix_now / vix_at_open - 1) * 100)
+            outcome = _outcome_from_pnl(direction, entry, price)
+            await close_position(trade_id, price,
+                                 f"VIX shock {vix_at_open:.1f}->{vix_now:.1f}",
+                                 outcome=outcome)
+            continue
+
+        # T1 BE trigger — once price reaches T1, raise virtual stop to entry
+        if not order.get("t1_hit"):
+            t1_reached = (direction == "LONG" and price >= t1) or \
+                         (direction == "SHORT" and price <= t1)
+            if t1_reached:
+                order["t1_hit"] = True
+                order["virtual_stop"] = entry
+                _persist_active_orders()
+                logger.info("T1 reached for trade %d at %.2f — virtual stop moved to BE %.2f",
+                            trade_id, price, entry)
+                try:
+                    await telegram.notify_be_move(trade_id, direction, entry)
+                except Exception as e:
+                    logger.warning("Telegram notify_be_move failed: %s", e)
+
+        # Virtual BE stop — only active after t1_hit
+        if order.get("t1_hit"):
+            vstop = order["virtual_stop"]
+            be_hit = (direction == "LONG" and price <= vstop) or \
+                     (direction == "SHORT" and price >= vstop)
+            if be_hit:
+                logger.info("Virtual BE stop for trade %d at %.2f (entry %.2f)",
+                            trade_id, price, entry)
+                await close_position(trade_id, vstop, "BE stop after T1",
+                                     outcome="WIN")
+                continue
+
+        # Stop hit — TV bracket auto-closed at original SL. Reconcile (no market order).
         if direction == "LONG" and price <= stop:
             logger.info("Stop hit for trade %d: price %.2f <= stop %.2f (TV auto-closed)",
                         trade_id, price, stop)
@@ -595,14 +677,55 @@ async def monitor_trades() -> None:
                                  outcome="LOSS", skip_chart_close=True)
             continue
 
-        # T1 hit — TV bracket auto-closed at T1. Reconcile. No market order.
-        t1_hit = (direction == "LONG" and price >= t1) or \
-                 (direction == "SHORT" and price <= t1)
-        if t1_hit:
-            logger.info("T1 hit for trade %d at %.2f (TV auto-closed)", trade_id, t1)
-            await close_position(trade_id, t1, "T1 target hit",
+        # T2 hit — TV bracket auto-closed at T2. Reconcile.
+        t2_hit = (direction == "LONG" and price >= t2) or \
+                 (direction == "SHORT" and price <= t2)
+        if t2_hit:
+            logger.info("T2 hit for trade %d at %.2f (TV auto-closed)", trade_id, t2)
+            await close_position(trade_id, t2, "T2 target hit",
                                  outcome="WIN", skip_chart_close=True)
             continue
+
+
+def _check_news_intervention(sentinel: dict, opened_at: datetime, now: datetime) -> bool:
+    """Return True if a high-impact headline landed within NEWS_INTERVENTION_WINDOW_SEC
+    AND after the trade was opened (don't close on stale pre-trade news)."""
+    headlines = sentinel.get("recent_headlines") or sentinel.get("headlines") or []
+    cutoff_secs = NEWS_INTERVENTION_WINDOW_SEC
+    for h in headlines:
+        if h.get("impact") != "HIGH":
+            continue
+        pub_str = h.get("published") or h.get("pub_date") or h.get("timestamp")
+        if not pub_str:
+            continue
+        try:
+            pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
+            if pub_dt.tzinfo is None:
+                pub_dt = ET.localize(pub_dt)
+        except Exception:
+            continue
+        # Must be both recent AND after trade open
+        if pub_dt < opened_at:
+            continue
+        delta_secs = (now - pub_dt).total_seconds()
+        if 0 <= delta_secs <= cutoff_secs:
+            return True
+    return False
+
+
+def _latest_high_impact_headline(sentinel: dict) -> str:
+    headlines = sentinel.get("recent_headlines") or sentinel.get("headlines") or []
+    for h in headlines:
+        if h.get("impact") == "HIGH":
+            return h.get("title") or h.get("headline") or "high-impact news"
+    return "high-impact news"
+
+
+def _outcome_from_pnl(direction: str, entry: float, price: float) -> str:
+    """WIN if exit is in trade's favor, else LOSS. Used for early-close interventions."""
+    if direction == "LONG":
+        return "WIN" if price > entry else "LOSS"
+    return "WIN" if price < entry else "LOSS"
 
 
 def get_active_orders() -> dict:

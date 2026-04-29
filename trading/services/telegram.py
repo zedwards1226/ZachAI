@@ -208,6 +208,17 @@ async def notify_skip(direction: str, score: int, reason: str) -> bool:
     return await send(msg)
 
 
+async def notify_be_move(trade_id: int, direction: str, entry: float) -> bool:
+    """Notify that virtual stop has moved to breakeven after T1 reached."""
+    msg = (
+        f"🎯 <b>T1 REACHED — STOP TO BREAKEVEN</b>\n\n"
+        f"Trade #{trade_id} ({direction}) hit T1.\n"
+        f"Virtual stop now at entry <b>{entry:.2f}</b>.\n\n"
+        f"<i>Worst case from here: scratch. Bot now targeting T2.</i>"
+    )
+    return await send(msg)
+
+
 async def notify_hard_block(reason: str) -> bool:
     """Send notification when trading is hard-blocked (won't take any trades)."""
     msg = (

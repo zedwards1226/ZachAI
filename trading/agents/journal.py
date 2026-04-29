@@ -327,6 +327,30 @@ def get_weekly_trades(weeks_back: int = 1) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_today_pnl() -> float:
+    """Net $ P&L (after slippage) for today's closed trades. Negative = down."""
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(pnl_after_slippage), 0) AS total "
+            "FROM trades WHERE date = ? AND outcome NOT IN ('OPEN', 'FAILED_PLACEMENT')",
+            (today,)
+        ).fetchone()
+        return float(row["total"] or 0)
+
+
+def get_week_pnl() -> float:
+    """Net $ P&L (after slippage) for the trailing 7 calendar days."""
+    cutoff = (datetime.now(ET) - timedelta(days=7)).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(pnl_after_slippage), 0) AS total "
+            "FROM trades WHERE date >= ? AND outcome NOT IN ('OPEN', 'FAILED_PLACEMENT')",
+            (cutoff,)
+        ).fetchone()
+        return float(row["total"] or 0)
+
+
 async def weekly_report() -> bool:
     """Generate and send the weekly performance report via Telegram."""
     logger.info("Generating weekly report")

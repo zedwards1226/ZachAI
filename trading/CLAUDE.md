@@ -29,12 +29,38 @@ NQ/MNQ futures ORB scalp system. Captures 15-min opening range (9:30-9:45 ET), w
 Scheduler: `misfire_grace_time=3600` — jobs run up to 1h late instead of silently skipping on clock drift.
 Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, boot failed.
 
-## ORB MECHANICS
+## ORB MECHANICS (regrouped 2026-04-28)
 - **Range:** 15-min opening range (`ORB_MINUTES=15`, 9:30-9:45)
 - **Breakout confirmation:** closed 5-min bar outside the range (prevents wick fakeouts)
 - **Chart:** MNQ1! on 5m timeframe
-- **Order placement:** direct CDP via `trading/services/tv_trader.py::place_bracket_order` — NOT webhooks or alerts. CDP :9222 must be reachable.
-- Single CDP evaluate() call, ~750ms place / ~375ms close
+- **Position size:** 1 MNQ contract (paper, $5,000 demo, $2/pt)
+- **Stop:** ORB ± `STOP_EXTENSION_MULT` × range = 0.25× range beyond opposite boundary
+- **Bracket TP:** **T2** (1.5× ORB range from entry) — TV's bracket runs the trade to T2, not T1
+- **T1 = breakeven trigger** (0.5× ORB range from entry) — when price reaches T1, monitor sets virtual_stop=entry; if price drifts back through entry, monitor sends a market close (BE scratch)
+- **Order placement:** direct CDP via `trading/services/tv_trader.py::place_bracket_order` — NOT webhooks or alerts. CDP :9222 must be reachable. Single CDP evaluate() call, ~750ms place / ~375ms close
+
+## RISK RULES (active hard caps, all enforced)
+- **Per-trade max risk: $100** — `MAX_RISK_PER_TRADE_DOLLARS` — skip if `abs(entry-stop) × MULTIPLIER > $100`
+- **Daily max loss: $150** — `DAILY_LOSS_LIMIT_DOLLARS` — pause day when today's `pnl_after_slippage` total ≤ -$150
+- **Weekly max loss: $350** — `STARTING_CAPITAL × WEEKLY_LOSS_LIMIT_PCT` (7%) — pause week when 7-day total ≤ -$350
+- **3 consecutive losses** — `MAX_CONSECUTIVE_LOSSES=3` — pause day
+- **Max trades/session: 2** — strict ORB rules (first break + optional second-break, never a third)
+- **VIX > 30** — `VIX_HARD_BLOCK=30` — pause day
+- **High-impact news day** — CPI/NFP/FOMC scheduled in session window — pause day
+
+## TRADE MANAGEMENT (`monitor_trades` runs every 30s)
+- **T1 reached → BE move:** virtual_stop = entry, Telegram alert via `notify_be_move`. Original TV bracket SL stays as backstop.
+- **Virtual BE stop:** after t1_hit, if price drifts back to entry → market close (counts as WIN, scratch P&L after slippage).
+- **News intervention:** high-impact headline within `NEWS_INTERVENTION_WINDOW_SEC=90` AND published after trade open → market close.
+- **VIX intervention:** `VIX > vix_at_open × (1 + VIX_INTERVENTION_PCT)` (20% spike) → market close.
+- **2-hour time exit** — `MAX_HOLD_MINUTES=120`.
+- **3pm hard close** (1pm on half days) — `HARD_CLOSE_HOUR/MINUTE`.
+- **Reconciliation:** if TV's bracket auto-closes at SL or T2, monitor logs the outcome to journal without sending a duplicate market order.
+
+## PAPER GUARANTEE
+- `PAPER_MODE=true` env required in `trading/.env`.
+- `tv_trader.place_bracket_order()` raises `RuntimeError` if `PAPER_MODE != "true"` and marks the journal row `FAILED_PLACEMENT`.
+- Setting `PAPER_MODE=false` is one of the 3 hard stops in master CLAUDE.md.
 
 ## SCORING TABLE
 | Factor | Points |
@@ -58,16 +84,7 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 - Score **8-9** → half size
 - Score **< 8** → skip + Telegram notify
 
-**Hard blocks** (skip regardless of anything else):
-- VIX > 30 (`VIX_HARD_BLOCK=30`)
-- High-impact news day (CPI/NFP/FOMC) within session window
-- Circuit breaker: 3 consecutive losses (`MAX_CONSECUTIVE_LOSSES=3`)
-
-**Daily cap:** `MAX_TRADES_PER_SESSION=2` — strict ORB: first break + optional second-break (Zarattini). No third entry.
-
-**Cascade gates: DISABLED 2026-04-28** for exit-management evaluation phase. Owner directive: collect raw data on stop/target/trail/time-exit behavior across a wider sample. Every closed-bar breakout fires (subject to hard blocks above and daily cap).
-
-ORB candle direction, HTF bias, VWAP alignment, ATR floor, level proximity — all still flow into `ScoreBreakdown` via `_score_trade()` for journaling and later ML labeling, but none hard-skip. To restore: re-add gate logic in `combiner.py::_check_cascade` above the `return None`.
+**See "RISK RULES" section above** for the authoritative list of caps and pause conditions. Everything in `_score_trade()` (HTF bias, VWAP, ATR, level proximity, ORB candle direction) is recorded for ML labeling but no longer hard-skips a trade — `_check_cascade()` is a stub that always returns `None`. To restore filtering: re-add gate logic above the `return None`.
 
 ## 2026 HIGH-IMPACT CALENDAR (official BLS + Fed dates, hard-coded)
 - **CPI** (8:30 AM): Jan 13, Feb 11, Mar 11, Apr 10, May 12, Jun 10, Jul 14, Aug 12, Sep 11, Oct 14, Nov 10, Dec 10
