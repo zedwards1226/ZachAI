@@ -17,8 +17,7 @@ Quarter-Kelly: stake = f* * 0.25 * capital
 Capped at MAX_BET.
 """
 from config import (
-    KELLY_FRACTION, MAX_BET, MAX_CONTRACTS, STARTING_CAPITAL,
-    BANKROLL_PCT_CAP,
+    KELLY_FRACTION, MAX_BET, MAX_CONTRACTS, BANKROLL_PCT_CAP,
 )
 
 

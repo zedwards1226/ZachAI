@@ -252,7 +252,7 @@ def check_positions_pnl():
                   f"Our open positions are down ${abs(total_unrealized):.2f} right now. Worst three: {breakdown}. Nothing's locked in yet — these can recover before the markets close.")
         else:
             clear_alert("unrealized_loss")
-        # stale_prices alert removed — 0¢/None on a resolving T-market is normal.
+        # 0¢/None on a resolving T-market is normal — don't add a stale-prices alert.
     except Exception as e:
         alert("pnl_check_error", f"Couldn't check current profit/loss: {e}")
 

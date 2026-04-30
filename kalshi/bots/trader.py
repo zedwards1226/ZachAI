@@ -21,7 +21,7 @@ from database import (
 )
 from weather import fetch_all_forecasts
 from kalshi_client import get_client
-from edge import prob_exceeds, prob_between, compute_edge, best_side, effective_edge, parse_strike_from_ticker
+from edge import prob_exceeds, prob_between, best_side, effective_edge, parse_strike_from_ticker
 from kelly import size_stake
 from guardrails import all_checks
 

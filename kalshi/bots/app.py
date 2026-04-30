@@ -28,8 +28,8 @@ from database import (
     get_signals, get_equity_curve, get_calibration, get_trades_with_verification,
     get_today_stats, get_city_performance,
 )
-from guardrails import guardrail_status, set_window_override, get_window_override
-from scheduler import start_scheduler, stop_scheduler, trigger_scan_now
+from guardrails import guardrail_status, set_window_override
+from scheduler import start_scheduler, trigger_scan_now
 from trader import resolve_expired_trades
 
 logging.basicConfig(

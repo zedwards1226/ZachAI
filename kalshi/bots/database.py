@@ -7,7 +7,6 @@ import sqlite3
 import json
 from contextlib import contextmanager
 from datetime import date, datetime
-from pathlib import Path
 
 from config import DATABASE_PATH
 

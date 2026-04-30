@@ -7,7 +7,7 @@ import os
 import time
 import requests
 import logging
-from datetime import date, timedelta
+from datetime import date
 from config import CITIES
 
 log = logging.getLogger(__name__)

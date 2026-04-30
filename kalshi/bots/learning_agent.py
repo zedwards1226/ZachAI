@@ -15,7 +15,7 @@ import logging
 from datetime import datetime
 from config import CITIES, MIN_EDGE as DEFAULT_MIN_EDGE
 from database import (
-    agent_get, agent_set, pause_city, city_is_paused, get_city_cooldowns,
+    agent_get, agent_set, pause_city, city_is_paused,
     journal_write, get_recent_city_trades, get_brier_recent,
     get_city_performance, get_summary,
 )
