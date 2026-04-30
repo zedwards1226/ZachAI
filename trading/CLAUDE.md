@@ -51,11 +51,12 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 ## TRADE MANAGEMENT (`monitor_trades` runs every 30s)
 - **T1 reached → BE move:** virtual_stop = entry, Telegram alert via `notify_be_move`. Original TV bracket SL stays as backstop.
 - **Virtual BE stop:** after t1_hit, if price drifts back to entry → market close (counts as WIN, scratch P&L after slippage).
-- **News intervention:** high-impact headline within `NEWS_INTERVENTION_WINDOW_SEC=90` AND published after trade open → market close.
 - **VIX intervention:** `VIX > vix_at_open × (1 + VIX_INTERVENTION_PCT)` (20% spike) → market close.
 - **2-hour time exit** — `MAX_HOLD_MINUTES=120`.
 - **3pm hard close** (1pm on half days) — `HARD_CLOSE_HOUR/MINUTE`.
 - **Reconciliation:** if TV's bracket auto-closes at SL or T2, monitor logs the outcome to journal without sending a duplicate market order.
+
+> News intervention REMOVED 2026-04-29. Sentinel's HIGH-impact text classifier was tagging junk headlines (e.g. "Tech stocks today" on a "fed" keyword match) as HIGH. Closing real trades on classifier noise = negative EV. Calendar-based hard block (CPI/NFP/FOMC days) still active. Don't re-add without a far better classifier.
 
 ## PAPER GUARANTEE
 - `PAPER_MODE=true` env required in `trading/.env`.

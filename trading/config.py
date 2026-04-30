@@ -65,7 +65,8 @@ DAILY_LOSS_LIMIT_DOLLARS = 150     # 3% — pause day if today's net P&L falls b
 
 # Mid-trade intervention thresholds (used by tv_trader.monitor_trades)
 VIX_INTERVENTION_PCT = 0.20        # Close trade if VIX rises 20%+ from trade-open VIX
-NEWS_INTERVENTION_WINDOW_SEC = 90  # High-impact headline within last N seconds = close trade
+# News intervention removed 2026-04-29 — sentinel impact-classifier was tagging
+# junk headlines as HIGH. Calendar-based hard block (CPI/NFP/FOMC) still active.
 
 # Trailing stop after T1 hit. virtual_stop = price - (TRAIL_DISTANCE_RATIO × ORB range)
 # 0.5 × ORB matches the T1 distance — gives trade room equal to the breakeven trigger band

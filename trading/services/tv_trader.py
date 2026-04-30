@@ -18,7 +18,7 @@ import pytz
 
 from config import (
     TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time,
-    VIX_INTERVENTION_PCT, NEWS_INTERVENTION_WINDOW_SEC,
+    VIX_INTERVENTION_PCT,
     TRAIL_DISTANCE_RATIO, POSITION_OPEN_FUNDS_THRESHOLD, STARTING_CAPITAL,
 )
 from services.tv_client import get_client
@@ -700,10 +700,16 @@ async def monitor_trades() -> None:
     TV's bracket runs to T2 (1.5x ORB). This monitor adds:
       - BE move at T1: once price reaches T1, virtual_stop = entry. If price
         then drifts back through entry, monitor sends a market close.
-      - News intervention: high-impact headline within last 90s -> close.
+      - Continuous trail after T1: virtual_stop trails price by 0.5x ORB.
       - VIX intervention: VIX up 20%+ from trade-open VIX -> close.
       - Reconciles TV bracket auto-closes (SL hit, T2 hit) into the journal.
       - Explicit closes for 2-hour time exit and 3pm hard close.
+
+    News intervention removed 2026-04-29 — sentinel impact-classifier was
+    matching junk Yahoo Finance headlines as HIGH (e.g. "Tech stocks today"
+    on a "fed" keyword). Cut to avoid spurious closes. Sentinel still posts
+    headlines to Telegram for awareness; the calendar-based hard block for
+    CPI/NFP/FOMC days still pauses trading on those days.
     """
     if not _active_orders:
         return
@@ -715,8 +721,7 @@ async def monitor_trades() -> None:
     if price == 0:
         return
 
-    # Fresh sentinel + structure state for news/VIX intervention
-    sentinel = read_state("sentinel") or {}
+    # Fresh structure state for VIX intervention
     structure = read_state("structure") or {}
 
     for trade_id, order in list(_active_orders.items()):
@@ -740,16 +745,6 @@ async def monitor_trades() -> None:
         if minutes_held >= MAX_HOLD_MINUTES:
             logger.info("2-hour time exit for trade %d (held %.0f min)", trade_id, minutes_held)
             await close_position(trade_id, price, "2-hour time exit")
-            continue
-
-        # News intervention — high-impact headline mid-trade
-        if _check_news_intervention(sentinel, opened_at, now):
-            headline = _latest_high_impact_headline(sentinel)
-            logger.warning("News intervention for trade %d: %s", trade_id, headline)
-            outcome = _outcome_from_pnl(direction, entry, price)
-            await close_position(trade_id, price,
-                                 f"news intervention: {headline[:60]}",
-                                 outcome=outcome)
             continue
 
         # VIX intervention — VIX spike since trade open
@@ -839,40 +834,6 @@ async def monitor_trades() -> None:
             await close_position(trade_id, t2, "T2 target hit",
                                  outcome="WIN", skip_chart_close=True)
             continue
-
-
-def _check_news_intervention(sentinel: dict, opened_at: datetime, now: datetime) -> bool:
-    """Return True if a high-impact headline landed within NEWS_INTERVENTION_WINDOW_SEC
-    AND after the trade was opened (don't close on stale pre-trade news)."""
-    headlines = sentinel.get("recent_headlines") or sentinel.get("headlines") or []
-    cutoff_secs = NEWS_INTERVENTION_WINDOW_SEC
-    for h in headlines:
-        if h.get("impact") != "HIGH":
-            continue
-        pub_str = h.get("published") or h.get("pub_date") or h.get("timestamp")
-        if not pub_str:
-            continue
-        try:
-            pub_dt = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
-            if pub_dt.tzinfo is None:
-                pub_dt = ET.localize(pub_dt)
-        except Exception:
-            continue
-        # Must be both recent AND after trade open
-        if pub_dt < opened_at:
-            continue
-        delta_secs = (now - pub_dt).total_seconds()
-        if 0 <= delta_secs <= cutoff_secs:
-            return True
-    return False
-
-
-def _latest_high_impact_headline(sentinel: dict) -> str:
-    headlines = sentinel.get("recent_headlines") or sentinel.get("headlines") or []
-    for h in headlines:
-        if h.get("impact") == "HIGH":
-            return h.get("title") or h.get("headline") or "high-impact news"
-    return "high-impact news"
 
 
 def _outcome_from_pnl(direction: str, entry: float, price: float) -> str:
