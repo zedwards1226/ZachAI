@@ -40,11 +40,12 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 - **Order placement:** direct CDP via `trading/services/tv_trader.py::place_bracket_order` — NOT webhooks or alerts. CDP :9222 must be reachable. Single CDP evaluate() call, ~750ms place / ~375ms close
 
 ## RISK RULES (active hard caps, all enforced)
-- **Per-trade max risk: $100** — `MAX_RISK_PER_TRADE_DOLLARS` — skip if `abs(entry-stop) × MULTIPLIER > $100`
-- **Daily max loss: $150** — `DAILY_LOSS_LIMIT_DOLLARS` — pause day when today's `pnl_after_slippage` total ≤ -$150
+- **Per-trade max risk: $350** — `MAX_RISK_PER_TRADE_DOLLARS` — skip if `abs(entry-stop) × MULTIPLIER > $350`
+- **Daily max loss: $200** — `DAILY_LOSS_LIMIT_DOLLARS` — pause day when today's `pnl_after_slippage` total ≤ -$200
 - **Weekly max loss: $350** — `STARTING_CAPITAL × WEEKLY_LOSS_LIMIT_PCT` (7%) — pause week when 7-day total ≤ -$350
 - **3 consecutive losses** — `MAX_CONSECUTIVE_LOSSES=3` — pause day
 - **Max trades/session: 2** — strict ORB rules (first break + optional second-break, never a third)
+- **One position at a time** — combiner blocks new entries while `tv_trader.get_active_orders()` is non-empty. Prevents overlapping setups (e.g. long open + second-break short attempt).
 - **VIX > 30** — `VIX_HARD_BLOCK=30` — pause day
 - **High-impact news day** — CPI/NFP/FOMC scheduled in session window — pause day
 

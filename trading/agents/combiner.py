@@ -126,6 +126,13 @@ async def poll() -> Optional[dict]:
     if now < session_start or now > session_end:
         return None
 
+    # One position at a time — block new entries while any existing trade is open.
+    # Prevents stacking on the same direction (failed first long + new long retry)
+    # and overlapping setups (long open + second-break short attempt).
+    from services.tv_trader import get_active_orders
+    if get_active_orders():
+        return None
+
     # Check circuit breaker
     stats = journal.get_today_stats()
     if stats["consecutive_losses"] >= MAX_CONSECUTIVE_LOSSES:
