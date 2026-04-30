@@ -218,7 +218,7 @@ async def _fetch_economic_calendar() -> list[dict]:
             if not event_name:
                 continue
 
-            # Check if within session window (8:00 AM - 11:00 AM)
+            # Check if within trading-relevance window (90 min pre-open through session-end)
             within_window = _is_near_session(event_time, now)
 
             events.append({
@@ -562,13 +562,19 @@ def _parse_event_time(time_str: str) -> Optional[datetime]:
 
 
 def _is_near_session(time_str: str, now: datetime) -> bool:
-    """Check if an event time is within 90 min of market open (9:30)."""
+    """Check if an event falls within the trading-relevance window:
+    90 minutes before market open (8:00 AM) through SESSION_END_HOUR.
+    Catches pre-open data releases (gap risk) AND any release that lands
+    while the bot might still be in a position.
+    """
+    from config import SESSION_END_HOUR, SESSION_END_MINUTE
     event_time = _parse_event_time(time_str)
     if not event_time:
         return False
-    open_time = now.replace(hour=9, minute=30, second=0)
-    diff = abs((event_time - open_time).total_seconds()) / 60
-    return diff <= 90
+    window_start = now.replace(hour=8, minute=0, second=0, microsecond=0)
+    window_end = now.replace(hour=SESSION_END_HOUR, minute=SESSION_END_MINUTE,
+                             second=0, microsecond=0)
+    return window_start <= event_time <= window_end
 
 
 def _is_upcoming(time_str: str, now: datetime) -> bool:
@@ -644,14 +650,14 @@ def _get_static_events(now: datetime) -> list[dict]:
         })
 
     if (month, day) in fomc_dates:
-        # FOMC at 2:00pm is OUTSIDE the ORB session window (9:30-11:00 ET).
-        # Morning ORB max-hold of 120min force-closes any 9:45 entry by 11:45 —
-        # 2+ hours before FOMC drops. Tracked for awareness, not as a hard block.
+        # FOMC at 2:00pm lands AT the trading session cutoff (SESSION_END_HOUR=14).
+        # Block FOMC days entirely — bot must not be holding a position when the
+        # Fed prints. ~8 days/year of skipped trading.
         events.append({
             "time": "2:00pm",
             "event": "FOMC Statement + Rate Decision",
             "impact": "HIGH",
-            "within_session_window": False,
+            "within_session_window": True,
         })
 
     # Thursday jobless claims (recurring, lower impact)

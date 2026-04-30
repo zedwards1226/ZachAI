@@ -28,7 +28,7 @@ STARTING_CAPITAL = 5000  # Demo account balance
 # ORB Settings (research-calibrated)
 ORB_MINUTES = 15  # 15-min ORB default (Finding 4: fewer false breakouts)
 ORB_START_HOUR, ORB_START_MINUTE = 9, 30
-SESSION_END_HOUR, SESSION_END_MINUTE = 11, 0
+SESSION_END_HOUR, SESSION_END_MINUTE = 14, 0
 HARD_CLOSE_HOUR, HARD_CLOSE_MINUTE = 15, 0  # 3 PM ET close everything
 MAX_HOLD_MINUTES = 120  # 2-hour time exit (Finding 11)
 
@@ -87,8 +87,8 @@ STRUCTURE_TIME = (8, 45)
 MEMORY_TIME = (18, 0)
 BRIEFING_TIME = (8, 50)
 SENTINEL_INITIAL_TIME = (8, 0)
-COMBINER_WINDOW = ((9, 30), (11, 0))
-SENTINEL_POLL_WINDOW = ((9, 30), (11, 0))
+COMBINER_WINDOW = ((9, 30), (14, 0))
+SENTINEL_POLL_WINDOW = ((9, 30), (14, 0))
 
 # Sentinel Keywords
 TRUTH_HIGH_IMPACT_KEYWORDS = [

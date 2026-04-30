@@ -373,9 +373,10 @@ async def poll() -> Optional[dict]:
     )
 
     # Place paper trade on TradingView
+    order_placed = False
     try:
         from services.tv_trader import place_bracket_order
-        await place_bracket_order(
+        order_placed = await place_bracket_order(
             direction=breakout_direction.value,
             entry_price=price,
             stop_price=stop,
@@ -388,15 +389,26 @@ async def poll() -> Optional[dict]:
     except Exception as e:
         logger.error("Failed to place chart order: %s", e)
 
-    _trades_today += 1
+    # Always mark this breakout event as processed — don't retry the same
+    # signal in a tight loop. _breakout_processed resets when price returns
+    # inside the box (giving room for a real second-break later).
     _breakout_processed = True
-    _log_signal(breakout_direction, price, breakdown, size, is_second_break)
-    _persist_session()
 
-    logger.info("TRADE EXECUTED: %s score=%d size=%s entry=%.2f stop=%.2f t1=%.2f t2=%.2f",
-                breakout_direction.value, score, size.value, price, stop, target_1, target_2)
-
-    return signal.model_dump()
+    if order_placed:
+        _trades_today += 1
+        _log_signal(breakout_direction, price, breakdown, size, is_second_break)
+        _persist_session()
+        logger.info("TRADE EXECUTED: %s score=%d size=%s entry=%.2f stop=%.2f t1=%.2f t2=%.2f",
+                    breakout_direction.value, score, size.value, price, stop, target_1, target_2)
+        return signal.model_dump()
+    else:
+        # Order rejected by TV (broker disconnected, modal blocking, side_not_found, etc).
+        # Do NOT increment _trades_today — that would falsely consume the daily cap.
+        # Journal row already marked FAILED_PLACEMENT inside place_bracket_order.
+        _persist_session()
+        logger.warning("TRADE NOT PLACED: %s entry=%.2f — TV rejected order, daily cap NOT consumed",
+                       breakout_direction.value, price)
+        return None
 
 
 def _score_trade(direction: Direction, is_second_break: bool,
