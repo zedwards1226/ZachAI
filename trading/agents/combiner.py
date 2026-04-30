@@ -283,25 +283,8 @@ async def poll() -> Optional[dict]:
         _persist_session()
         return None
 
-    # --- Cascade filter (4 hard gates, no scoring) ---
-    # Replaces the old weighted score threshold. Research (Zarattini ORB paper,
-    # freqtrade/backtrader conventions) shows production breakout bots use 3-4
-    # AND-gated booleans, not confluence scoring. Score/RVOL/VWAP/VIX etc.
-    # still recorded to signal_history for later ML-based meta-labeling.
-    score = breakdown.total  # kept for logging/metadata only
-    gate_failed = _check_cascade(breakout_direction, _orb, states, price, is_second_break)
-    if gate_failed:
-        logger.info("Trade skipped: %s (gate failed: %s)",
-                    breakout_direction.value, gate_failed)
-        await telegram.notify_skip(breakout_direction.value, score, gate_failed)
-        _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
-                    block_reason=f"cascade:{gate_failed}")
-        _breakout_processed = True
-        _persist_session()
-        return None
-
-    # All 4 gates passed → HALF size by default (conservative while we gather data).
-    # Will promote to FULL once signal_history shows consistent WR >= 55%.
+    # Score is recorded to signal_history for ML labeling but no longer gates entry.
+    score = breakdown.total
     size = TradeSize.HALF
 
     # --- Phase 4: Calculate stop/target ---
@@ -496,26 +479,6 @@ def _score_trade(direction: Direction, is_second_break: bool,
 
     b.compute_total()
     return b
-
-
-def _check_cascade(direction: Direction, orb: ORBRange,
-                   states: dict, price: float,
-                   is_second_break: bool = False) -> Optional[str]:
-    """Entry filter — DISABLED 2026-04-28 for exit-management evaluation phase.
-
-    All cascade gates removed to collect data on stop/target/trail behavior across
-    a wider sample. Hard blocks (VIX>30, CPI/NFP/FOMC) still apply via
-    _check_hard_blocks(). MAX_TRADES_PER_SESSION=2 caps daily activity to mainstream
-    ORB rules (first break + optional second break). Circuit breaker
-    (MAX_CONSECUTIVE_LOSSES=3) still pauses the day after 3 losers.
-
-    HTF bias, VWAP alignment, ATR floor, level proximity, ORB candle direction —
-    all still flow into ScoreBreakdown via _score_trade() for journaling and
-    eventual ML labeling, but none hard-skip a trade.
-
-    To restore filtering, re-add gate logic above the `return None`.
-    """
-    return None
 
 
 def _check_hard_blocks(states: dict, orb: ORBRange) -> Optional[str]:

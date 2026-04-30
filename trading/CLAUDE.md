@@ -56,8 +56,6 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 - **3pm hard close** (1pm on half days) — `HARD_CLOSE_HOUR/MINUTE`.
 - **Reconciliation:** if TV's bracket auto-closes at SL or T2, monitor logs the outcome to journal without sending a duplicate market order.
 
-> News intervention REMOVED 2026-04-29. Sentinel's HIGH-impact text classifier was tagging junk headlines (e.g. "Tech stocks today" on a "fed" keyword match) as HIGH. Closing real trades on classifier noise = negative EV. Calendar-based hard block (CPI/NFP/FOMC days) still active. Don't re-add without a far better classifier.
-
 ## PAPER GUARANTEE
 - `PAPER_MODE=true` env required in `trading/.env`.
 - `tv_trader.place_bracket_order()` raises `RuntimeError` if `PAPER_MODE != "true"` and marks the journal row `FAILED_PLACEMENT`.
@@ -80,12 +78,7 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 | No news block | +1 |
 | No truth block | +1 |
 
-**Thresholds** (`trading/config.py`):
-- Score **≥ 10** → full size
-- Score **8-9** → half size
-- Score **< 8** → skip + Telegram notify
-
-**See "RISK RULES" section above** for the authoritative list of caps and pause conditions. Everything in `_score_trade()` (HTF bias, VWAP, ATR, level proximity, ORB candle direction) is recorded for ML labeling but no longer hard-skips a trade — `_check_cascade()` is a stub that always returns `None`. To restore filtering: re-add gate logic above the `return None`.
+Score is recorded to `signal_history` for ML labeling but does not gate entry. Authoritative entry rules live in **RISK RULES** above; the only entry filters are the hard blocks (VIX>30, scheduled CPI/NFP/FOMC, daily/weekly $ caps, per-trade $ cap, 3-consec-loss circuit).
 
 ## 2026 HIGH-IMPACT CALENDAR (official BLS + Fed dates, hard-coded)
 - **CPI** (8:30 AM): Jan 13, Feb 11, Mar 11, Apr 10, May 12, Jun 10, Jul 14, Aug 12, Sep 11, Oct 14, Nov 10, Dec 10

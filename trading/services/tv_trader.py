@@ -704,12 +704,6 @@ async def monitor_trades() -> None:
       - VIX intervention: VIX up 20%+ from trade-open VIX -> close.
       - Reconciles TV bracket auto-closes (SL hit, T2 hit) into the journal.
       - Explicit closes for 2-hour time exit and 3pm hard close.
-
-    News intervention removed 2026-04-29 — sentinel impact-classifier was
-    matching junk Yahoo Finance headlines as HIGH (e.g. "Tech stocks today"
-    on a "fed" keyword). Cut to avoid spurious closes. Sentinel still posts
-    headlines to Telegram for awareness; the calendar-based hard block for
-    CPI/NFP/FOMC days still pauses trading on those days.
     """
     if not _active_orders:
         return
