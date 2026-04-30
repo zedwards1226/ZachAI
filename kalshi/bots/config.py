@@ -38,6 +38,10 @@ PROB_SHRINK_TO_MARKET = float(os.getenv("PROB_SHRINK_TO_MARKET", "0.25"))
 # Competitive Kalshi weather bots use 15% fractional Kelly (suislanchez et al.);
 # dropping from 25% cuts drawdown risk ~40% at small cost to compounding.
 KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.15"))
+# Per-trade hard cap as a fraction of LIVE bankroll. 0.05 = 5% — auto-scales
+# as bankroll grows so dollars per trade compound with realized P&L.
+# Acts together with MAX_BET (absolute $ ceiling) and KELLY_FRACTION.
+BANKROLL_PCT_CAP = float(os.getenv("BANKROLL_PCT_CAP", "0.05"))
 
 # Per-city calibration: min resolved trades before we trust historical WR
 # instead of the global default. Below this, fall back to global shrinkage.

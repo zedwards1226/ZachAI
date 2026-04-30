@@ -16,7 +16,10 @@ For a Kalshi YES contract at price P cents:
 Quarter-Kelly: stake = f* * 0.25 * capital
 Capped at MAX_BET.
 """
-from config import KELLY_FRACTION, MAX_BET, MAX_CONTRACTS, STARTING_CAPITAL
+from config import (
+    KELLY_FRACTION, MAX_BET, MAX_CONTRACTS, STARTING_CAPITAL,
+    BANKROLL_PCT_CAP,
+)
 
 
 def kelly_fraction(our_prob: float, price_cents: int) -> float:
@@ -35,21 +38,22 @@ def kelly_fraction(our_prob: float, price_cents: int) -> float:
     return max(0.0, f)
 
 
-def size_stake(our_prob: float, price_cents: int, capital_usd: float) -> dict:
+def size_stake(our_prob: float, price_cents: int, bankroll_usd: float) -> dict:
     """
-    Returns:
-        {
-          "raw_kelly":  float,
-          "frac_kelly": float,  # KELLY_FRACTION * raw_kelly
-          "stake_usd":  float,  # capped at MAX_BET
-          "contracts":  int,
-          "price_cents": int,
-        }
+    Stake = min(KELLY_FRACTION × raw_Kelly × bankroll,
+                bankroll × BANKROLL_PCT_CAP,
+                MAX_BET).
+
+    The middle term (bankroll × 5%) is the hard per-trade ceiling — auto-scales
+    as bankroll compounds. MAX_BET is a runaway-bug safety stop, not the
+    binding constraint at small bankrolls.
     """
-    raw_k   = kelly_fraction(our_prob, price_cents)
-    frac_k  = raw_k * KELLY_FRACTION
-    stake   = min(frac_k * capital_usd, MAX_BET)
-    stake   = max(0.0, stake)
+    raw_k        = kelly_fraction(our_prob, price_cents)
+    frac_k       = raw_k * KELLY_FRACTION
+    kelly_usd    = frac_k * bankroll_usd
+    pct_cap_usd  = bankroll_usd * BANKROLL_PCT_CAP
+    stake        = min(kelly_usd, pct_cap_usd, MAX_BET)
+    stake        = max(0.0, stake)
 
     cost_per = price_cents / 100.0
     contracts = int(stake / cost_per) if cost_per > 0 else 0
@@ -57,9 +61,12 @@ def size_stake(our_prob: float, price_cents: int, capital_usd: float) -> dict:
     actual_stake = contracts * cost_per
 
     return {
-        "raw_kelly":   round(raw_k, 4),
-        "frac_kelly":  round(frac_k, 4),
-        "stake_usd":   round(actual_stake, 2),
-        "contracts":   contracts,
-        "price_cents": price_cents,
+        "raw_kelly":     round(raw_k, 4),
+        "frac_kelly":    round(frac_k, 4),
+        "stake_usd":     round(actual_stake, 2),
+        "contracts":     contracts,
+        "price_cents":   price_cents,
+        "bankroll_used": round(bankroll_usd, 2),
+        "kelly_dollars": round(kelly_usd, 2),
+        "pct_cap_dollars": round(pct_cap_usd, 2),
     }

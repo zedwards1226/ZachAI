@@ -255,6 +255,14 @@ def scan_and_trade() -> list[dict]:
         # 7. Size position
         sizing = size_stake(our_prob_for_side, price_cents, capital)
         stake = sizing["stake_usd"]
+        log.info(
+            "Sizing %s %s: bankroll=$%.2f raw_kelly=%.1f%% frac_kelly=%.1f%% "
+            "kelly$=$%.2f pct_cap$=$%.2f -> stake=$%.2f (%d contracts @ %d¢)",
+            city_code, side.upper(), sizing["bankroll_used"],
+            sizing["raw_kelly"] * 100, sizing["frac_kelly"] * 100,
+            sizing["kelly_dollars"], sizing["pct_cap_dollars"],
+            stake, sizing["contracts"], price_cents,
+        )
 
         # Signal data for calibration tracking
         _sig = dict(
