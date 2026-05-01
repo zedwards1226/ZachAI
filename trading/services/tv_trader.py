@@ -119,7 +119,23 @@ async def place_bracket_order(direction: str, entry_price: float,
     tv = await get_client()
     side = "buy" if direction == "LONG" else "sell"
 
-    # Pre-check 1: refuse to stack a second open position on top of an existing one.
+    # Pre-check 1: DOM health — verify TV is in a tradeable state.
+    # Stops the side_not_found cascade (2026-04-30) when broker-selection modal is open
+    # or Paper Trading session is disconnected.
+    dom_ready, dom_reason = await tv_dom_ready(tv)
+    if not dom_ready:
+        logger.error("Refusing trade %d: TV DOM not ready (reason=%s)", trade_id, dom_reason)
+        try:
+            journal.mark_failed_placement(trade_id, f"dom_not_ready:{dom_reason}")
+        except Exception as e:
+            logger.error("Failed to mark trade %d FAILED_PLACEMENT: %s", trade_id, e)
+        try:
+            await telegram.notify_hard_block(f"TV DOM not ready: {dom_reason}. No order placed.")
+        except Exception:
+            pass
+        return False
+
+    # Pre-check 2: refuse to stack a second open position on top of an existing one.
     # The original phantom-short bug was caused by adding trade #6 while trade #5 still
     # held its margin — TV silently rejected and the bot tracked a non-existent position.
     pre_position = await _has_open_position(tv)
@@ -222,6 +238,68 @@ async def _check_order_outcome(tv, before_snapshot: str, timeout: float = 4.0) -
             pass
         await asyncio.sleep(0.5)
     return "unknown"
+
+
+async def tv_dom_ready(tv) -> tuple[bool, str]:
+    """Pre-flight DOM health check — verify TV is in a tradeable state.
+
+    Returns (ready, reason):
+      ready=True, reason='ok' — broker connected, side selectors visible, no blocking modal
+      ready=False, reason='broker_modal' — broker-selection modal is open (today's bug)
+      ready=False, reason='paper_trading_disconnected' — Paper Trading session not active
+      ready=False, reason='side_selectors_missing' — Buy/Sell side tiles not in DOM
+      ready=False, reason='unknown' — couldn't determine
+
+    Returning False prevents place_bracket_order / close_via_trading_panel from
+    attempting to interact with a broken DOM. Stops the side_not_found cascade.
+    """
+    js = r"""
+    (function() {
+      var bodyText = document.body.innerText || '';
+
+      // 1. Broker-selection modal blocking — this is the worst state to trade in.
+      //    Detected by today's bug (2026-04-30).
+      if (bodyText.includes('Trade with your broker') &&
+          bodyText.includes('Brokerage simulator')) {
+        return {ready: false, reason: 'broker_modal'};
+      }
+
+      // 2. The broker-selection follow-up modal ("Connect" button visible)
+      if (bodyText.match(/Paper Trading[\s\S]{0,30}Connect/)) {
+        return {ready: false, reason: 'paper_trading_disconnected'};
+      }
+
+      // 3. Verify Paper Trading footer/tab is visible — this is the persistent indicator
+      //    that Paper Trading session is connected. "Trade" tab next to it = trade panel
+      //    is reachable. The trade panel may be collapsed; that's fine — place_bracket_order
+      //    opens the Trade tab itself as step 1 of its DOM script.
+      var paperTab = false, tradeTab = false;
+      var btns = document.querySelectorAll('button, [role="button"], [role="tab"]');
+      for (var i = 0; i < btns.length; i++) {
+        var t = (btns[i].textContent || '').trim();
+        if (t === 'Paper Trading') paperTab = true;
+        if (t === 'Trade' || t === 'TradeTrade') tradeTab = true;
+        if (paperTab && tradeTab) break;
+      }
+
+      if (!paperTab) {
+        return {ready: false, reason: 'paper_trading_not_active'};
+      }
+      if (!tradeTab) {
+        return {ready: false, reason: 'trade_tab_missing'};
+      }
+
+      return {ready: true, reason: 'ok'};
+    })()
+    """
+    try:
+        result = await tv.evaluate(js) or {}
+        ready = bool(result.get("ready"))
+        reason = result.get("reason", "unknown")
+        return (ready, reason)
+    except Exception as e:
+        logger.warning("tv_dom_ready check failed: %s", e)
+        return (False, "exception")
 
 
 async def _has_open_position(tv) -> Optional[bool]:
@@ -636,29 +714,40 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "",
     if not skip_chart_close:
         try:
             tv = await get_client()
-            # Verify there's actually a position to close — guards against the
-            # phantom-position bug where a market sell on a flat account opens a
-            # fresh short instead of closing.
-            has_pos = await _has_open_position(tv)
-            if has_pos is False:
+            # DOM health pre-flight — if TV is in a broken state, don't try to send a
+            # close order (would fail with side_not_found or open phantom positions).
+            dom_ready, dom_reason = await tv_dom_ready(tv)
+            if not dom_ready:
                 logger.warning(
-                    "close_position(trade %d): TV shows no open position — "
-                    "skipping chart close, reconciling journal only",
-                    trade_id,
+                    "close_position(trade %d): TV DOM not ready (reason=%s) — "
+                    "skipping chart close, reconciling journal only. "
+                    "Reconciliation loop will catch any drift.",
+                    trade_id, dom_reason,
                 )
             else:
-                # Either has position or unclear — send close. Capture toasts to
-                # detect rejection.
-                before_toasts = await _capture_toast_snapshot(tv)
-                await close_via_trading_panel(tv, direction)
-                # Best-effort post-close verification (logs only — don't reopen).
-                outcome_text = await _check_order_outcome(tv, before_toasts, timeout=3.0)
-                if outcome_text in ("rejected_funds", "rejected"):
+                # Verify there's actually a position to close — guards against the
+                # phantom-position bug where a market sell on a flat account opens a
+                # fresh short instead of closing.
+                has_pos = await _has_open_position(tv)
+                if has_pos is False:
                     logger.warning(
-                        "close_position(trade %d): TV rejected the close order (%s) — "
-                        "no phantom position created",
-                        trade_id, outcome_text,
+                        "close_position(trade %d): TV shows no open position — "
+                        "skipping chart close, reconciling journal only",
+                        trade_id,
                     )
+                else:
+                    # Either has position or unclear — send close. Capture toasts to
+                    # detect rejection.
+                    before_toasts = await _capture_toast_snapshot(tv)
+                    await close_via_trading_panel(tv, direction)
+                    # Best-effort post-close verification (logs only — don't reopen).
+                    outcome_text = await _check_order_outcome(tv, before_toasts, timeout=3.0)
+                    if outcome_text in ("rejected_funds", "rejected"):
+                        logger.warning(
+                            "close_position(trade %d): TV rejected the close order (%s) — "
+                            "no phantom position created",
+                            trade_id, outcome_text,
+                        )
         except Exception as e:
             logger.warning("Failed to close on chart: %s", e)
 
