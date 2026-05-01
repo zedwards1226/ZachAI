@@ -302,6 +302,72 @@ async def tv_dom_ready(tv) -> tuple[bool, str]:
         return (False, "exception")
 
 
+async def tv_get_positions(tv) -> dict:
+    """Query TV-live for current open position state. SOURCE OF TRUTH for
+    'are we flat?' decisions, replacing local-state assumptions.
+
+    Returns a dict:
+      {
+        "count": int,              # estimated number of open MNQ contracts (0 if flat)
+        "has_position": bool,      # True if at least one position open
+        "available_funds": float | None,  # margin available for new orders
+        "signal": str,             # how we determined the answer (debug)
+      }
+
+    The available-funds heuristic is the most reliable signal across TV's
+    various trading-panel states (collapsed, expanded, account-info view).
+    Positions consume ~$2,720 of margin per MNQ contract, so a drop in
+    available funds tells us a position is open even when the position rows
+    aren't visible in the current panel tab.
+    """
+    js = r"""
+    (function() {
+      var allText = document.body.innerText || '';
+      // Strong direct signal: "Avg Fill Price" only appears when a position row is rendered
+      var hasAvgFill = allText.includes('Avg Fill Price');
+      // Margin display "X / Y" — Y is available funds for new orders
+      var m = allText.match(/Margin[\s\S]{1,30}?([\d,]+\.\d+)\s*\/\s*([\d,]+\.\d+)/);
+      var avail = m ? parseFloat(m[2].replace(/,/g, '')) : null;
+      return {hasAvgFill: hasAvgFill, avail: avail};
+    })()
+    """
+    try:
+        r = await tv.evaluate(js) or {}
+    except Exception as e:
+        logger.warning("tv_get_positions JS failed: %s", e)
+        return {"count": 0, "has_position": False, "available_funds": None,
+                "signal": "exception"}
+
+    avail = r.get("avail")
+    has_avg_fill = bool(r.get("hasAvgFill"))
+
+    # Direct signal — TV is showing position rows
+    if has_avg_fill:
+        # Estimate count from margin used (each MNQ takes ~$2720 margin)
+        if avail is not None:
+            margin_used = STARTING_CAPITAL - avail
+            est_count = max(1, round(margin_used / 2720))
+        else:
+            est_count = 1
+        return {"count": est_count, "has_position": True,
+                "available_funds": avail, "signal": "avg_fill_price_visible"}
+
+    # Heuristic — available funds dropped below threshold = position open
+    if avail is not None:
+        threshold = STARTING_CAPITAL * POSITION_OPEN_FUNDS_THRESHOLD
+        if avail < threshold:
+            margin_used = STARTING_CAPITAL - avail
+            est_count = max(1, round(margin_used / 2720))
+            return {"count": est_count, "has_position": True,
+                    "available_funds": avail, "signal": "low_avail_funds"}
+        return {"count": 0, "has_position": False,
+                "available_funds": avail, "signal": "full_avail_funds"}
+
+    # Couldn't determine — return unknown
+    return {"count": 0, "has_position": False, "available_funds": None,
+            "signal": "unknown"}
+
+
 async def _has_open_position(tv) -> Optional[bool]:
     """Best-effort check: does TV show an open MNQ position?
 

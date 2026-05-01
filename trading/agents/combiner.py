@@ -126,12 +126,27 @@ async def poll() -> Optional[dict]:
     if now < session_start or now > session_end:
         return None
 
-    # One position at a time — block new entries while any existing trade is open.
-    # Prevents stacking on the same direction (failed first long + new long retry)
-    # and overlapping setups (long open + second-break short attempt).
-    from services.tv_trader import get_active_orders
+    # One position at a time — block new entries while any existing position is open.
+    # Two checks: local active_orders (fast) AND TV-live query (authoritative).
+    # If they disagree, TV wins — but log the drift for the reconciliation loop.
+    from services.tv_trader import get_active_orders, tv_get_positions, get_client
     if get_active_orders():
         return None
+    # TV-live query — catches phantom positions our local state missed
+    try:
+        tv = await get_client()
+        tv_pos = await tv_get_positions(tv)
+        if tv_pos.get("has_position"):
+            logger.warning(
+                "Skipping new entry: local active_orders empty but TV shows "
+                "position(s) (count=%d, signal=%s, avail=%s). Reconciliation "
+                "needed.",
+                tv_pos.get("count", 0), tv_pos.get("signal"),
+                tv_pos.get("available_funds"),
+            )
+            return None
+    except Exception as e:
+        logger.warning("tv_get_positions check failed: %s — proceeding with local state", e)
 
     # Check circuit breaker
     stats = journal.get_today_stats()
@@ -170,8 +185,12 @@ async def poll() -> Optional[dict]:
             _logged_weekly_cap = True
         return None
 
-    # Check max trades
-    if _trades_today >= MAX_TRADES_PER_SESSION:
+    # Check max trades — use TV-confirmed journal count (filled trades only).
+    # Replaces the old in-memory `_trades_today` which incremented on FAILED
+    # placements too (today's bug 2026-04-30, fixed). Journal is the cached
+    # source of TV truth — entries are only written after TV accepts the order.
+    fills_today = journal.get_today_filled_count()
+    if fills_today >= MAX_TRADES_PER_SESSION:
         return None
 
     tv = await get_client()

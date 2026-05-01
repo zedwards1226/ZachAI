@@ -351,6 +351,24 @@ def get_week_pnl() -> float:
         return float(row["total"] or 0)
 
 
+def get_today_filled_count() -> int:
+    """Count of today's TV-confirmed fills (excludes FAILED_PLACEMENT).
+
+    The journal is the cached source of truth for TV fills — entries are only
+    written after place_bracket_order returns True (i.e. TV accepted the order).
+    This replaces the old in-memory `_trades_today` counter which drifted on
+    failed placements (today's bug, 2026-04-30).
+    """
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM trades "
+            "WHERE date = ? AND outcome NOT IN ('FAILED_PLACEMENT')",
+            (today,)
+        ).fetchone()
+        return int(row["n"] or 0)
+
+
 async def weekly_report() -> bool:
     """Generate and send the weekly performance report via Telegram."""
     logger.info("Generating weekly report")
