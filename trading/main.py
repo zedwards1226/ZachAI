@@ -184,6 +184,20 @@ async def run_trade_monitor():
         logger.error("Trade monitor failed: %s", e, exc_info=True)
 
 
+async def run_reconcile():
+    """Phase 2.2 — reconcile local _active_orders state vs TV's actual state every 60s.
+    Catches phantom positions and orphan orders before they cascade."""
+    try:
+        if not is_trading_day():
+            return
+        from services.tv_trader import reconcile_with_tv
+        result = await reconcile_with_tv()
+        if not result.get("in_sync"):
+            logger.warning("Reconcile drift: %s", result)
+    except Exception as e:
+        logger.error("Reconcile failed: %s", e, exc_info=True)
+
+
 async def run_weekly_report():
     try:
         await journal.weekly_report()
@@ -366,6 +380,13 @@ async def main():
     # Trade monitor: every 30 seconds
     scheduler.add_job(run_trade_monitor, "interval", seconds=30,
                       id="trade_monitor", name="Trade Monitor",
+                      max_instances=1, coalesce=True)
+
+    # Reconciliation loop (Phase 2.2): every 60s, compare local active_orders to TV
+    # state. Catches phantom positions before they cascade. Uses 60s offset from
+    # trade_monitor so they don't both fire CDP queries simultaneously.
+    scheduler.add_job(run_reconcile, "interval", seconds=60,
+                      id="reconcile_tv", name="Reconcile TV State",
                       max_instances=1, coalesce=True)
 
     # Weekly journal report: Sunday 7:00 AM ET

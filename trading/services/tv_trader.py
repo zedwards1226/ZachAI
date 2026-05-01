@@ -33,6 +33,71 @@ ET = pytz.timezone(TIMEZONE)
 _active_orders: dict[int, dict] = {}  # trade_id -> order info
 
 
+# ─── Phase 2.3 — Sliding-Window Circuit Breaker ──────────────────────
+# Halts new order placement when broker errors cluster, before they cascade.
+# Failure classifications: dom_state (modal blocking, missing selectors),
+# network (CDP timeout), funds (insufficient margin), unknown (anything else).
+
+from collections import deque
+import time as _time
+
+_FAILURE_WINDOW: deque = deque(maxlen=5)
+_CIRCUIT_OPEN_UNTIL: float = 0.0  # timestamp; if monotonic() < this, circuit open
+_CIRCUIT_BREAKER_THRESHOLD = 3   # 3 same-type failures in window = open
+_CIRCUIT_BREAKER_COOLDOWN = 300  # 5 min cooldown after circuit opens
+
+
+def _classify_failure(reason: str) -> str:
+    """Group a failure reason string into one of: dom_state, network, funds, unknown."""
+    if not reason:
+        return "unknown"
+    r = reason.lower()
+    if "dom" in r or "side_not_found" in r or "submit_not_found" in r or "modal" in r:
+        return "dom_state"
+    if "network" in r or "timeout" in r or "connection" in r or "cdp" in r:
+        return "network"
+    if "funds" in r or "margin" in r:
+        return "funds"
+    return "unknown"
+
+
+def record_broker_failure(reason: str) -> None:
+    """Log a broker failure event and trip the circuit if N same-type failures cluster."""
+    global _CIRCUIT_OPEN_UNTIL
+    failure_type = _classify_failure(reason)
+    _FAILURE_WINDOW.append({"type": failure_type, "reason": reason, "ts": _time.monotonic()})
+
+    # Count this failure type in the current window
+    type_count = sum(1 for f in _FAILURE_WINDOW if f["type"] == failure_type)
+    if type_count >= _CIRCUIT_BREAKER_THRESHOLD:
+        _CIRCUIT_OPEN_UNTIL = _time.monotonic() + _CIRCUIT_BREAKER_COOLDOWN
+        logger.error(
+            "CIRCUIT BREAKER OPEN — %d %s failures in last %d events. "
+            "Halting new orders for %d seconds. Most recent: %s",
+            type_count, failure_type, len(_FAILURE_WINDOW),
+            _CIRCUIT_BREAKER_COOLDOWN, reason,
+        )
+
+
+def is_circuit_open() -> tuple[bool, str]:
+    """Returns (open, reason). If open, no new orders should be placed."""
+    remaining = _CIRCUIT_OPEN_UNTIL - _time.monotonic()
+    if remaining > 0:
+        return (True, f"cooldown_active_{int(remaining)}s_remaining")
+    return (False, "ok")
+
+
+def circuit_breaker_status() -> dict:
+    """Snapshot of circuit breaker state — for logging / debug / Telegram."""
+    open_now, reason = is_circuit_open()
+    return {
+        "open": open_now,
+        "cooldown_remaining_s": max(0, int(_CIRCUIT_OPEN_UNTIL - _time.monotonic())),
+        "window_size": len(_FAILURE_WINDOW),
+        "recent_failures": list(_FAILURE_WINDOW)[-3:],
+    }
+
+
 def _persist_active_orders() -> None:
     """Write _active_orders to disk so they survive restarts."""
     write_state("active_orders", {
@@ -119,11 +184,22 @@ async def place_bracket_order(direction: str, entry_price: float,
     tv = await get_client()
     side = "buy" if direction == "LONG" else "sell"
 
+    # Pre-check 0: Circuit breaker — if recent failures clustered, halt
+    cb_open, cb_reason = is_circuit_open()
+    if cb_open:
+        logger.error("Refusing trade %d: circuit breaker OPEN (%s)", trade_id, cb_reason)
+        try:
+            journal.mark_failed_placement(trade_id, f"circuit_breaker_open:{cb_reason}")
+        except Exception:
+            pass
+        return False
+
     # Pre-check 1: DOM health — verify TV is in a tradeable state.
     # Stops the side_not_found cascade (2026-04-30) when broker-selection modal is open
     # or Paper Trading session is disconnected.
     dom_ready, dom_reason = await tv_dom_ready(tv)
     if not dom_ready:
+        record_broker_failure(f"dom_not_ready:{dom_reason}")
         logger.error("Refusing trade %d: TV DOM not ready (reason=%s)", trade_id, dom_reason)
         try:
             journal.mark_failed_placement(trade_id, f"dom_not_ready:{dom_reason}")
@@ -165,6 +241,9 @@ async def place_bracket_order(direction: str, entry_price: float,
             fail_reason = f"tv_{accept_reason}"
             logger.error("TV did not accept the order: %s — NOT tracking in active_orders",
                          accept_reason)
+            record_broker_failure(fail_reason)
+    else:
+        record_broker_failure(fail_reason or "submit_failed")
 
     if success:
         # Capture VIX-at-open for mid-trade VIX intervention
@@ -995,3 +1074,124 @@ def _outcome_from_pnl(direction: str, entry: float, price: float) -> str:
 def get_active_orders() -> dict:
     """Get currently active orders for status check."""
     return dict(_active_orders)
+
+
+# ─── Phase 2.2 — Reconciliation Loop ─────────────────────────────────
+# Compares bot's local view (_active_orders) to TV's actual state.
+# Catches phantom positions (TV shows position, local doesn't) and
+# orphaned orders (local thinks open, TV is flat). Runs every 60s
+# via main.py scheduler.
+
+_RECONCILE_LAST_DRIFT_ALERT_TS: float = 0.0
+_RECONCILE_DRIFT_ALERT_COOLDOWN = 300  # don't spam Telegram more than once per 5 min
+
+
+async def reconcile_with_tv() -> dict:
+    """Reconcile local _active_orders state against TV's actual position state.
+
+    Returns a status dict:
+      {
+        "in_sync": bool,
+        "drift_type": str,                # 'none', 'phantom_position', 'orphan_order'
+        "local_count": int,
+        "tv_count": int,
+        "tv_signal": str,
+        "action_taken": str,
+      }
+
+    Drift handling:
+      - Local says position open, TV says flat → mark orders RECONCILED_CLOSED in
+        journal, clear from _active_orders. Likely a TV-side bracket auto-close
+        we missed.
+      - Local says flat, TV says position → ALERT (this is the dangerous phantom
+        case from the 2026-04-29 bug). Don't auto-fix; require human review.
+        Bot will refuse new entries until cleared.
+    """
+    global _RECONCILE_LAST_DRIFT_ALERT_TS
+
+    try:
+        tv = await get_client()
+        tv_pos = await tv_get_positions(tv)
+    except Exception as e:
+        logger.warning("Reconcile: failed to query TV — %s", e)
+        return {"in_sync": True, "drift_type": "tv_query_failed", "local_count": 0,
+                "tv_count": 0, "tv_signal": str(e), "action_taken": "skipped"}
+
+    local_count = len(_active_orders)
+    tv_count = tv_pos.get("count", 0)
+    tv_signal = tv_pos.get("signal", "unknown")
+    tv_has_pos = tv_pos.get("has_position", False)
+
+    # Case 1: in sync (most common path)
+    if (local_count > 0) == bool(tv_has_pos):
+        return {"in_sync": True, "drift_type": "none", "local_count": local_count,
+                "tv_count": tv_count, "tv_signal": tv_signal, "action_taken": "none"}
+
+    now_ts = _time.monotonic()
+
+    # Case 2: orphan order — local thinks position open, TV says flat
+    # Likely TV's bracket already auto-closed (SL or TP hit). Reconcile journal.
+    if local_count > 0 and not tv_has_pos and tv_signal != "unknown":
+        logger.warning(
+            "RECONCILE drift: local has %d active orders but TV is flat (signal=%s, avail=%s). "
+            "Likely TV-side bracket close we missed. Cleaning journal.",
+            local_count, tv_signal, tv_pos.get("available_funds"),
+        )
+        for trade_id, order in list(_active_orders.items()):
+            try:
+                journal.log_trade_close(
+                    trade_id, order.get("entry", 0), "RECONCILED_CLOSED",
+                    notes="reconciled_orphan_order — TV flat but local tracked open"
+                )
+            except Exception as e:
+                logger.error("Failed to journal-close trade %d during reconcile: %s",
+                             trade_id, e)
+            _active_orders.pop(trade_id, None)
+        _persist_active_orders()
+
+        # Alert (rate-limited)
+        if now_ts - _RECONCILE_LAST_DRIFT_ALERT_TS > _RECONCILE_DRIFT_ALERT_COOLDOWN:
+            try:
+                await telegram.notify_hard_block(
+                    f"Reconcile: cleared {local_count} orphan order(s). TV was flat. "
+                    f"Bot's view now matches reality."
+                )
+                _RECONCILE_LAST_DRIFT_ALERT_TS = now_ts
+            except Exception:
+                pass
+
+        return {"in_sync": False, "drift_type": "orphan_order", "local_count": local_count,
+                "tv_count": 0, "tv_signal": tv_signal, "action_taken": "cleaned_journal"}
+
+    # Case 3: phantom position — local says flat, TV says position open
+    # This is the dangerous case (2026-04-29 phantom-short bug). Don't auto-fix.
+    if local_count == 0 and tv_has_pos:
+        logger.error(
+            "RECONCILE DRIFT — PHANTOM POSITION DETECTED. "
+            "Local active_orders empty but TV shows position(s) (count=%d, signal=%s, "
+            "avail=%s). NOT auto-closing. New entries blocked until reviewed.",
+            tv_count, tv_signal, tv_pos.get("available_funds"),
+        )
+        # Trip circuit breaker so combiner.poll() refuses new orders
+        record_broker_failure(f"phantom_position:tv_count={tv_count}")
+        record_broker_failure(f"phantom_position:tv_count={tv_count}")
+        record_broker_failure(f"phantom_position:tv_count={tv_count}")  # 3x = circuit OPEN
+
+        if now_ts - _RECONCILE_LAST_DRIFT_ALERT_TS > _RECONCILE_DRIFT_ALERT_COOLDOWN:
+            try:
+                await telegram.notify_hard_block(
+                    f"PHANTOM POSITION: TV shows {tv_count} open contract(s) but bot "
+                    f"thinks it's flat. Trading HALTED. Manually close the position on "
+                    f"TradingView or investigate. Circuit breaker tripped."
+                )
+                _RECONCILE_LAST_DRIFT_ALERT_TS = now_ts
+            except Exception:
+                pass
+
+        return {"in_sync": False, "drift_type": "phantom_position", "local_count": 0,
+                "tv_count": tv_count, "tv_signal": tv_signal,
+                "action_taken": "circuit_breaker_tripped_alerted"}
+
+    # Case 4: signal=unknown (TV UI in a state we can't read) — no action, no alert
+    return {"in_sync": True, "drift_type": "tv_unknown_state", "local_count": local_count,
+            "tv_count": 0, "tv_signal": tv_signal, "action_taken": "skipped_unknown"}
