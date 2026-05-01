@@ -98,6 +98,65 @@ def circuit_breaker_status() -> dict:
     }
 
 
+# ─── Recent-Failed-Attempts buffer (orphan adoption) ──────────────────
+# When _check_order_acceptance times out but TV actually filled the order,
+# the reconcile loop runs 60s later and sees a phantom position. If it can
+# match the phantom to a recent submission attempt, it ADOPTS the position
+# instead of orphaning it forever.
+#
+# Today's 09:00 incident: ORB submitted a Buy at 09:00:07, the 4s acceptance
+# check timed out at 09:00:11 (TV hadn't rendered the position yet), the
+# combiner saw the position 10s later but had no way to claim it. Result:
+# 5h of phantom alerts and a manual close. The buffer fixes that.
+_FAILED_ATTEMPT_TTL_S = 180.0  # 3 reconcile cycles — enough for slow days
+_recent_failed_attempts: dict[int, dict] = {}
+
+
+def _record_failed_attempt(
+    trade_id: int,
+    direction: str,
+    entry_price: float,
+    stop_price: float,
+    target_1: float,
+    target_2: float,
+    reason: str,
+) -> None:
+    """Stash the intended SL/TP from a submission whose acceptance check failed.
+    The reconcile loop will use this to adopt the position if TV's slow
+    confirmation reveals it filled after all.
+    """
+    _recent_failed_attempts[trade_id] = {
+        "direction": direction,
+        "entry": entry_price,
+        "stop": stop_price,
+        "target_1": target_1,
+        "target_2": target_2,
+        "reason": reason,
+        "ts": _time.monotonic(),
+    }
+
+
+def _prune_failed_attempts() -> None:
+    """Drop entries older than _FAILED_ATTEMPT_TTL_S so we don't adopt
+    positions that aren't ours."""
+    cutoff = _time.monotonic() - _FAILED_ATTEMPT_TTL_S
+    stale = [k for k, v in _recent_failed_attempts.items() if v["ts"] < cutoff]
+    for k in stale:
+        _recent_failed_attempts.pop(k, None)
+
+
+def _claim_recent_failed_attempt() -> Optional[dict]:
+    """Pop and return the most-recent in-window failed attempt, or None.
+    Caller is responsible for activating the trade after claiming."""
+    _prune_failed_attempts()
+    if not _recent_failed_attempts:
+        return None
+    trade_id = max(_recent_failed_attempts, key=lambda k: _recent_failed_attempts[k]["ts"])
+    rec = _recent_failed_attempts.pop(trade_id)
+    rec["trade_id"] = trade_id
+    return rec
+
+
 def _persist_active_orders() -> None:
     """Write _active_orders to disk so they survive restarts."""
     write_state("active_orders", {
@@ -223,8 +282,15 @@ async def place_bracket_order(direction: str, entry_price: float,
             logger.error("Failed to mark trade %d FAILED_PLACEMENT: %s", trade_id, e)
         return False
 
-    # Capture pre-submission toast snapshot — needed to diff for the acceptance check.
+    # Capture pre-submission toast snapshot AND avail-funds baseline — needed
+    # to diff for the acceptance check. Margin-drop is the most reliable fill
+    # signal and beats toast scraping when TV is slow.
     before_toasts = await _capture_toast_snapshot(tv)
+    try:
+        _pre = await tv_get_positions(tv)
+        before_avail = _pre.get("available_funds")
+    except Exception:
+        before_avail = None
 
     # TV bracket TP = T2 (1.5x ORB). Monitor handles the BE move at T1.
     submitted, fail_reason = await _place_via_trading_panel(tv, side, stop_price, target_2)
@@ -232,10 +298,12 @@ async def place_bracket_order(direction: str, entry_price: float,
     success = False
     if submitted:
         # Verify TV actually accepted the order (didn't reject it for funds, etc.)
-        accepted, accept_reason = await _check_order_acceptance(tv, before_toasts, timeout=4.0)
+        accepted, accept_reason = await _check_order_acceptance(
+            tv, before_toasts, before_avail=before_avail
+        )
         if accepted:
             success = True
-            logger.debug("Order accepted by TV: %s", accept_reason)
+            logger.info("Order accepted by TV: %s", accept_reason)
         else:
             success = False
             fail_reason = f"tv_{accept_reason}"
@@ -266,7 +334,21 @@ async def place_bracket_order(direction: str, entry_price: float,
                      side.upper(), DEFAULT_SYMBOL, entry_price, stop_price, target_2, target_1,
                      f"{vix_at_open:.1f}" if vix_at_open else "n/a")
     else:
+        # Track this submission so the reconcile loop can adopt the position
+        # if TV slow-rolls the fill confirmation past our timeout window
+        # (today's 09:00 bug: TV needed ~10s to surface the position; our
+        # acceptance check timed out and orphaned the trade for 5h+).
+        _record_failed_attempt(
+            trade_id=trade_id,
+            direction=direction,
+            entry_price=entry_price,
+            stop_price=stop_price,
+            target_1=target_1,
+            target_2=target_2,
+            reason=fail_reason or "unknown",
+        )
         # Clean the phantom journal row so it doesn't sit OPEN forever.
+        # If reconcile adopts the trade later, it will reopen the row.
         try:
             journal.mark_failed_placement(trade_id, fail_reason or "unknown")
         except Exception as e:
@@ -482,26 +564,67 @@ async def _has_open_position(tv) -> Optional[bool]:
     return avail < threshold
 
 
-async def _check_order_acceptance(tv, before_snapshot: str, timeout: float = 4.0) -> tuple[bool, str]:
-    """Wait for TV order confirmation. Combines toast scan with position-state probe.
+# MNQ contract consumes ~$2,720 of margin. Use $2,400 as the threshold so a
+# fractional fill or session-cost variance doesn't trip a false negative —
+# but a flat-account toast race (today's 09:00 bug) absolutely will.
+_MNQ_MARGIN_DROP_CONFIRM = 2400.0
+# Bumped 4s→12s after 2026-05-01 09:00 incident: TV took ~10s to surface the
+# position rendered after a market order, the 4s window orphaned the trade.
+_ORDER_ACCEPTANCE_TIMEOUT_S = 12.0
 
-    Returns (accepted, reason). reason is 'executed', 'rejected_funds', 'rejected',
-    'unknown'. If the toast scan is inconclusive, falls back to checking whether
-    a position now exists on TV.
+
+async def _check_order_acceptance(
+    tv,
+    before_snapshot: str,
+    before_avail: Optional[float] = None,
+    timeout: float = _ORDER_ACCEPTANCE_TIMEOUT_S,
+) -> tuple[bool, str]:
+    """Wait up to `timeout` for any of: toast confirmation, position visible, or
+    margin drop consistent with one MNQ fill.
+
+    Returns (accepted, reason). reasons:
+      'executed'             — toast said "Market order executed"
+      'position_visible'     — tv_get_positions reported a position
+      'margin_drop_confirmed'— available_funds dropped >= one MNQ margin
+      'rejected_funds'       — toast said rejected: not enough funds
+      'rejected'             — toast said rejected (other)
+      'no_position_after_submit' — timeout, none of the above triggered
+
+    The three positive signals run in parallel each iteration so whichever TV
+    surfaces first wins. Toast text is unreliable (race / locale / class hash);
+    margin drop is reliable but lags ~5–10s; position rows lag the most.
     """
-    outcome = await _check_order_outcome(tv, before_snapshot, timeout)
-    if outcome == "executed":
-        return (True, "executed")
-    if outcome in ("rejected_funds", "rejected"):
-        return (False, outcome)
-    # outcome == 'unknown' — fall back to position-state probe
-    has_pos = await _has_open_position(tv)
-    if has_pos is True:
-        return (True, "position_visible")
-    if has_pos is False:
-        return (False, "no_position_after_submit")
-    # Still unknown — log warning but treat as failure (safer)
-    return (False, "unknown")
+    import asyncio
+    import time as _time
+    start = _time.monotonic()
+    while _time.monotonic() - start < timeout:
+        # 1. Toast diff — fastest when it works
+        after = await _capture_toast_snapshot(tv)
+        new_text = after.replace(before_snapshot, "") if before_snapshot else after
+        if "Market order rejected" in new_text:
+            if "Not enough funds" in new_text or "margin exceeds" in new_text:
+                return (False, "rejected_funds")
+            return (False, "rejected")
+        if "Market order executed" in new_text:
+            return (True, "executed")
+
+        # 2. Position-state probe — combined position-row + margin-drop check
+        try:
+            pos_state = await tv_get_positions(tv)
+        except Exception:
+            pos_state = {}
+
+        if pos_state.get("has_position"):
+            return (True, "position_visible")
+
+        avail_now = pos_state.get("available_funds")
+        if (before_avail is not None and avail_now is not None
+                and (before_avail - avail_now) >= _MNQ_MARGIN_DROP_CONFIRM):
+            return (True, "margin_drop_confirmed")
+
+        await asyncio.sleep(0.5)
+
+    return (False, "no_position_after_submit")
 
 
 async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tuple[bool, str]:
@@ -1083,7 +1206,11 @@ def get_active_orders() -> dict:
 # via main.py scheduler.
 
 _RECONCILE_LAST_DRIFT_ALERT_TS: float = 0.0
-_RECONCILE_DRIFT_ALERT_COOLDOWN = 300  # don't spam Telegram more than once per 5 min
+# 15-min cooldown: today's incident produced 1 alert/min for 5.5h = 100+
+# notifications. Lifting this from 5min→15min cuts the noise to ≤22/day in
+# the worst case, plus a single RESOLVED ping when drift clears.
+_RECONCILE_DRIFT_ALERT_COOLDOWN = 900
+_RECONCILE_DRIFT_ACTIVE: bool = False  # tracks whether last cycle was drifted; flipped → triggers RESOLVED
 
 
 async def reconcile_with_tv() -> dict:
@@ -1107,7 +1234,7 @@ async def reconcile_with_tv() -> dict:
         case from the 2026-04-29 bug). Don't auto-fix; require human review.
         Bot will refuse new entries until cleared.
     """
-    global _RECONCILE_LAST_DRIFT_ALERT_TS
+    global _RECONCILE_LAST_DRIFT_ALERT_TS, _RECONCILE_DRIFT_ACTIVE, _CIRCUIT_OPEN_UNTIL
 
     try:
         tv = await get_client()
@@ -1122,8 +1249,22 @@ async def reconcile_with_tv() -> dict:
     tv_signal = tv_pos.get("signal", "unknown")
     tv_has_pos = tv_pos.get("has_position", False)
 
-    # Case 1: in sync (most common path)
+    # Case 1: in sync (most common path). If we were drifted and just resolved,
+    # send a one-shot RESOLVED ping and reset the circuit breaker.
     if (local_count > 0) == bool(tv_has_pos):
+        if _RECONCILE_DRIFT_ACTIVE:
+            _RECONCILE_DRIFT_ACTIVE = False
+            # Drift cleared on its own (Zach manually closed, or adoption took).
+            # Reset circuit breaker so combiner can take new entries again.
+            _CIRCUIT_OPEN_UNTIL = 0.0
+            _FAILURE_WINDOW.clear()
+            try:
+                await telegram.send(
+                    "✅ <b>Drift RESOLVED</b> — bot's view matches TV again. "
+                    "Circuit breaker reset, new entries unblocked."
+                )
+            except Exception:
+                pass
         return {"in_sync": True, "drift_type": "none", "local_count": local_count,
                 "tv_count": tv_count, "tv_signal": tv_signal, "action_taken": "none"}
 
@@ -1163,26 +1304,90 @@ async def reconcile_with_tv() -> dict:
         return {"in_sync": False, "drift_type": "orphan_order", "local_count": local_count,
                 "tv_count": 0, "tv_signal": tv_signal, "action_taken": "cleaned_journal"}
 
-    # Case 3: phantom position — local says flat, TV says position open
-    # This is the dangerous case (2026-04-29 phantom-short bug). Don't auto-fix.
+    # Case 3: phantom position — local says flat, TV says position open.
+    # Attempt adoption first: if there was a recent failed-acceptance attempt
+    # (today's 09:00 bug), the position belongs to us and we just missed the
+    # fill confirmation. Adopt it, restore SL/TP management, journal it.
+    # Only if adoption isn't possible do we fall back to the original
+    # halt-and-alert path.
     if local_count == 0 and tv_has_pos:
+        _RECONCILE_DRIFT_ACTIVE = True
+        attempt = _claim_recent_failed_attempt()
+        if attempt is not None:
+            structure = read_state("structure") or {}
+            vix_at_open = structure.get("vix")
+            trade_id = attempt["trade_id"]
+
+            _active_orders[trade_id] = {
+                "direction": attempt["direction"],
+                "entry": attempt["entry"],
+                "stop": attempt["stop"],
+                "target_1": attempt["target_1"],
+                "target_2": attempt["target_2"],
+                "opened_at": datetime.now(ET).isoformat(),
+                "t1_hit": False,
+                "virtual_stop": None,
+                "vix_at_open": vix_at_open,
+                "adopted": True,
+            }
+            _persist_active_orders()
+
+            try:
+                journal.reopen_as_adopted(
+                    trade_id,
+                    note=f"reconcile detected fill {attempt['reason']}",
+                )
+            except Exception as e:
+                logger.error("reopen_as_adopted failed for trade %d: %s", trade_id, e)
+
+            logger.warning(
+                "RECONCILE ADOPTED phantom as trade %d: %s @ ~%.2f SL=%.2f TP=%.2f "
+                "(prior submit fail_reason=%s)",
+                trade_id, attempt["direction"], attempt["entry"],
+                attempt["stop"], attempt["target_2"], attempt["reason"],
+            )
+
+            try:
+                await telegram.send(
+                    f"🛡️ <b>Adopted phantom as trade {trade_id}</b>\n"
+                    f"{attempt['direction']} @ ~{attempt['entry']:.2f} "
+                    f"SL {attempt['stop']:.2f} TP {attempt['target_2']:.2f}\n"
+                    f"Reason: prior submit returned <code>{attempt['reason']}</code> "
+                    f"but TV filled it — SL/TP now managed by bot."
+                )
+            except Exception:
+                pass
+
+            # Reset circuit breaker — drift is resolved, no halt needed.
+            _CIRCUIT_OPEN_UNTIL = 0.0
+            _FAILURE_WINDOW.clear()
+            _RECONCILE_DRIFT_ACTIVE = False
+
+            return {"in_sync": True, "drift_type": "adopted", "local_count": 1,
+                    "tv_count": tv_count, "tv_signal": tv_signal,
+                    "action_taken": f"adopted_trade_{trade_id}"}
+
+        # No recent attempt to adopt — this is a true unknown phantom (manual
+        # entry, leftover from a prior session, or bug). Halt and alert
+        # (throttled to once per 15 min).
         logger.error(
             "RECONCILE DRIFT — PHANTOM POSITION DETECTED. "
             "Local active_orders empty but TV shows position(s) (count=%d, signal=%s, "
             "avail=%s). NOT auto-closing. New entries blocked until reviewed.",
             tv_count, tv_signal, tv_pos.get("available_funds"),
         )
-        # Trip circuit breaker so combiner.poll() refuses new orders
+        # Trip circuit breaker so combiner.poll() refuses new orders.
+        # 3x record_broker_failure tips count over the 3-failure threshold.
         record_broker_failure(f"phantom_position:tv_count={tv_count}")
         record_broker_failure(f"phantom_position:tv_count={tv_count}")
-        record_broker_failure(f"phantom_position:tv_count={tv_count}")  # 3x = circuit OPEN
+        record_broker_failure(f"phantom_position:tv_count={tv_count}")
 
         if now_ts - _RECONCILE_LAST_DRIFT_ALERT_TS > _RECONCILE_DRIFT_ALERT_COOLDOWN:
             try:
                 await telegram.notify_hard_block(
                     f"PHANTOM POSITION: TV shows {tv_count} open contract(s) but bot "
-                    f"thinks it's flat. Trading HALTED. Manually close the position on "
-                    f"TradingView or investigate. Circuit breaker tripped."
+                    f"thinks it's flat and has no recent submission attempt to claim. "
+                    f"Trading HALTED. Manually close on TradingView or investigate."
                 )
                 _RECONCILE_LAST_DRIFT_ALERT_TS = now_ts
             except Exception:
