@@ -6,7 +6,7 @@ NQ/MNQ futures ORB scalp system. Captures 15-min opening range (9:30-9:45 ET), w
 - Main controller: `C:\ZachAI\trading\main.py` (APScheduler, PID lock)
 - PID lock: `trading/state/orb.pid` — only ONE instance runs at a time
 - VBS auto-start: `scripts/ORBAgents.vbs` → git pull → python main.py
-- Watchdog: `scripts/ORBWatchdog.vbs` → `scripts/orb_watchdog.py` (auto-restart + Telegram alerts)
+- Watchdog: `scripts/ORBWatchdog.vbs` → `scripts/orb_watchdog.py` (auto-restart + Telegram alerts). Supervised by Task Scheduler `ORB_Watchdog_Heartbeat` — runs the VBS every 5 min; VBS dedupes so it's a no-op when alive, self-heals when dead.
 - Telegram bot: `C:\ZachAI\telegram-bridge\bot.py` (auto-start via Jarvis_Bot.vbs)
 - **Paper mode: ON** (NEVER change without explicit approval — one of the 3 hard stops)
 
