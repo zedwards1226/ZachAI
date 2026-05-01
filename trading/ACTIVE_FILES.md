@@ -36,6 +36,15 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `backtest/runner.py`
 - `backtest/replay.py`
 
+## Tests
+- `tests/test_cascade_second_break.py`
+- `tests/test_combiner_reversal.py`
+- `tests/test_config_loader.py`
+- `tests/test_learning_agent.py`
+
+## Research
+- `research/production_patterns_2026-04-30.md` — pattern audit from 5 parallel research subagents
+
 ## Runtime (gitignored)
 - `.env` — TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 - `state/orb.pid` — single-instance lock
