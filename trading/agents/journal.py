@@ -239,6 +239,30 @@ def mark_failed_placement(trade_id: int, reason: str = "") -> None:
     logger.warning("Trade %d marked FAILED_PLACEMENT (reason=%s)", trade_id, reason)
 
 
+def reopen_as_adopted(trade_id: int, note: str = "") -> bool:
+    """Flip a FAILED_PLACEMENT row back to OPEN — used when the reconcile loop
+    discovers the order actually filled and the bot adopts the orphaned position.
+
+    Returns True if a row was updated, False if no matching FAILED_PLACEMENT
+    row existed (caller should not adopt without a journal record).
+    """
+    new_note = f"Adopted from phantom: {note}" if note else "Adopted from phantom"
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE trades
+               SET outcome = 'OPEN',
+                   notes = ?
+             WHERE id = ? AND outcome = 'FAILED_PLACEMENT'
+            """,
+            (new_note, trade_id),
+        )
+        updated = cur.rowcount
+    if updated:
+        logger.warning("Trade %d reopened as ADOPTED (note=%s)", trade_id, note)
+    return updated > 0
+
+
 def log_signal_history(direction: str, price: float, score: int, size: str,
                        breakdown: dict, was_second_break: bool,
                        block_reason: Optional[str] = None) -> None:
