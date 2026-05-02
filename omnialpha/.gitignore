@@ -1,0 +1,36 @@
+# Secrets
+.env
+
+# Runtime state
+state/*.json
+state/*.lock
+state/*.db
+state/*.db-*
+*.pid
+
+# Logs
+logs/*.log
+logs/*.log.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Data — historical pulls can be huge, never commit
+data/raw/
+data/processed/
+*.parquet
+*.csv
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Backtest output
+backtest/results/
