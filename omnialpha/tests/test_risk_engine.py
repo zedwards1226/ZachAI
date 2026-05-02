@@ -33,7 +33,7 @@ def _market(volume=5000.0) -> MarketSnapshot:
         title="t", open_time="2026-03-01T00:00:00Z", close_time="2026-03-01T00:15:00Z",
         yes_ask_cents=25, yes_bid_cents=24, no_ask_cents=75, no_bid_cents=74,
         last_price_cents=25, volume_fp=volume, open_interest_fp=10.0,
-        seconds_to_close=600,
+        seconds_to_close=120,
     )
 
 

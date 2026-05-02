@@ -1,27 +1,18 @@
 """OmniAlpha main loop — APScheduler-driven, paper-mode by default.
 
-Jobs (all paper-safe in this version):
+Jobs (all paper-safe):
+  - strategy_poll             every 60s — scan live KXBTC15M markets via
+                                 public /markets endpoint, run enabled
+                                 strategies, place paper orders for any
+                                 approved entries
   - settle_open_trades        every 30s — settle any paper trades whose
                                  underlying markets resolved
-  - write_pnl_snapshot        every 60s — periodic equity curve point
-  - daily_summary             07:00 ET — Telegram summary of yesterday
-  - update_risk_state         every 60s — write our section to shared
-                                 risk_state.json so other bots can see
-                                 our P&L + open positions
+  - write_pnl_snapshot        every 60s — periodic equity curve point +
+                                 update our section in cross-bot risk_state.json
+  - daily_summary             07:00 ET — Telegram summary
 
-Strategy polling is NOT in this version. The first strategy
-(crypto_midband) currently runs against historical data only — its
-backtest is the validation. To actually place paper trades on live
-markets, we'd need an authenticated client + a live-data feed; that's
-the cutover step (separate session, with Zach's eyes on it).
-
-What this loop DOES achieve in paper mode:
-  - All scaffolding and lifecycle works
-  - Telegram alerts wired
-  - DB snapshots running
-  - Cross-bot risk-state coupling active
-  - Restart-safe: schedulers + DB survive crashes
-  - Auto-start via scripts/OmniAlpha.vbs
+Live-mode order placement is locked behind two flags in
+order_placer.py — paper mode is the only path that can actually fire.
 """
 from __future__ import annotations
 
@@ -36,14 +27,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from bots import telegram_alerts
+from bots.live_scanner import scan_and_trade
 from bots.risk_engine import update_my_section
 from bots.trade_monitor import settle_resolved_trades, write_pnl_snapshot
 from config import (
+    ENABLED_SECTORS,
     LOG_DIR,
     PAPER_MODE,
     STARTING_CAPITAL_USD,
 )
 from data_layer.database import get_conn, init_db
+from strategies.crypto_midband import CryptoMidBandStrategy
+
+# Sector → list of (Strategy instance, series_ticker_to_scan)
+# Empty if the sector isn't enabled in config.ENABLED_SECTORS.
+_STRATEGY_REGISTRY: dict[str, list[tuple]] = {
+    "crypto": [(CryptoMidBandStrategy(), "KXBTC15M")],
+}
 
 
 def _setup_logging() -> None:
@@ -61,6 +61,47 @@ def _setup_logging() -> None:
 
 
 log = logging.getLogger("omnialpha")
+
+
+def _current_capital_estimate() -> float:
+    """Best estimate of available trading capital. Subtracts open paper
+    stakes so Kelly sizing doesn't double-allocate."""
+    with get_conn(readonly=True) as conn:
+        row = conn.execute(
+            "SELECT "
+            "  COALESCE(SUM(CASE WHEN status IN ('won','lost') THEN pnl_usd END), 0) realized, "
+            "  COALESCE(SUM(CASE WHEN status='open' THEN stake_usd END), 0) open_risk "
+            "FROM trades"
+        ).fetchone()
+    return STARTING_CAPITAL_USD + float(row["realized"] or 0) - float(row["open_risk"] or 0)
+
+
+def job_strategy_poll() -> None:
+    """Scan live markets in every enabled sector, run each enabled
+    strategy, place paper orders on approved entries."""
+    if not ENABLED_SECTORS:
+        return  # bot is dormant by design until a sector is opted in
+    capital = _current_capital_estimate()
+    for sector in ENABLED_SECTORS:
+        for strategy, series_ticker in _STRATEGY_REGISTRY.get(sector, []):
+            try:
+                result = scan_and_trade(
+                    strategy=strategy,
+                    series_ticker=series_ticker,
+                    capital_usd=capital,
+                )
+                if result.get("placed", 0) > 0 or result.get("approved", 0) > 0:
+                    log.info(
+                        "scan %s/%s: %s",
+                        sector, series_ticker,
+                        ", ".join(f"{k}={v}" for k, v in result.items()),
+                    )
+            except Exception as e:
+                log.exception("strategy_poll %s/%s failed: %s",
+                              sector, series_ticker, e)
+                telegram_alerts.notify_error(
+                    f"strategy_poll {sector}/{series_ticker}", e
+                )
 
 
 def job_settle() -> None:
@@ -91,7 +132,10 @@ def job_pnl_snapshot() -> None:
 
 def job_daily_summary() -> None:
     try:
-        today = datetime.now().strftime("%Y-%m-%d")
+        # Match the scheduler's tz so "today" agrees with the cron's 07:00 ET fire
+        import pytz
+        et = pytz.timezone("America/New_York")
+        today = datetime.now(et).strftime("%Y-%m-%d")
         with get_conn(readonly=True) as conn:
             row = conn.execute(
                 "SELECT "
@@ -130,9 +174,13 @@ def main() -> int:
         return 1
 
     init_db()
-    log.info("DB ready: %s", "")
+    from config import DB_PATH
+    log.info("DB ready: %s", DB_PATH)
+    log.info("Enabled sectors: %s", ENABLED_SECTORS or "<none — bot dormant>")
 
     sched = BlockingScheduler(timezone="America/New_York")
+    sched.add_job(job_strategy_poll, "interval", seconds=60, id="strategy_poll",
+                  misfire_grace_time=120)
     sched.add_job(job_settle, "interval", seconds=30, id="settle",
                   misfire_grace_time=300)
     sched.add_job(job_pnl_snapshot, "interval", seconds=60, id="pnl_snap",

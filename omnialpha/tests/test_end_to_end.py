@@ -114,7 +114,7 @@ def test_end_to_end_paper_trade_lifecycle(isolated_db):
         close_time=(datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
         yes_ask_cents=25, yes_bid_cents=24, no_ask_cents=75, no_bid_cents=74,
         last_price_cents=25, volume_fp=5000.0, open_interest_fp=50.0,
-        seconds_to_close=600,
+        seconds_to_close=120,  # within new 30-180s entry window
     )
     ctx = StrategyContext(
         capital_usd=100.0, open_positions_count=0,

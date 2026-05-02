@@ -40,13 +40,14 @@ Per master CLAUDE.md hygiene rule: every file in this directory MUST appear here
 ## `dashboard/`
 - `app.py` — Streamlit, port 8502, read-only
 
-## `tests/`
+## `tests/` (50 tests passing)
 - `__init__.py`
 - `test_kalshi_public.py` — 6 tests (sector classification, market row mapping, pagination)
-- `test_calibration.py` — 6 tests (Brier, log loss, bin computation)
-- `test_strategy_midband.py` — 10 tests (band classification, gates, Kelly scaling)
+- `test_calibration.py` — 7 tests (Brier, log loss, bin computation)
+- `test_strategy_midband.py` — 13 tests (band classification, gates, Kelly scaling, dropped-bands, entry-window)
 - `test_risk_engine.py` — 10 tests (every gate, contract clamping, cross-bot state)
 - `test_order_placer.py` — 4 tests (paper writes correctly, live refused without explicit flag)
+- `test_live_scanner.py` — 9 tests (snapshot conversion, scan-and-trade, already-taken, HTTP failure)
 - `test_end_to_end.py` — 1 test, full lifecycle (strategy → risk → place → settle → P&L)
 
 ## `state/` (gitignored)

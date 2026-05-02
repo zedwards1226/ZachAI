@@ -64,8 +64,15 @@ def check_entry(
     decision: EntryDecision,
     market: MarketSnapshot,
     context: StrategyContext,
+    *,
+    skip_db_gates: bool = False,
 ) -> RiskCheckResult:
-    """Run all gates. Return verdict for the runner."""
+    """Run all gates. Return verdict for the runner.
+
+    `skip_db_gates=True` — for backtest replay: skip gates that query the
+    live trades table. Otherwise the backtest's view of "today's sector
+    trade count" leaks live-DB state and results aren't reproducible.
+    """
 
     # Gate 1: paper mode
     if not PAPER_MODE:
@@ -138,23 +145,48 @@ def check_entry(
             clamped_contracts=0,
         )
 
-    # Gate 5b: per-sector daily trade cap (don't burn the day on one sector)
-    today_in_sector = _count_today_trades_in_sector(context.sector)
-    if today_in_sector >= MAX_TRADES_PER_SECTOR_PER_DAY:
-        return RiskCheckResult(
-            approved=False,
-            reason="sector_daily_trade_cap",
-            detail=f"sector {context.sector}: {today_in_sector} trades today (cap {MAX_TRADES_PER_SECTOR_PER_DAY})",
-            clamped_contracts=0,
-        )
+    # Gate 5b: per-sector daily trade cap (don't burn the day on one sector).
+    # Skipped during backtest replay so we don't leak live-DB state into
+    # offline runs.
+    if not skip_db_gates:
+        today_in_sector = _count_today_trades_in_sector(context.sector)
+        if today_in_sector >= MAX_TRADES_PER_SECTOR_PER_DAY:
+            return RiskCheckResult(
+                approved=False,
+                reason="sector_daily_trade_cap",
+                detail=f"sector {context.sector}: {today_in_sector} trades today (cap {MAX_TRADES_PER_SECTOR_PER_DAY})",
+                clamped_contracts=0,
+            )
 
-    # Gate 6: cross-bot risk state — read shared file, refuse if aggregate breached
-    cross_bot = _read_cross_bot_state()
-    if cross_bot.get("halt_all"):
+    # Gate 6: cross-bot risk state — read shared file, refuse if aggregate breached.
+    # Same skip_db_gates rationale: backtest doesn't share risk state with
+    # production bots.
+    if not skip_db_gates:
+        cross_bot = _read_cross_bot_state()
+        if cross_bot.get("halt_all"):
+            return RiskCheckResult(
+                approved=False,
+                reason="cross_bot_halt",
+                detail=f"shared risk_state.halt_all set: {cross_bot.get('reason', 'unknown')}",
+                clamped_contracts=0,
+            )
+
+    # Gate 7: aggregate open risk — don't allow open stake to exceed 50% of
+    # capital regardless of per-trade cap. Prevents N×$20 over-leverage
+    # when MAX_CONCURRENT_POSITIONS would let it happen.
+    # Computed from context.open_positions_count × per_trade_cap is too
+    # pessimistic; the snapshot job already pushes open_risk_usd into the
+    # cross-bot state. For now use a conservative heuristic.
+    new_stake_usd = clamped * (decision.price_cents / 100.0)
+    estimated_open_usd = context.open_positions_count * PER_TRADE_MAX_RISK_USD
+    if (estimated_open_usd + new_stake_usd) > (context.capital_usd * 0.5):
         return RiskCheckResult(
             approved=False,
-            reason="cross_bot_halt",
-            detail=f"shared risk_state.halt_all set: {cross_bot.get('reason', 'unknown')}",
+            reason="aggregate_open_risk",
+            detail=(
+                f"open_risk_estimate ${estimated_open_usd:.2f} + new stake "
+                f"${new_stake_usd:.2f} > 50% of capital ${context.capital_usd:.2f}"
+            ),
             clamped_contracts=0,
         )
 

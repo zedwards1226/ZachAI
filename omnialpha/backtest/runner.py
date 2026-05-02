@@ -24,8 +24,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
+
+# Backtest decision moment: how many seconds before close the strategy
+# evaluates the market. Matches live-scanner policy (enter in the last
+# few minutes where the calibration distribution actually applies).
+BACKTEST_DECISION_OFFSET_S = 120
 
 from data_layer.database import get_conn
 from strategies.base import EntryDecision, MarketSnapshot, Strategy, StrategyContext
@@ -99,9 +104,17 @@ def _market_snapshot_from_db_row(row: dict) -> MarketSnapshot:
     yes_bid = max(0, yes_ask - 1)
     no_bid = max(0, no_ask - 1)
 
+    # Decision moment is "2 minutes before close" — matches live-scanner
+    # entry policy (only trade in the final stretch, where price ≈ closing
+    # distribution that the calibration was measured on). Without this the
+    # MIN_SECONDS_TO_CLOSE filter never trips in backtest, since (close - open)
+    # is the FULL market lifetime (900s for KXBTC15M), not time remaining.
     open_dt = _parse_iso(row["open_time"]) or datetime.now(timezone.utc)
     close_dt = _parse_iso(row["close_time"]) or open_dt
-    seconds_to_close = int((close_dt - open_dt).total_seconds())
+    decision_moment = close_dt - timedelta(seconds=BACKTEST_DECISION_OFFSET_S)
+    seconds_to_close = max(
+        0, int((close_dt - decision_moment).total_seconds())
+    )
 
     return MarketSnapshot(
         ticker=row["ticker"],
@@ -251,13 +264,14 @@ def run_backtest(
         if decision is None:
             continue
 
-        # Run through risk engine (same gates the live bot will apply)
+        # Run through risk engine (same gates the live bot will apply,
+        # except for ones that need live DB / cross-bot state which would
+        # leak production state into the backtest).
         if apply_risk_engine:
             from bots.risk_engine import check_entry
-            verdict = check_entry(decision, snap, ctx)
+            verdict = check_entry(decision, snap, ctx, skip_db_gates=True)
             if not verdict.approved:
                 continue
-            # Risk engine may have clamped contract count down to fit caps
             if verdict.clamped_contracts != decision.contracts:
                 from dataclasses import replace
                 decision = replace(decision, contracts=verdict.clamped_contracts)

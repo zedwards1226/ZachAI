@@ -43,11 +43,14 @@ MAX_TRADES_PER_SECTOR_PER_DAY: int = int(os.getenv("MAX_TRADES_PER_SECTOR_PER_DA
 
 # ─── Sector enables ───────────────────────────────────────────────────
 # Opt-in. Add a sector here only when its strategy module exists AND has
-# been paper-validated. Empty by default — the bot is dormant until a
-# sector strategy is wired and explicitly turned on.
-ENABLED_SECTORS: list[str] = []
-# Future values: "crypto" (KXBTC15M, KXETH*), "sports" (KXNBA*, KXMLB*, KXNHL*),
-# "politics" (KX presidential / congress / state), "economics" (CPI / NFP / FOMC).
+# been paper-validated.
+#
+# crypto: backtest 89.4% WR, +20.5% return on $100 over 7 days,
+#         $3.43 max DD, Sharpe 0.424, PF 2.91 (verified 2026-05-02 with
+#         tightened bands + 0.05 Kelly + 3-min entry window).
+#
+# Future values: "sports" (KXNBA*, KXMLB*, KXNHL*), "politics", "economics".
+ENABLED_SECTORS: list[str] = ["crypto"]
 
 # ─── Kalshi API endpoints ─────────────────────────────────────────────
 # /historical/* are PUBLIC and unauthenticated.

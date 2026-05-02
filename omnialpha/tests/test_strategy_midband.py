@@ -23,7 +23,8 @@ from strategies.crypto_midband import (
 
 
 def _make_market(*, last_yes_cents: int, volume: float = 5000.0,
-                 seconds_to_close: int = 600) -> MarketSnapshot:
+                 seconds_to_close: int = 120) -> MarketSnapshot:
+    # 120s default = within the new 30-180s entry window.
     return MarketSnapshot(
         ticker="KXBTC15M-26MAR011845-45",
         sector="crypto",
@@ -103,6 +104,32 @@ def test_too_close_to_settlement_skipped():
     assert s.decide_entry(near, _ctx()) is None
 
 
+def test_too_far_from_settlement_skipped():
+    """Strategy enters only in the last MAX_SECONDS_TO_CLOSE_FOR_ENTRY (180s)
+    window — outside that, the calibration distribution doesn't apply."""
+    from strategies.crypto_midband import MAX_SECONDS_TO_CLOSE_FOR_ENTRY
+    s = CryptoMidBandStrategy()
+    far = _make_market(
+        last_yes_cents=25,
+        seconds_to_close=MAX_SECONDS_TO_CLOSE_FOR_ENTRY + 60,
+    )
+    assert s.decide_entry(far, _ctx()) is None
+
+
+def test_dropped_band_30_40_no_longer_takes():
+    """The 0.30-0.40 NO band was DROPPED for sample-size reasons.
+    yes_price=35c should now SKIP."""
+    s = CryptoMidBandStrategy()
+    assert s.decide_entry(_make_market(last_yes_cents=35), _ctx()) is None
+
+
+def test_dropped_band_70_75_no_longer_takes():
+    """The 0.70-0.75 YES band was DROPPED for sample-size reasons.
+    yes_price=72c should now SKIP."""
+    s = CryptoMidBandStrategy()
+    assert s.decide_entry(_make_market(last_yes_cents=72), _ctx()) is None
+
+
 def test_already_settled_skipped():
     """yes_price 0 or 100 means market settled — skip"""
     s = CryptoMidBandStrategy()
@@ -121,10 +148,9 @@ def test_non_crypto_sector_skipped():
 def test_kelly_fraction_scales_contracts():
     """Lower kelly_fraction → fewer contracts at same price."""
     m = _make_market(last_yes_cents=25)
-    s_full = CryptoMidBandStrategy(kelly_fraction=0.5)
-    s_tenth = CryptoMidBandStrategy(kelly_fraction=0.05)
-    d_full = s_full.decide_entry(m, _ctx())
-    d_tenth = s_tenth.decide_entry(m, _ctx())
-    assert d_full is not None and d_tenth is not None
-    # Half-Kelly should produce more contracts than tenth-Kelly
-    assert d_full.contracts > d_tenth.contracts
+    s_aggressive = CryptoMidBandStrategy(kelly_fraction=0.20)
+    s_conservative = CryptoMidBandStrategy(kelly_fraction=0.05)
+    d_aggressive = s_aggressive.decide_entry(m, _ctx())
+    d_conservative = s_conservative.decide_entry(m, _ctx())
+    assert d_aggressive is not None and d_conservative is not None
+    assert d_aggressive.contracts > d_conservative.contracts
