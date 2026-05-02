@@ -75,6 +75,11 @@ def _isolate(monkeypatch):
     fake_telegram.send = AsyncMock(return_value=True)
     fake_telegram.notify_hard_block = AsyncMock(return_value=True)
     monkeypatch.setattr(tv_trader, "telegram", fake_telegram)
+    # CRITICAL: stop tests from writing to the live state/active_orders.json.
+    # `reconcile_with_tv()` calls `_persist_active_orders()` after adopting,
+    # which writes to disk. Without this stub, the adoption test would
+    # populate production state with fake trade rows.
+    monkeypatch.setattr(tv_trader, "_persist_active_orders", lambda: None)
     yield fake_telegram
     _reset_module_state()
 
