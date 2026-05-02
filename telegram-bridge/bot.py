@@ -448,6 +448,10 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "/status — Bot info\n"
         "/ping — Ping\n"
         "/chatid — Your chat ID\n\n"
+        "*ORB controls*\n"
+        "/orb_status — Active positions, today's P&L, paused flag\n"
+        "/orb_pause — Halt new ORB entries (existing positions still managed)\n"
+        "/orb_resume — Re-enable ORB entries\n\n"
         "_Approval requests appear as YES/NO buttons when Claude needs to use a tool._",
         parse_mode="Markdown",
     )
@@ -531,6 +535,97 @@ async def cmd_new(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Conversation reset. Next message starts fresh.")
     else:
         await update.message.reply_text("No active session to reset.")
+
+
+# ─── ORB control commands ───────────────────────────────────────────
+# /orb_status   read-only snapshot from state files + journal.db
+# /orb_pause    touches state/orb_paused.flag (combiner.poll() bails early)
+# /orb_resume   deletes the flag
+# /orb_flat is intentionally not implemented here yet — closing positions
+# requires tv_trader.py changes (auto-merge exception list); shipping
+# separately.
+ORB_STATE_DIR = Path("C:/ZachAI/trading/state")
+ORB_JOURNAL_DB = Path("C:/ZachAI/trading/trades_journal.db")
+ORB_PAUSE_FLAG = ORB_STATE_DIR / "orb_paused.flag"
+
+
+async def cmd_orb_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Snapshot of ORB: paused flag, active positions, today's trade count + P&L."""
+    if not is_authorized(update):
+        return
+
+    paused = ORB_PAUSE_FLAG.exists()
+
+    active = {}
+    try:
+        ao = json.loads((ORB_STATE_DIR / "active_orders.json").read_text(encoding="utf-8"))
+        active = ao.get("orders", {})
+    except Exception:
+        pass
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    trades_today = 0
+    pnl_today = 0.0
+    try:
+        import sqlite3
+        with sqlite3.connect(str(ORB_JOURNAL_DB)) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(pnl_after_slippage), 0) FROM trades "
+                "WHERE date = ? AND outcome NOT IN ('OPEN', 'FAILED_PLACEMENT')",
+                (today,),
+            ).fetchone()
+            if row:
+                trades_today, pnl_today = row[0], float(row[1] or 0.0)
+    except Exception as e:
+        log.warning("orb_status: journal read failed: %s", e)
+
+    lines = [
+        "*ORB Status*",
+        f"Paused: {'🛑 YES' if paused else '✅ NO'}",
+        f"Active positions: {len(active)}",
+    ]
+    for tid, o in active.items():
+        adopted = " (adopted)" if o.get("adopted") else ""
+        try:
+            lines.append(
+                f"  • {tid}: {o.get('direction')} @ {float(o.get('entry')):.2f} "
+                f"SL {float(o.get('stop')):.2f} TP {float(o.get('target_2')):.2f}{adopted}"
+            )
+        except Exception:
+            lines.append(f"  • {tid}: {o}{adopted}")
+    lines.append(f"Today: {trades_today} trade(s), P&L ${pnl_today:+.2f}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_orb_pause(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Halt new ORB entries until /orb_resume. Existing positions keep being managed."""
+    if not is_authorized(update):
+        return
+    try:
+        ORB_PAUSE_FLAG.touch()
+        await update.message.reply_text(
+            "🛑 ORB *paused*. New entries blocked. Existing positions still managed by trade monitor.\n"
+            "Use /orb_resume to re-enable.",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Failed to pause: {e}")
+
+
+async def cmd_orb_resume(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resume ORB entries — deletes the pause flag."""
+    if not is_authorized(update):
+        return
+    if ORB_PAUSE_FLAG.exists():
+        try:
+            ORB_PAUSE_FLAG.unlink()
+            await update.message.reply_text("✅ ORB *resumed*. New entries unblocked.",
+                                            parse_mode="Markdown")
+        except Exception as e:
+            await update.message.reply_text(f"Failed to resume: {e}")
+    else:
+        await update.message.reply_text("ORB was not paused.")
 
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     config = load_config()
@@ -644,6 +739,9 @@ def main() -> None:
     app.add_handler(CommandHandler("ping",   cmd_ping))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(CommandHandler("new",    cmd_new))
+    app.add_handler(CommandHandler("orb_status", cmd_orb_status))
+    app.add_handler(CommandHandler("orb_pause",  cmd_orb_pause))
+    app.add_handler(CommandHandler("orb_resume", cmd_orb_resume))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

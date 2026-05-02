@@ -126,6 +126,13 @@ async def poll() -> Optional[dict]:
     if now < session_start or now > session_end:
         return None
 
+    # Manual pause via Telegram /orb_pause — touches state/orb_paused.flag.
+    # Does NOT affect monitor_trades; existing positions keep their SL/TP
+    # management. Only blocks new entry signals.
+    from config import STATE_DIR
+    if (STATE_DIR / "orb_paused.flag").exists():
+        return None
+
     # One position at a time — block new entries while any existing position is open.
     # Two checks: local active_orders (fast) AND TV-live query (authoritative).
     # If they disagree, TV wins — but log the drift for the reconciliation loop.
