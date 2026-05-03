@@ -113,10 +113,23 @@ def _current_capital_estimate() -> float:
 
 def job_strategy_poll() -> None:
     """Scan live markets in every enabled sector, run each enabled
-    strategy, place paper orders on approved entries."""
+    strategy, place paper orders on approved entries.
+
+    Writes the per-pass result to state/last_scan.json so the dashboard
+    can show what the bot is currently looking at.
+    """
     if not ENABLED_SECTORS:
         return  # bot is dormant by design until a sector is opted in
+    import json
+    from datetime import datetime, timezone
+    from config import BASE_DIR
     capital = _current_capital_estimate()
+    pass_summary: dict = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "capital_usd": capital,
+        "scan_interval_s": 60,
+        "by_series": {},
+    }
     for sector in ENABLED_SECTORS:
         for strategy, series_ticker in _STRATEGY_REGISTRY.get(sector, []):
             try:
@@ -125,6 +138,11 @@ def job_strategy_poll() -> None:
                     series_ticker=series_ticker,
                     capital_usd=capital,
                 )
+                pass_summary["by_series"][series_ticker] = {
+                    "sector": sector,
+                    "strategy": strategy.name,
+                    **{k: v for k, v in result.items()},
+                }
                 if result.get("placed", 0) > 0 or result.get("approved", 0) > 0:
                     log.info(
                         "scan %s/%s: %s",
@@ -134,9 +152,22 @@ def job_strategy_poll() -> None:
             except Exception as e:
                 log.exception("strategy_poll %s/%s failed: %s",
                               sector, series_ticker, e)
+                pass_summary["by_series"][series_ticker] = {
+                    "sector": sector,
+                    "strategy": strategy.name,
+                    "error": str(e)[:200],
+                }
                 telegram_alerts.notify_error(
                     f"strategy_poll {sector}/{series_ticker}", e
                 )
+    # Persist the latest scan for dashboard consumption. Best-effort —
+    # never let dashboard plumbing break the trading loop.
+    try:
+        scan_state_file = BASE_DIR / "state" / "last_scan.json"
+        scan_state_file.parent.mkdir(parents=True, exist_ok=True)
+        scan_state_file.write_text(json.dumps(pass_summary, indent=2), encoding="utf-8")
+    except Exception as e:
+        log.warning("could not write last_scan.json: %s", e)
 
 
 def job_settle() -> None:

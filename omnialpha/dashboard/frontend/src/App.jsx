@@ -5,6 +5,7 @@ import OpenPositions from './components/OpenPositions'
 import ActivityRail from './components/ActivityRail'
 import EquityChart from './components/EquityChart'
 import StrategyCards from './components/StrategyCards'
+import LiveScan from './components/LiveScan'
 
 /** Custom hook: poll a JSON endpoint at a fixed interval. */
 function usePoll(path, intervalMs = 5000) {
@@ -38,6 +39,7 @@ export default function App() {
   const { data: activity } = usePoll('/api/activity', 5000)
   const { data: equity } = usePoll('/api/equity', 30000)
   const { data: strategies } = usePoll('/api/strategies', 15000)
+  const { data: scan } = usePoll('/api/scan', 5000)
 
   return (
     <div className="min-h-screen bg-bg flex flex-col">
@@ -59,7 +61,7 @@ export default function App() {
               points={equity?.points ?? []}
               startingCapital={summary?.starting_capital_usd ?? 100}
             />
-            <StrategyCards strategies={strategies?.strategies ?? []} />
+            <StrategyCards strategies={strategies?.strategies ?? []} liveScan={scan} />
           </div>
           <div>
             <ActivityRail entries={activity?.entries ?? []} />

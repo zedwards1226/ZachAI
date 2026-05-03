@@ -1,5 +1,6 @@
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts'
 import { Layers } from 'lucide-react'
+import LiveScan from './LiveScan'
 
 const SECTOR_COLOR = {
   crypto: '#fbbf24',
@@ -84,7 +85,7 @@ function StrategyCard({ s }) {
   )
 }
 
-export default function StrategyCards({ strategies }) {
+export default function StrategyCards({ strategies, liveScan }) {
   return (
     <div className="rounded-xl gradient-card border overflow-hidden" style={{ borderColor: '#2a2a3a' }}>
       <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid #2a2a3a' }}>
@@ -96,17 +97,20 @@ export default function StrategyCards({ strategies }) {
           {strategies.length}
         </span>
       </div>
-      {strategies.length === 0 ? (
-        <div className="px-4 py-6 text-xs text-center" style={{ color: '#64748b' }}>
-          No strategies running yet.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3">
-          {strategies.map((s) => (
-            <StrategyCard key={s.strategy} s={s} />
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3">
+        {/* Live-scan tile slots into the strategies grid as the first cell so
+            the empty spot becomes a useful "what's the bot doing right now"
+            view instead of dead air. */}
+        {liveScan !== undefined && <LiveScan scan={liveScan} />}
+        {strategies.map((s) => (
+          <StrategyCard key={s.strategy} s={s} />
+        ))}
+        {strategies.length === 0 && liveScan === undefined && (
+          <div className="px-4 py-6 text-xs text-center col-span-full" style={{ color: '#64748b' }}>
+            No strategies running yet.
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
-from config import DB_PATH, PAPER_MODE, STARTING_CAPITAL_USD
+from config import BASE_DIR, DB_PATH, PAPER_MODE, STARTING_CAPITAL_USD
 from data_layer.database import get_conn
 from dashboard.feeds import fetch_crypto_history, fetch_crypto_prices
 
@@ -313,6 +313,80 @@ def api_strategies():
                 "curve": curve[-50:],  # last 50 points only
             })
     return jsonify({"strategies": out})
+
+
+@app.route("/api/scan")
+def api_scan():
+    """Latest scanner pass — what the bot looked at, what it decided,
+    what (if anything) blocked it. Backed by state/last_scan.json which
+    the bot writes after every poll."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    scan_file = BASE_DIR / "state" / "last_scan.json"
+    if not scan_file.exists():
+        return jsonify({
+            "ok": False,
+            "reason": "no_scan_yet",
+            "message": "Bot hasn't completed its first scan pass yet.",
+        })
+    try:
+        data = _json.loads(scan_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        return jsonify({"ok": False, "reason": "parse_error", "message": str(e)})
+
+    # Compute time-since + next-in
+    age_s = None
+    next_in_s = None
+    try:
+        ts = datetime.fromisoformat(data["ts"].replace("Z", "+00:00"))
+        age_s = (datetime.now(timezone.utc) - ts).total_seconds()
+        interval = float(data.get("scan_interval_s", 60))
+        next_in_s = max(0, interval - age_s)
+    except Exception:
+        pass
+
+    # Aggregate the per-series breakdown into a one-line "why no trade"
+    by_series = data.get("by_series", {})
+    total_scanned = sum(s.get("scanned", 0) for s in by_series.values())
+    total_decisions = sum(s.get("decisions", 0) for s in by_series.values())
+    total_approved = sum(s.get("approved", 0) for s in by_series.values())
+    total_placed = sum(s.get("placed", 0) for s in by_series.values())
+    total_blocked = sum(
+        sum(v for k, v in s.items() if k.startswith("blocked_"))
+        for s in by_series.values()
+    )
+
+    if total_placed > 0:
+        reason = f"Just placed {total_placed} new trade(s) on the last pass."
+    elif total_approved > 0:
+        reason = f"{total_approved} entry(ies) approved last pass — should appear on the next settle."
+    elif total_decisions > 0 and total_blocked > 0:
+        reason = f"{total_decisions} markets matched a band but the risk engine blocked all of them."
+    elif total_decisions == 0 and total_scanned > 0:
+        reason = (
+            f"Scanned {total_scanned} markets across {len(by_series)} series — none in the "
+            "0.20-0.30 NO band or 0.75-0.85 YES band right now, or none inside the entry window."
+        )
+    else:
+        reason = "No markets returned from the Kalshi scan (may be a transient API blip)."
+
+    return jsonify({
+        "ok": True,
+        "ts": data.get("ts"),
+        "age_seconds": age_s,
+        "next_scan_in_seconds": next_in_s,
+        "capital_usd": data.get("capital_usd"),
+        "by_series": by_series,
+        "totals": {
+            "scanned": total_scanned,
+            "decisions": total_decisions,
+            "approved": total_approved,
+            "placed": total_placed,
+            "blocked": total_blocked,
+        },
+        "why_no_trade": reason,
+    })
 
 
 @app.route("/api/activity")
