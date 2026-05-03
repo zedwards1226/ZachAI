@@ -2,11 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "weatheralpha-dashboard",
+      "name": "omnialpha-dashboard",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["serve.py"],
-      "cwd": "kalshi/dashboard/backend",
-      "port": 3001
+      "runtimeArgs": ["C:/ZachAI/omnialpha/dashboard/backend/serve.py"],
+      "port": 8503
     }
   ]
 }
