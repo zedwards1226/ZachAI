@@ -78,13 +78,16 @@ No paid data feeds. No PMXT relay. No third-party data brokers. Everything Zach 
 5. **CLV grading** — auto-pause underperforming sectors (mirrors WA's learning-agent city pause)
 6. **Hedge-to-lock** — buy opposite side at favorable price to lock partial profit, free capital faster
 
-## RISK CAPS (planned)
-- Per-trade max risk: $20 (small while paper-validating)
-- Daily max loss: $50 across all sectors
-- Weekly max loss: $150
+## RISK CAPS (paper, $500 bankroll, growth-with-risk-management)
+- Starting capital: $500 (paper)
+- Per-trade max risk: $25 (5% of starting capital; matches Kelly 0.05 frac × $500 exactly so the cap doesn't artificially clip)
+- Daily max loss: $50 (10% of starting capital — circuit breaker, halts new entries for the day)
+- Weekly max loss: $100 (20% of starting capital — kill switch)
 - Max concurrent positions: 8
-- Max trades per sector per day: 5
+- Max trades per sector per day: 20 (three crypto strategies share the sector)
 - Sectors must be enabled per-sector via config — opt-in, not opt-out
+
+Capital scales naturally with realized P&L: `capital_usd = STARTING_CAPITAL_USD + realized − open_risk`, and Kelly stake recomputes off the live capital each scan. As the account grows, position sizes grow with it; the absolute USD caps stay fixed until the next review (re-tune when capital crosses 1.5× starting).
 
 Subject to revision as the bot proves itself in paper.
 
