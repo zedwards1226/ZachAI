@@ -68,23 +68,37 @@ def test_paper_mode_off_blocks(monkeypatch):
 
 
 def test_per_trade_cap_clamps_contracts():
-    """PER_TRADE_MAX_RISK_USD=20 → at 25c entry, max contracts = 20/0.25 = 80.
-    We propose 10 contracts (under the cap), should pass with no clamp."""
-    from bots import risk_engine
-    monkeypatch_clamp = type("M", (), {})()  # no-op
-    v = risk_engine.check_entry(_decision(contracts=10, price_cents=25), _market(), _ctx())
+    """At capital=$100, default 5% pct → cap=$5 (= floor). Price 25c → max
+    contracts = 5/0.25 = 20. We propose 10 contracts (under the cap),
+    should pass with no clamp."""
+    v = _import_re().check_entry(_decision(contracts=10, price_cents=25), _market(), _ctx())
     assert v.approved
     assert v.clamped_contracts == 10
 
 
-def test_per_trade_cap_clamps_when_exceeded(monkeypatch):
-    from bots import risk_engine
-    # Force a tiny cap to trigger clamping
-    monkeypatch.setattr(risk_engine, "PER_TRADE_MAX_RISK_USD", 5.0)
-    v = risk_engine.check_entry(_decision(contracts=100, price_cents=25), _market(), _ctx())
+def test_per_trade_cap_clamps_when_exceeded():
+    """At capital=$100, default 5% pct → cap=$5 (= floor). Price 25c
+    → max contracts = 5/0.25 = 20. Propose 100, expect clamp to 20."""
+    v = _import_re().check_entry(_decision(contracts=100, price_cents=25), _market(), _ctx())
     assert v.approved
-    # cap=5, price=0.25 → max contracts = 20
     assert v.clamped_contracts == 20
+
+
+def test_per_trade_cap_compounds_with_capital():
+    """At capital=$1000, 5% pct → cap=$50. Price 25c → max contracts = 200.
+    Verifies the cap actually scales with the bankroll."""
+    v = _import_re().check_entry(
+        _decision(contracts=300, price_cents=25),
+        _market(),
+        _ctx(capital_usd=1000.0),
+    )
+    assert v.approved
+    assert v.clamped_contracts == 200
+
+
+def _import_re():
+    from bots import risk_engine
+    return risk_engine
 
 
 def test_liquidity_floor_blocks():

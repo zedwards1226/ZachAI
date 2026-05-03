@@ -29,14 +29,17 @@ from pathlib import Path
 from typing import Optional
 
 from config import (
-    DAILY_MAX_LOSS_USD,
     MAX_CONCURRENT_POSITIONS,
     MAX_TRADES_PER_SECTOR_PER_DAY,
     PAPER_MODE,
-    PER_TRADE_MAX_RISK_USD,
     SHARED_RISK_STATE,
-    WEEKLY_MAX_LOSS_USD,
+    daily_loss_cap_usd,
+    per_trade_cap_usd,
+    weekly_loss_cap_usd,
 )
+# Used in update_my_section() global-halt threshold; live capital not in
+# scope there, so use a fixed $50 floor as the reference (worst case).
+_GLOBAL_HALT_DAILY_CAP_USD = 50.0
 from data_layer.database import get_conn
 from strategies.base import EntryDecision, MarketSnapshot, StrategyContext
 
@@ -83,7 +86,9 @@ def check_entry(
             clamped_contracts=0,
         )
 
-    # Gate 2: per-trade $ cap → clamp contracts
+    # Gate 2: per-trade $ cap (compounding) → clamp contracts.
+    # Cap is computed live from current capital × pct, so position sizes
+    # grow as the account grows and shrink during drawdowns.
     # max_loss for a binary YES/NO bet at price p, n contracts = n × p × $1
     # (since worst case the contract goes to 0).
     p = decision.price_cents / 100.0
@@ -94,13 +99,14 @@ def check_entry(
             detail=f"Decision had price_cents={decision.price_cents}",
             clamped_contracts=0,
         )
-    max_contracts_by_dollar_cap = max(1, int(PER_TRADE_MAX_RISK_USD / p))
+    per_trade_cap = per_trade_cap_usd(context.capital_usd)
+    max_contracts_by_dollar_cap = max(1, int(per_trade_cap / p))
     clamped = min(decision.contracts, max_contracts_by_dollar_cap)
     if clamped == 0:
         return RiskCheckResult(
             approved=False,
             reason="per_trade_cap_excludes_min_size",
-            detail=f"PER_TRADE_MAX_RISK_USD ${PER_TRADE_MAX_RISK_USD} cannot fit even 1 contract at {decision.price_cents}c",
+            detail=f"per-trade cap ${per_trade_cap:.2f} (live) cannot fit even 1 contract at {decision.price_cents}c",
             clamped_contracts=0,
         )
 
@@ -122,19 +128,21 @@ def check_entry(
             clamped_contracts=0,
         )
 
-    # Gate 5: drawdown / loss caps
-    if -context.daily_realized_pnl_usd >= DAILY_MAX_LOSS_USD:
+    # Gate 5: drawdown / loss caps (compounding — % of live capital).
+    daily_cap = daily_loss_cap_usd(context.capital_usd)
+    weekly_cap = weekly_loss_cap_usd(context.capital_usd)
+    if -context.daily_realized_pnl_usd >= daily_cap:
         return RiskCheckResult(
             approved=False,
             reason="daily_loss_cap",
-            detail=f"daily loss ${context.daily_realized_pnl_usd:+.2f} exceeds cap ${DAILY_MAX_LOSS_USD}",
+            detail=f"daily loss ${context.daily_realized_pnl_usd:+.2f} exceeds cap ${daily_cap:.2f} (live)",
             clamped_contracts=0,
         )
-    if -context.weekly_realized_pnl_usd >= WEEKLY_MAX_LOSS_USD:
+    if -context.weekly_realized_pnl_usd >= weekly_cap:
         return RiskCheckResult(
             approved=False,
             reason="weekly_loss_cap",
-            detail=f"weekly loss ${context.weekly_realized_pnl_usd:+.2f} exceeds cap ${WEEKLY_MAX_LOSS_USD}",
+            detail=f"weekly loss ${context.weekly_realized_pnl_usd:+.2f} exceeds cap ${weekly_cap:.2f} (live)",
             clamped_contracts=0,
         )
     if context.consecutive_losses_in_sector >= MAX_CONSEC_LOSSES_BEFORE_PAUSE:
@@ -178,7 +186,7 @@ def check_entry(
     # pessimistic; the snapshot job already pushes open_risk_usd into the
     # cross-bot state. For now use a conservative heuristic.
     new_stake_usd = clamped * (decision.price_cents / 100.0)
-    estimated_open_usd = context.open_positions_count * PER_TRADE_MAX_RISK_USD
+    estimated_open_usd = context.open_positions_count * per_trade_cap
     if (estimated_open_usd + new_stake_usd) > (context.capital_usd * 0.5):
         return RiskCheckResult(
             approved=False,
@@ -275,7 +283,7 @@ def update_my_section(
         state["aggregate_daily_pnl_usd"] = agg_daily
         # Trip the global halt if aggregate daily loss breaches cap
         # (this is in addition to per-bot daily caps — defense in depth)
-        if -agg_daily >= DAILY_MAX_LOSS_USD * 2:  # 2× per-bot cap = global halt
+        if -agg_daily >= _GLOBAL_HALT_DAILY_CAP_USD * 2:  # 2× ref cap = global halt
             state["halt_all"] = True
             state["reason"] = (
                 f"aggregate daily loss ${agg_daily:+.2f} exceeded global cap"

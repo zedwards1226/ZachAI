@@ -33,13 +33,39 @@ ANTHROPIC_API_KEY: str | None = os.getenv("ANTHROPIC_API_KEY") or None
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN") or None
 TELEGRAM_CHAT_ID: str | None = os.getenv("TELEGRAM_CHAT_ID") or None
 
-# ─── Risk caps ────────────────────────────────────────────────────────
-# Paper-mode defaults — tune up only as the bot proves itself.
-PER_TRADE_MAX_RISK_USD: float = float(os.getenv("PER_TRADE_MAX_RISK_USD", "20"))
-DAILY_MAX_LOSS_USD: float = float(os.getenv("DAILY_MAX_LOSS_USD", "50"))
-WEEKLY_MAX_LOSS_USD: float = float(os.getenv("WEEKLY_MAX_LOSS_USD", "150"))
+# ─── Risk caps (compound — % of live capital, not fixed $) ────────────
+# Caps are derived at gate-eval time from context.capital_usd × pct, with
+# a hard USD floor so a deep drawdown can't degenerate the cap to pennies.
+# As the account grows, caps grow with it (compounding); as it shrinks,
+# caps shrink (auto-deleveraging).
+PER_TRADE_MAX_RISK_PCT: float = float(os.getenv("PER_TRADE_MAX_RISK_PCT", "0.05"))   # 5% of live capital
+DAILY_MAX_LOSS_PCT: float = float(os.getenv("DAILY_MAX_LOSS_PCT", "0.10"))           # 10% of live capital
+WEEKLY_MAX_LOSS_PCT: float = float(os.getenv("WEEKLY_MAX_LOSS_PCT", "0.20"))         # 20% of live capital
+
+# Hard USD floors — caps never drop below these regardless of how small
+# the account gets. Keeps the bot able to place a meaningful trade even
+# during deep drawdown / re-warmup.
+PER_TRADE_FLOOR_USD: float = float(os.getenv("PER_TRADE_FLOOR_USD", "5"))
+DAILY_FLOOR_USD: float = float(os.getenv("DAILY_FLOOR_USD", "10"))
+WEEKLY_FLOOR_USD: float = float(os.getenv("WEEKLY_FLOOR_USD", "20"))
+
 MAX_CONCURRENT_POSITIONS: int = int(os.getenv("MAX_CONCURRENT_POSITIONS", "8"))
 MAX_TRADES_PER_SECTOR_PER_DAY: int = int(os.getenv("MAX_TRADES_PER_SECTOR_PER_DAY", "20"))
+
+
+def per_trade_cap_usd(capital_usd: float) -> float:
+    """Live per-trade $ cap = max(floor, capital × pct)."""
+    return max(PER_TRADE_FLOOR_USD, capital_usd * PER_TRADE_MAX_RISK_PCT)
+
+
+def daily_loss_cap_usd(capital_usd: float) -> float:
+    """Live daily-loss $ cap = max(floor, capital × pct)."""
+    return max(DAILY_FLOOR_USD, capital_usd * DAILY_MAX_LOSS_PCT)
+
+
+def weekly_loss_cap_usd(capital_usd: float) -> float:
+    """Live weekly-loss $ cap = max(floor, capital × pct)."""
+    return max(WEEKLY_FLOOR_USD, capital_usd * WEEKLY_MAX_LOSS_PCT)
 
 # ─── Sector enables ───────────────────────────────────────────────────
 # Opt-in. Add a sector here only when its strategy module exists AND has
