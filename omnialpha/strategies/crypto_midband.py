@@ -13,10 +13,11 @@ Bands DROPPED from the previous version:
   0.70-0.75 (n=14): Wilson lower bound 60% — could be -edge. Too thin.
 
 Sizing:
-  - 0.05 fractional Kelly (was 0.10 — domain review flagged the 0.10
-    default as over-fit to one BTC regime). 0.05 still extracts edge,
-    survives shocks better.
-  - Capped at PER_TRADE_MAX_RISK_USD via the risk engine.
+  - 0.08 fractional Kelly (bumped 0.05 → 0.08 on 2026-05-03 to accelerate
+    growth toward $100/day target. Still well under full-Kelly; preserves
+    most of the variance protection while ~60% bigger bets.)
+  - Capped by per-trade risk pct in the risk engine. PER_TRADE_MAX_RISK_PCT
+    must be ≥ kelly_fraction or the cap clips the Kelly stake.
 
 Entry timing:
   - Only enter when 0 < seconds_to_close <= MAX_SECONDS_TO_CLOSE_FOR_ENTRY
@@ -79,7 +80,7 @@ class CryptoMidBandStrategy(Strategy):
 
     def __init__(
         self,
-        kelly_fraction: float = 0.05,
+        kelly_fraction: float = 0.08,
         *,
         name: str | None = None,
         no_bands: list[tuple[float, float, float]] | None = None,
@@ -88,9 +89,10 @@ class CryptoMidBandStrategy(Strategy):
         max_seconds_to_close: int | None = None,
         min_seconds_to_close: int | None = None,
     ):
-        # 0.05 = 1/20-Kelly. Validated as the variance/return sweet
-        # spot for crypto mid-band. P&L scales linearly with Kelly;
-        # risk does not.
+        # 0.08 ≈ 1/12.5-Kelly. Bumped from 0.05 on 2026-05-03 — 90.9% live
+        # WR over 22 trades + 95.1% blended backtest WR justified scaling
+        # bets up to accelerate growth. Still well under full-Kelly so
+        # variance protection remains intact.
         self.kelly_fraction = kelly_fraction
         if name is not None:
             self.name = name

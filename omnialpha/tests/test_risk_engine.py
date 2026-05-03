@@ -68,32 +68,31 @@ def test_paper_mode_off_blocks(monkeypatch):
 
 
 def test_per_trade_cap_clamps_contracts():
-    """At capital=$100, default 5% pct → cap=$5 (= floor). Price 25c → max
-    contracts = 5/0.25 = 20. We propose 10 contracts (under the cap),
-    should pass with no clamp."""
+    """At capital=$100, default 8% pct → cap=$8. Price 25c → max contracts
+    = 8/0.25 = 32. Propose 10 (under cap), should pass with no clamp."""
     v = _import_re().check_entry(_decision(contracts=10, price_cents=25), _market(), _ctx())
     assert v.approved
     assert v.clamped_contracts == 10
 
 
 def test_per_trade_cap_clamps_when_exceeded():
-    """At capital=$100, default 5% pct → cap=$5 (= floor). Price 25c
-    → max contracts = 5/0.25 = 20. Propose 100, expect clamp to 20."""
+    """At capital=$100, default 8% pct → cap=$8. Price 25c
+    → max contracts = 8/0.25 = 32. Propose 100, expect clamp to 32."""
     v = _import_re().check_entry(_decision(contracts=100, price_cents=25), _market(), _ctx())
     assert v.approved
-    assert v.clamped_contracts == 20
+    assert v.clamped_contracts == 32
 
 
 def test_per_trade_cap_compounds_with_capital():
-    """At capital=$1000, 5% pct → cap=$50. Price 25c → max contracts = 200.
+    """At capital=$1000, 8% pct → cap=$80. Price 25c → max contracts = 320.
     Verifies the cap actually scales with the bankroll."""
     v = _import_re().check_entry(
-        _decision(contracts=300, price_cents=25),
+        _decision(contracts=500, price_cents=25),
         _market(),
         _ctx(capital_usd=1000.0),
     )
     assert v.approved
-    assert v.clamped_contracts == 200
+    assert v.clamped_contracts == 320
 
 
 def _import_re():
