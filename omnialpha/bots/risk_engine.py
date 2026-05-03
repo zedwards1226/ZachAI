@@ -6,12 +6,13 @@ kills the trade.
 
 Gates:
   1. Paper-mode check       — refuse if PAPER_MODE flag is off without approval
-  2. Per-trade $ cap        — clamp contract count so max_loss <= PER_TRADE_MAX_RISK_USD
+  2. Per-trade $ cap        — clamp contracts so max_loss <= per_trade_cap_usd(capital)
   3. Liquidity              — refuse if market volume_fp < MIN_LIQUIDITY_FP
   4. Concentration          — refuse if open positions in this sector >= MAX_CONCURRENT
-  5. Drawdown / loss caps   — daily, weekly, consecutive losses. Refuse if breached
+  5. Drawdown / loss caps   — daily/weekly via daily_loss_cap_usd / weekly_loss_cap_usd
+                              (compounding — % of live capital). Plus consecutive losses.
   6. Cross-bot risk state   — read shared risk_state.json. If aggregate loss across all
-                              ZachAI bots breaches DAILY_MAX_LOSS_USD, refuse
+                              ZachAI bots breaches 2× daily cap, refuse.
 
 (Six gates total, not five. The 5-in-the-name comes from OctagonAI's original;
 adding cross-bot gates Zach asked for explicitly. The naming is intentional.)
@@ -37,9 +38,6 @@ from config import (
     per_trade_cap_usd,
     weekly_loss_cap_usd,
 )
-# Used in update_my_section() global-halt threshold; live capital not in
-# scope there, so use a fixed $50 floor as the reference (worst case).
-_GLOBAL_HALT_DAILY_CAP_USD = 50.0
 from data_layer.database import get_conn
 from strategies.base import EntryDecision, MarketSnapshot, StrategyContext
 
@@ -245,9 +243,15 @@ def update_my_section(
     daily_pnl_usd: float,
     weekly_pnl_usd: float,
     open_positions: int,
+    capital_usd: float,
     last_trade_ts: Optional[str] = None,
 ) -> None:
     """Write our section to risk_state.json, preserving other bots' data.
+
+    `capital_usd` is required so the global-halt threshold can compound
+    with the bankroll — otherwise halt would either false-trip when the
+    account grows (cap stale-low) or fail to fire during drawdown
+    (cap stale-high). Threshold: 2× live daily cap.
 
     Uses a sidecar .lock file as a coarse mutex. Best-effort — if locking
     fails we still write (the consequence is rare race-write churn, not
@@ -281,12 +285,16 @@ def update_my_section(
             for b in bots.values()
         )
         state["aggregate_daily_pnl_usd"] = agg_daily
-        # Trip the global halt if aggregate daily loss breaches cap
-        # (this is in addition to per-bot daily caps — defense in depth)
-        if -agg_daily >= _GLOBAL_HALT_DAILY_CAP_USD * 2:  # 2× ref cap = global halt
+        # Trip the global halt if aggregate daily loss breaches 2× live
+        # daily cap (defense in depth on top of per-bot daily caps).
+        # Cap is computed live from current capital so it scales with the
+        # account — won't false-trip after compounding nor stale during DD.
+        global_cap = daily_loss_cap_usd(capital_usd) * 2
+        if -agg_daily >= global_cap:
             state["halt_all"] = True
             state["reason"] = (
-                f"aggregate daily loss ${agg_daily:+.2f} exceeded global cap"
+                f"aggregate daily loss ${agg_daily:+.2f} exceeded global cap "
+                f"${global_cap:.2f} (2× live daily cap @ capital ${capital_usd:.2f})"
             )
         else:
             # Don't auto-clear halt_all; that requires manual reset

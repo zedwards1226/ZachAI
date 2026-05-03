@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from config import PAPER_MODE
+from config import PAPER_MODE, assert_paper_mode
 from data_layer.database import get_conn
 from strategies.base import EntryDecision
 
@@ -183,7 +183,15 @@ def place(
     kalshi_client=None,
     decision_id: Optional[int] = None,
 ) -> dict:
-    """Single entry point — dispatch to paper or live based on PAPER_MODE."""
+    """Single entry point — dispatch to paper or live based on PAPER_MODE.
+
+    HARD LOCK: assert_paper_mode() raises when PAPER_MODE is off. Live
+    cutover requires deleting this line in a separate, deliberate diff
+    (one of Zach's 3 hard stops). Until then, this guarantees that
+    NOTHING placed through this entry point can hit the live API, even
+    if a future call site bypasses the risk engine.
+    """
+    assert_paper_mode()
     if PAPER_MODE:
         return place_paper_order(
             decision=decision, market_ticker=market_ticker,

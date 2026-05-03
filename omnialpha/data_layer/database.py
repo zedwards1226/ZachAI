@@ -35,6 +35,10 @@ def get_conn(db_path: Path = DB_PATH, *, readonly: bool = False) -> Iterator[sql
         # URI mode lets the dashboard open without contention with the bot.
         uri = f"file:{db_path}?mode=ro"
         conn = sqlite3.connect(uri, uri=True)
+        # Even readonly connections can hit SQLITE_BUSY during a WAL
+        # checkpoint. 2s is plenty for a checkpoint to complete; without
+        # it, a coincident checkpoint raises OperationalError.
+        conn.execute("PRAGMA busy_timeout=2000")
     else:
         conn = sqlite3.connect(str(db_path))
         conn.execute("PRAGMA journal_mode=WAL")

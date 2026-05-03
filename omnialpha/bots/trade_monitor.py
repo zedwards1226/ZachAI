@@ -12,7 +12,6 @@ endpoint to see actual fills + settlement values.
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Iterable, Optional
@@ -75,7 +74,6 @@ def _market_result(ticker: str) -> Optional[dict]:
 
     # Update local DB row so future settles use the fast path
     try:
-        import json as _json
         with get_conn() as conn:
             conn.execute(
                 "UPDATE markets SET status=?, result=?, "

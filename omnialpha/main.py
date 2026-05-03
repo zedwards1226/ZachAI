@@ -153,12 +153,14 @@ def job_settle() -> None:
 def job_pnl_snapshot() -> None:
     try:
         snap = write_pnl_snapshot(starting_capital_usd=STARTING_CAPITAL_USD)
-        # Update cross-bot risk-state with our latest P&L
+        # Update cross-bot risk-state with our latest P&L. Pass live capital
+        # so the global-halt threshold (2× daily cap) compounds with the bot.
         update_my_section(
             bot="omnialpha",
             daily_pnl_usd=snap["realized_today"],
             weekly_pnl_usd=snap["realized_total"],   # rolling — refine later
             open_positions=snap["open_positions"],
+            capital_usd=_current_capital_estimate(),
             last_trade_ts=snap["timestamp"],
         )
     except Exception as e:
@@ -209,19 +211,36 @@ def main() -> int:
         return 1
 
     init_db()
-    from config import DB_PATH
+    from config import DB_PATH, PER_TRADE_MAX_RISK_PCT
     log.info("DB ready: %s", DB_PATH)
     log.info("Enabled sectors: %s", ENABLED_SECTORS or "<none — bot dormant>")
 
+    # Drift detector: per-trade cap must >= every strategy's Kelly fraction
+    # or the cap silently clips the natural Kelly stake. Surfaces config
+    # drift at startup so we don't discover it weeks later.
+    for sector_strats in _STRATEGY_REGISTRY.values():
+        for strat, _ in sector_strats:
+            kfrac = getattr(strat, "kelly_fraction", None)
+            if kfrac is not None and kfrac > PER_TRADE_MAX_RISK_PCT:
+                log.warning(
+                    "Strategy %s has kelly_fraction=%.3f > PER_TRADE_MAX_RISK_PCT=%.3f "
+                    "— per-trade cap will clip every Kelly stake from this strategy. "
+                    "Bump PER_TRADE_MAX_RISK_PCT or lower kelly_fraction to align.",
+                    strat.name, kfrac, PER_TRADE_MAX_RISK_PCT,
+                )
+
+    # max_instances=1 explicit on every job — APScheduler default is 1
+    # but stating it prevents accidental concurrent-scan bugs if the
+    # executor is ever swapped to a thread/process pool.
     sched = BlockingScheduler(timezone="America/New_York")
     sched.add_job(job_strategy_poll, "interval", seconds=60, id="strategy_poll",
-                  misfire_grace_time=120)
+                  max_instances=1, misfire_grace_time=120)
     sched.add_job(job_settle, "interval", seconds=30, id="settle",
-                  misfire_grace_time=300)
+                  max_instances=1, misfire_grace_time=300)
     sched.add_job(job_pnl_snapshot, "interval", seconds=60, id="pnl_snap",
-                  misfire_grace_time=300)
+                  max_instances=1, misfire_grace_time=300)
     sched.add_job(job_daily_summary, "cron", hour=7, minute=0,
-                  id="daily_summary", misfire_grace_time=3600)
+                  id="daily_summary", max_instances=1, misfire_grace_time=3600)
 
     telegram_alerts.notify_startup()
     log.info("Scheduler started")

@@ -17,7 +17,7 @@ Per master CLAUDE.md hygiene rule: every file in this directory MUST appear here
 - `kalshi_public.py` — unauthenticated `/historical/*` puller (no API key needed)
 - `kalshi_client.py` — RSA-PSS authenticated REST client (live only; not yet active)
 - `order_placer.py` — paper-order writer (live path exists but locked behind two flags)
-- `events_scanner.py` — universe scanner (currently reads from historical store)
+- `live_scanner.py` — live universe scanner — pulls Kalshi public markets, hands snapshots to strategies, places orders
 - `trade_monitor.py` — settles open paper trades + writes pnl_snapshots
 - `telegram_alerts.py` — Jarvis-bot send-only with [OmniAlpha] prefix
 - `risk_engine.py` — 5-gate pre-trade filter + cross-bot risk_state.json coupling

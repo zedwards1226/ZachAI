@@ -153,6 +153,7 @@ def test_update_my_section_writes_and_reads(tmp_path, monkeypatch):
         daily_pnl_usd=12.50,
         weekly_pnl_usd=88.00,
         open_positions=2,
+        capital_usd=500.0,
     )
     state = risk_engine._read_cross_bot_state()
     assert state["bots"]["omnialpha"]["daily_pnl_usd"] == 12.50

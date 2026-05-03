@@ -290,6 +290,13 @@ def scan_and_trade(
                 kalshi_client=None,
             )
             n_placed += 1
+            # Invalidate sector context so the next iteration in the same
+            # pass rebuilds open_positions_count from the DB and sees the
+            # fresh placement. Without this, the concentration gate +
+            # aggregate-open-risk gate use stale counts intra-pass and can
+            # over-place by N when multiple markets in the same sector pass
+            # the gates back-to-back.
+            ctx_cache.pop(snap.sector, None)
             stake = placement["stake_usd"]
             try:
                 telegram_alerts.notify_entry(
