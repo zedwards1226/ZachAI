@@ -176,6 +176,26 @@ def _is_winning(side: str, current_price: float, strike: float | None) -> bool |
     return above if (side or "").lower() == "yes" else (not above)
 
 
+def _seconds_until_close(raw_json: str) -> int | None:
+    """Extract close_time from raw market JSON and return seconds until close.
+    Returns None on parse failure, negative if already past."""
+    if not raw_json:
+        return None
+    try:
+        d = json.loads(raw_json)
+    except Exception:
+        return None
+    close_time = d.get("close_time")
+    if not close_time:
+        return None
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+        return int((dt - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return None
+
+
 @app.route("/api/positions")
 def api_positions():
     if not DB_PATH.exists():
@@ -221,7 +241,8 @@ def api_positions():
             "coin": coin,
             "current_price": current if current > 0 else None,
             "winning": _is_winning(r["side"] or "", current, strike),
-            "price_history": history[-30:],  # cap to keep payload small
+            "seconds_to_close": _seconds_until_close(r["market_raw"] or ""),
+            "price_history": history[-30:],
         })
     return jsonify({"positions": positions})
 
