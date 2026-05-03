@@ -1,5 +1,10 @@
 import { CheckCircle2, XCircle, HelpCircle } from 'lucide-react'
-import { LineChart, Line, ReferenceLine, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts'
+import LiveChart from './LiveChart'
+
+const TV_SYMBOL = {
+  bitcoin: 'BINANCE:BTCUSDT',
+  ethereum: 'BINANCE:ETHUSDT',
+}
 
 function StatusPill({ winning }) {
   if (winning === true) {
@@ -36,27 +41,7 @@ function PositionCard({ p }) {
   const winning = p.winning  // true / false / null
   const borderColor = winning === true ? '#26de81' : winning === false ? '#ff5e7d' : '#2a2a3a'
   const sideColor = p.side === 'yes' ? '#26de81' : '#ff5e7d'
-
-  // Recharts data: [{ts: ms, price}, ...]
-  const series = (p.price_history || []).map(([t, price]) => ({
-    t,
-    price,
-    label: new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-  }))
-
-  // Compute y-axis domain that includes both the recent path AND the strike
-  let yMin = null, yMax = null
-  if (series.length > 0) {
-    yMin = Math.min(...series.map(d => d.price))
-    yMax = Math.max(...series.map(d => d.price))
-    if (p.strike !== null && p.strike !== undefined) {
-      yMin = Math.min(yMin, p.strike)
-      yMax = Math.max(yMax, p.strike)
-    }
-    const pad = (yMax - yMin) * 0.05 || 1
-    yMin -= pad
-    yMax += pad
-  }
+  const tvSymbol = TV_SYMBOL[p.coin] || 'BINANCE:BTCUSDT'
 
   return (
     <div
@@ -108,52 +93,26 @@ function PositionCard({ p }) {
         </div>
       </div>
 
-      <div className="px-2 pb-2 pt-1" style={{ height: 130 }}>
-        {series.length > 1 ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} stroke="#2a2a3a" />
-              <YAxis
-                domain={[yMin, yMax]}
-                tick={{ fontSize: 10, fill: '#64748b' }}
-                stroke="#2a2a3a"
-                width={60}
-                tickFormatter={(v) => `$${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`}
-              />
-              <Tooltip
-                contentStyle={{ background: '#0a0a10', border: '1px solid #2a2a3a', fontSize: 12 }}
-                labelStyle={{ color: '#94a3b8' }}
-                formatter={(v) => [`$${v.toLocaleString('en-US', { maximumFractionDigits: 2 })}`, 'price']}
-              />
-              <Line
-                type="monotone"
-                dataKey="price"
-                stroke="#818cf8"
-                strokeWidth={2}
-                dot={false}
-                isAnimationActive={false}
-              />
-              {p.strike && (
-                <ReferenceLine
-                  y={p.strike}
-                  stroke={borderColor}
-                  strokeDasharray="3 3"
-                  label={{ value: `strike $${p.strike.toLocaleString('en-US', { maximumFractionDigits: 0 })}`, fill: '#94a3b8', fontSize: 10, position: 'right' }}
-                />
-              )}
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex items-center justify-center h-full text-xs" style={{ color: '#64748b' }}>
-            Loading price history…
-          </div>
-        )}
+      <div className="px-2 pb-2 pt-1">
+        <LiveChart symbol={tvSymbol} interval="1" height={300} containerId={`tv-pos-${p.id}`} />
+        <div className="px-2 pt-1 text-[10px] text-right" style={{ color: '#64748b' }}>
+          Live {p.coin === 'ethereum' ? 'ETH' : 'BTC'} via TradingView · strike ${p.strike?.toLocaleString('en-US', { maximumFractionDigits: 2 }) || '—'}
+        </div>
       </div>
     </div>
   )
 }
 
-export default function OpenPositions({ positions }) {
+function pickRecentSymbol(recentEntries) {
+  // Look at the most recent activity; if any ticker contains ETH, use ETH; else BTC.
+  const e = (recentEntries || []).find((x) => x.message)
+  if (e && /ETH/i.test(e.message)) return { symbol: 'BINANCE:ETHUSDT', label: 'ETH' }
+  return { symbol: 'BINANCE:BTCUSDT', label: 'BTC' }
+}
+
+
+export default function OpenPositions({ positions, recentEntries }) {
+  const { symbol, label } = pickRecentSymbol(recentEntries)
   return (
     <div>
       <div className="flex items-center gap-2 mb-3">
@@ -170,16 +129,19 @@ export default function OpenPositions({ positions }) {
 
       {positions.length === 0 ? (
         <div
-          className="rounded-xl gradient-card border p-6 text-center"
+          className="rounded-xl gradient-card border overflow-hidden"
           style={{ borderColor: '#2a2a3a' }}
         >
-          <div className="text-sm" style={{ color: '#94a3b8' }}>
-            No open positions.
+          <div className="px-4 py-3" style={{ borderBottom: '1px solid #2a2a3a' }}>
+            <div className="text-sm" style={{ color: '#94a3b8' }}>
+              No open positions — watching live {label}.
+            </div>
+            <div className="text-xs mt-1" style={{ color: '#64748b' }}>
+              Tracking the asset of your last trade. When a position opens, this switches to that position's coin live.
+            </div>
           </div>
-          <div className="text-xs mt-2" style={{ color: '#64748b' }}>
-            Bot is selective — only enters in the 20-30¢ NO band or 75-85¢ YES band,
-            in the last 3 minutes of a market's life. When a trade opens, the
-            strike-vs-price chart appears here.
+          <div className="px-2 pb-2 pt-2">
+            <LiveChart symbol={symbol} interval="1" height={360} containerId={`tv-watch-${label}`} />
           </div>
         </div>
       ) : (

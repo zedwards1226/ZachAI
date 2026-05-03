@@ -226,6 +226,74 @@ def api_positions():
     return jsonify({"positions": positions})
 
 
+@app.route("/api/equity")
+def api_equity():
+    """Capital-over-time series for the equity sparkline.
+    Returns the last 200 snapshots, downsampled if longer.
+    """
+    if not DB_PATH.exists():
+        return jsonify({"points": []})
+    points = []
+    with get_conn(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT timestamp, capital_usd, realized_total "
+            "FROM pnl_snapshots ORDER BY id DESC LIMIT 200"
+        ).fetchall()
+    rows = list(reversed(rows))  # chronological
+    for r in rows:
+        points.append({
+            "ts": r["timestamp"],
+            "capital_usd": float(r["capital_usd"] or 0),
+            "realized_total": float(r["realized_total"] or 0),
+        })
+    return jsonify({"points": points})
+
+
+@app.route("/api/strategies")
+def api_strategies():
+    """Per-strategy stats: W/L, P&L, last trade, micro-equity series."""
+    if not DB_PATH.exists():
+        return jsonify({"strategies": []})
+    out = []
+    with get_conn(readonly=True) as conn:
+        for s in conn.execute(
+            "SELECT strategy, sector, "
+            "  COUNT(*) AS n, "
+            "  SUM(CASE WHEN status='won' THEN 1 ELSE 0 END) AS w, "
+            "  SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END) AS l, "
+            "  SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS o, "
+            "  COALESCE(SUM(pnl_usd), 0) AS pnl, "
+            "  MAX(timestamp) AS last_ts "
+            "FROM trades GROUP BY strategy, sector "
+            "ORDER BY pnl DESC"
+        ).fetchall():
+            # Build cumulative P&L curve for this strategy
+            curve = []
+            cum = 0.0
+            for r in conn.execute(
+                "SELECT timestamp, pnl_usd FROM trades "
+                "WHERE strategy=? AND status IN ('won','lost') "
+                "ORDER BY id ASC",
+                (s["strategy"],),
+            ):
+                cum += float(r["pnl_usd"] or 0)
+                curve.append(cum)
+            wr = (s["w"] / max(s["w"] + s["l"], 1) * 100) if (s["w"] + s["l"]) else None
+            out.append({
+                "strategy": s["strategy"],
+                "sector": s["sector"],
+                "n": s["n"],
+                "wins": s["w"],
+                "losses": s["l"],
+                "open": s["o"],
+                "pnl_usd": float(s["pnl"]),
+                "win_rate_pct": wr,
+                "last_ts": s["last_ts"],
+                "curve": curve[-50:],  # last 50 points only
+            })
+    return jsonify({"strategies": out})
+
+
 @app.route("/api/activity")
 def api_activity():
     """Combined feed: closed trades (most recent 30) flagged as wins/losses."""
