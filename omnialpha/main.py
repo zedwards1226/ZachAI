@@ -39,10 +39,45 @@ from config import (
 from data_layer.database import get_conn, init_db
 from strategies.crypto_midband import CryptoMidBandStrategy
 
-# Sector → list of (Strategy instance, series_ticker_to_scan)
-# Empty if the sector isn't enabled in config.ENABLED_SECTORS.
+# Strategy registry — one entry per (sector, series). Each strategy is
+# tuned to that series's calibration evidence. Bands are chosen
+# conservatively from the well-sampled bins per the sweep on
+# 2026-05-02.
+
+_BTC15M_STRATEGY = CryptoMidBandStrategy(
+    name="crypto_btc15m_midband",
+    no_bands=[(0.20, 0.30, 0.15)],   # n=88, actual ~12%; conservative 15
+    yes_bands=[(0.75, 0.85, 0.90)],  # n=94, actual ~96%; conservative 90
+)
+
+_ETH15M_STRATEGY = CryptoMidBandStrategy(
+    name="crypto_eth15m_midband",
+    # ETH15M calibration: NO band 0.15-0.30 (n=294 across, miscal -8 to -15)
+    # YES band 0.65-0.85 (n=336 across, miscal +9 to +15)
+    no_bands=[(0.15, 0.30, 0.10)],   # actual 4-13%, conservative 10
+    yes_bands=[(0.65, 0.85, 0.85)],  # actual 81-93%, conservative 85
+)
+
+_BTCD_STRATEGY = CryptoMidBandStrategy(
+    name="crypto_btcd_midband",
+    # KXBTCD daily Bitcoin range markets — even larger samples, similar pattern.
+    # NO band 0.20-0.30 (n=875, actual 3-12%, edge much bigger)
+    # YES band 0.70-0.85 (n=1580, actual 95-98%)
+    no_bands=[(0.20, 0.30, 0.10)],
+    yes_bands=[(0.70, 0.85, 0.92)],
+    # Daily markets — entry window can be longer (15 min vs 3 min for 15M).
+    max_seconds_to_close=900,
+    min_seconds_to_close=60,
+)
+
+# Sector → list of (Strategy instance, series_ticker_to_scan).
+# Add a sector here once at least one strategy is built and validated.
 _STRATEGY_REGISTRY: dict[str, list[tuple]] = {
-    "crypto": [(CryptoMidBandStrategy(), "KXBTC15M")],
+    "crypto": [
+        (_BTC15M_STRATEGY, "KXBTC15M"),
+        (_ETH15M_STRATEGY, "KXETH15M"),
+        (_BTCD_STRATEGY,  "KXBTCD"),
+    ],
 }
 
 

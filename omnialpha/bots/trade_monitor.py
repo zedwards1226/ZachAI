@@ -36,18 +36,63 @@ def _open_trades(paper_only: bool = True) -> Iterable[dict]:
 
 
 def _market_result(ticker: str) -> Optional[dict]:
-    """Return {result, settlement_value_dollars, status} or None if not yet resolved."""
+    """Return {result, settlement_value_dollars, status} or None if not yet resolved.
+
+    Two-stage lookup:
+      1. Local DB — fast path for markets we've already ingested as finalized
+      2. Live /markets/{ticker} API — fallback for markets that closed
+         after our last ingestion. If we find one settled, we ALSO update
+         our local row so subsequent queries hit the fast path.
+    """
+    # Stage 1: local DB
     with get_conn(readonly=True) as conn:
         row = conn.execute(
             "SELECT result, settlement_value_dollars, status, raw_json "
             "FROM markets WHERE ticker = ?",
             (ticker,),
         ).fetchone()
-    if not row:
+    if row and row["status"] == "finalized" and row["result"] in ("yes", "no"):
+        return dict(row)
+
+    # Stage 2: live API fallback
+    try:
+        from bots.kalshi_public import get_market_status
+        live = get_market_status(ticker)
+    except Exception as e:
+        logger.warning("get_market_status failed for %s: %s", ticker, e)
         return None
-    if row["status"] != "finalized" or row["result"] not in ("yes", "no"):
+    if not live:
         return None
-    return dict(row)
+    status = live.get("status")
+    result = live.get("result")
+    if status != "finalized" or result not in ("yes", "no"):
+        return None
+    settlement = live.get("settlement_value_dollars") or live.get("settlement_value") or 0
+    try:
+        settlement_f = float(settlement)
+    except (TypeError, ValueError):
+        settlement_f = 0.0
+
+    # Update local DB row so future settles use the fast path
+    try:
+        import json as _json
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE markets SET status=?, result=?, "
+                "settlement_value_dollars=?, last_updated_at=? "
+                "WHERE ticker=?",
+                (status, result, settlement_f,
+                 datetime.now(timezone.utc).isoformat(),
+                 ticker),
+            )
+    except Exception as e:
+        logger.warning("could not update local market row %s: %s", ticker, e)
+
+    return {
+        "result": result,
+        "settlement_value_dollars": settlement_f,
+        "status": status,
+    }
 
 
 def _compute_pnl(trade: dict, market: dict) -> tuple[float, bool]:

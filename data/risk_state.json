@@ -1,0 +1,12 @@
+{
+  "bots": {
+    "omnialpha": {
+      "daily_pnl_usd": 0.13949999999999999,
+      "weekly_pnl_usd": 0.8462999999999999,
+      "open_positions": 0,
+      "last_trade_ts": "2026-05-03T01:48:37.866025+00:00",
+      "updated_at": "2026-05-03T01:48:37.883472+00:00"
+    }
+  },
+  "aggregate_daily_pnl_usd": 0.13949999999999999
+}

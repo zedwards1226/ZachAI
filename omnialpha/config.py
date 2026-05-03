@@ -39,7 +39,7 @@ PER_TRADE_MAX_RISK_USD: float = float(os.getenv("PER_TRADE_MAX_RISK_USD", "20"))
 DAILY_MAX_LOSS_USD: float = float(os.getenv("DAILY_MAX_LOSS_USD", "50"))
 WEEKLY_MAX_LOSS_USD: float = float(os.getenv("WEEKLY_MAX_LOSS_USD", "150"))
 MAX_CONCURRENT_POSITIONS: int = int(os.getenv("MAX_CONCURRENT_POSITIONS", "8"))
-MAX_TRADES_PER_SECTOR_PER_DAY: int = int(os.getenv("MAX_TRADES_PER_SECTOR_PER_DAY", "5"))
+MAX_TRADES_PER_SECTOR_PER_DAY: int = int(os.getenv("MAX_TRADES_PER_SECTOR_PER_DAY", "20"))
 
 # ─── Sector enables ───────────────────────────────────────────────────
 # Opt-in. Add a sector here only when its strategy module exists AND has

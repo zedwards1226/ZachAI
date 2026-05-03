@@ -44,6 +44,24 @@ def _client() -> httpx.Client:
     )
 
 
+def get_market_status(ticker: str) -> dict | None:
+    """Fetch live state for a single market via the unauthenticated
+    /markets/{ticker} endpoint. Returns None if not found.
+
+    Used by trade_monitor to settle paper trades whose markets resolved
+    but haven't been re-ingested into the local markets table yet.
+    """
+    with _client() as client:
+        try:
+            r = client.get(f"/markets/{ticker}")
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+    return r.json().get("market") or {}
+
+
 def get_cutoff() -> dict[str, str]:
     """Fetch the current historical-data cutoff timestamps.
 

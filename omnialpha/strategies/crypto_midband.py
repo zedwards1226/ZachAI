@@ -66,18 +66,51 @@ MAX_SECONDS_TO_CLOSE_FOR_ENTRY: int = 180
 
 
 class CryptoMidBandStrategy(Strategy):
-    """The first OmniAlpha strategy. Crypto-only. Rule-based. No LLM."""
+    """Generic mid-band strategy for binary YES/NO markets where Kalshi
+    miscalibrates a price range. Used for KXBTC15M, KXETH15M, KXBTCD —
+    each instance gets its own bands tuned to that series's calibration.
+
+    Construct one instance per series. Series-specific tuning in
+    main.py's _STRATEGY_REGISTRY.
+    """
 
     name = "crypto_midband"
     sector = "crypto"
 
-    def __init__(self, kelly_fraction: float = 0.05):
-        # 0.05 = 1/20-Kelly. Domain review flagged the previous 0.10
-        # default as over-fit to a 7-day BTC regime where wins were
-        # ~$1.63 and losses were ~$5. Half that to give regime shocks
-        # more room before the strategy bleeds capital. P&L scales
-        # linearly with Kelly; risk does not.
+    def __init__(
+        self,
+        kelly_fraction: float = 0.05,
+        *,
+        name: str | None = None,
+        no_bands: list[tuple[float, float, float]] | None = None,
+        yes_bands: list[tuple[float, float, float]] | None = None,
+        min_volume_fp: float | None = None,
+        max_seconds_to_close: int | None = None,
+        min_seconds_to_close: int | None = None,
+    ):
+        # 0.05 = 1/20-Kelly. Validated as the variance/return sweet
+        # spot for crypto mid-band. P&L scales linearly with Kelly;
+        # risk does not.
         self.kelly_fraction = kelly_fraction
+        if name is not None:
+            self.name = name
+        # Bands default to BTC15M tuning (the original calibration).
+        # Override per-series when constructing.
+        self._no_bands = no_bands if no_bands is not None else NO_BANDS
+        self._yes_bands = yes_bands if yes_bands is not None else YES_BANDS
+        self._min_volume_fp = (
+            min_volume_fp if min_volume_fp is not None else MIN_VOLUME_FP
+        )
+        self._max_seconds_to_close = (
+            max_seconds_to_close
+            if max_seconds_to_close is not None
+            else MAX_SECONDS_TO_CLOSE_FOR_ENTRY
+        )
+        self._min_seconds_to_close = (
+            min_seconds_to_close
+            if min_seconds_to_close is not None
+            else MIN_SECONDS_TO_CLOSE
+        )
 
     def decide_entry(
         self,
@@ -89,15 +122,13 @@ class CryptoMidBandStrategy(Strategy):
             return None
 
         # Liquidity / freshness gates
-        if market.volume_fp < MIN_VOLUME_FP:
+        if market.volume_fp < self._min_volume_fp:
             return None
-        # Entry window — only the last MAX_SECONDS_TO_CLOSE_FOR_ENTRY seconds.
-        # (The 0 < check excludes already-settled markets where seconds_to_close=0.)
         if market.seconds_to_close <= 0:
             return None
-        if market.seconds_to_close > MAX_SECONDS_TO_CLOSE_FOR_ENTRY:
+        if market.seconds_to_close > self._max_seconds_to_close:
             return None
-        if market.seconds_to_close < MIN_SECONDS_TO_CLOSE:
+        if market.seconds_to_close < self._min_seconds_to_close:
             return None
 
         yes_price = market.last_price_cents / 100.0
@@ -166,13 +197,12 @@ class CryptoMidBandStrategy(Strategy):
         Trade monitor handles the resolution write to journal."""
         return None
 
-    @staticmethod
-    def _classify_band(yes_price: float) -> Optional[tuple[str, float]]:
+    def _classify_band(self, yes_price: float) -> Optional[tuple[str, float]]:
         """Map a YES price to (side_to_take, our_forecast_of_true_yes_rate)."""
-        for low, high, true_rate in NO_BANDS:
+        for low, high, true_rate in self._no_bands:
             if low <= yes_price < high:
                 return ("no", true_rate)
-        for low, high, true_rate in YES_BANDS:
+        for low, high, true_rate in self._yes_bands:
             if low <= yes_price < high:
                 return ("yes", true_rate)
         return None
