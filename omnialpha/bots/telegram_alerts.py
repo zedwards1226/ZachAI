@@ -93,26 +93,141 @@ def send(text: str, *, parse_mode: str = "HTML") -> bool:
         return False
 
 
+def _market_metadata(ticker: str) -> dict:
+    """Look up human-readable market context: underlying asset, strike,
+    direction, close time. Returns {} on failure — alert still sends,
+    just without the plain-English bits.
+    """
+    from data_layer.database import get_conn
+    try:
+        with get_conn(readonly=True) as conn:
+            row = conn.execute(
+                "SELECT title, strike_type, floor_strike, cap_strike, close_time, series_ticker "
+                "FROM markets WHERE ticker = ?",
+                (ticker,),
+            ).fetchone()
+    except Exception as e:
+        logger.warning("market metadata lookup failed for %s: %s", ticker, e)
+        return {}
+    return dict(row) if row else {}
+
+
+def _underlying_label(series_ticker: str) -> str:
+    """Map Kalshi series ticker to plain-English asset name."""
+    if "BTC" in (series_ticker or ""):
+        return "BTC"
+    if "ETH" in (series_ticker or ""):
+        return "ETH"
+    return series_ticker or "the market"
+
+
+def _format_strike(meta: dict) -> str:
+    """Build '≥ $78,500' / '≤ $78,500' / '$78,500' depending on strike type."""
+    strike = meta.get("floor_strike") or meta.get("cap_strike")
+    if strike is None:
+        return ""
+    s_type = meta.get("strike_type", "")
+    if s_type in ("greater", "greater_or_equal"):
+        op = "≥"
+    elif s_type in ("less", "less_or_equal"):
+        op = "≤"
+    else:
+        op = ""
+    return f"{op} ${strike:,.0f}".strip()
+
+
+def _format_close_local(close_time_iso: str) -> str:
+    """Convert ISO UTC close time to America/New_York for display.
+    Cross-platform — `%-I` (no leading zero) is Linux-only; we use `%I`
+    and strip the leading zero in Python so Windows agrees."""
+    if not close_time_iso:
+        return ""
+    try:
+        from datetime import datetime
+        import pytz
+        dt = datetime.fromisoformat(close_time_iso.replace("Z", "+00:00"))
+        et = dt.astimezone(pytz.timezone("America/New_York"))
+        # %I gives 01-12 (zero-padded); lstrip('0') makes "01:30 PM" -> "1:30 PM"
+        return et.strftime("%I:%M %p ET").lstrip("0")
+    except Exception:
+        return close_time_iso[:16].replace("T", " ") + " UTC"
+
+
 def notify_entry(
     *, sector: str, strategy: str, market: str, side: str,
     contracts: int, price_cents: int, stake_usd: float, edge: float,
 ) -> None:
+    """Plain-English entry alert. Tells you WHAT was bought and WHAT
+    outcome we're betting on."""
     side_emoji = "🟢" if side == "yes" else "🔴"
-    send(
-        f"{side_emoji} <b>Entry</b>: {side.upper()} {contracts}× {market} @{price_cents}c\n"
-        f"Stake ${stake_usd:.2f} | Edge {edge:+.2%} | {strategy} ({sector})"
+    payout_usd = contracts * 1.00          # binary contracts pay $1 each on win
+    profit_usd = payout_usd - stake_usd
+    profit_pct = (profit_usd / stake_usd * 100) if stake_usd > 0 else 0
+
+    meta = _market_metadata(market)
+    asset = _underlying_label(meta.get("series_ticker") or market.split("-")[0])
+    strike = _format_strike(meta)
+    close_at = _format_close_local(meta.get("close_time", ""))
+
+    if strike and close_at:
+        # YES = we want condition to happen; NO = we want it to NOT happen
+        if side == "yes":
+            hope = f"<i>Hoping: {asset} {strike} by {close_at}</i>"
+        else:
+            # Invert the operator for NO bets
+            inverted = strike.replace("≥", "&lt;").replace("≤", "&gt;")
+            hope = f"<i>Hoping: {asset} {inverted} by {close_at}</i>"
+    else:
+        hope = ""
+
+    msg = (
+        f"{side_emoji} <b>Trade placed</b>\n"
+        f"Bought {contracts}× {side.upper()} on {asset} @ {price_cents}¢\n"
+        f"Stake ${stake_usd:.2f} → Pays ${payout_usd:.2f} if we win ({profit_pct:+.0f}%)\n"
     )
+    if hope:
+        msg += f"\n{hope}\n"
+    msg += f"\n<i>{strategy} · edge {edge:+.1%}</i>"
+    send(msg)
 
 
 def notify_exit(
     *, sector: str, strategy: str, market: str, side: str,
     pnl_usd: float, won: bool, reason: str,
 ) -> None:
+    """Plain-English exit alert. Tells you WIN or LOSE and WHY in
+    underlying-asset terms."""
     icon = "✅" if won else "❌"
-    send(
-        f"{icon} <b>Exit</b>: {side.upper()} {market}\n"
-        f"P&L ${pnl_usd:+.2f} | {reason} | {strategy} ({sector})"
+    word = "WON" if won else "LOST"
+
+    meta = _market_metadata(market)
+    asset = _underlying_label(meta.get("series_ticker") or market.split("-")[0])
+    strike = _format_strike(meta)
+
+    # Build the "what happened" line in plain English
+    if strike:
+        if won:
+            # We bet YES + got YES, OR bet NO + got NO
+            if side == "yes":
+                outcome = f"{asset} closed {strike} → {side.upper()} paid out"
+            else:
+                inv = strike.replace("≥", "&lt;").replace("≤", "&gt;")
+                outcome = f"{asset} closed {inv} → {side.upper()} paid out"
+        else:
+            if side == "yes":
+                outcome = f"{asset} did NOT close {strike} → {side.upper()} expired worthless"
+            else:
+                inv = strike.replace("≥", "&lt;").replace("≤", "&gt;")
+                outcome = f"{asset} did NOT close {inv} → {side.upper()} expired worthless"
+    else:
+        outcome = f"{side.upper()} bet resolved"
+
+    msg = (
+        f"{icon} <b>{word} ${pnl_usd:+.2f}</b>\n"
+        f"{outcome}\n"
+        f"\n<i>{strategy}</i>"
     )
+    send(msg)
 
 
 def notify_block(reason: str, detail: str) -> None:
