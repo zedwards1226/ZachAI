@@ -78,16 +78,29 @@ No paid data feeds. No PMXT relay. No third-party data brokers. Everything Zach 
 5. **CLV grading** — auto-pause underperforming sectors (mirrors WA's learning-agent city pause)
 6. **Hedge-to-lock** — buy opposite side at favorable price to lock partial profit, free capital faster
 
-## RISK CAPS (paper, $500 bankroll, growth-with-risk-management)
+## RISK CAPS (paper, $500 bankroll, COMPOUNDING)
+All caps are % of LIVE capital — they scale up as the bot wins, scale down during drawdown. No fixed-dollar ceilings to clip growth.
+
 - Starting capital: $500 (paper)
-- Per-trade max risk: $25 (5% of starting capital; matches Kelly 0.05 frac × $500 exactly so the cap doesn't artificially clip)
-- Daily max loss: $50 (10% of starting capital — circuit breaker, halts new entries for the day)
-- Weekly max loss: $100 (20% of starting capital — kill switch)
+- Per-trade max risk: 5% of live capital (floor $5)
+- Daily max loss: 10% of live capital (floor $10) — circuit breaker, halts new entries for the day
+- Weekly max loss: 20% of live capital (floor $20) — kill switch
 - Max concurrent positions: 8
 - Max trades per sector per day: 20 (three crypto strategies share the sector)
 - Sectors must be enabled per-sector via config — opt-in, not opt-out
 
-Capital scales naturally with realized P&L: `capital_usd = STARTING_CAPITAL_USD + realized − open_risk`, and Kelly stake recomputes off the live capital each scan. As the account grows, position sizes grow with it; the absolute USD caps stay fixed until the next review (re-tune when capital crosses 1.5× starting).
+| Capital | per-trade | daily | weekly |
+|---|---|---|---|
+| $250 (drawdown) | $12.50 | $25 | $50 |
+| $500 (today) | $25 | $50 | $100 |
+| $1000 | $50 | $100 | $200 |
+| $2000 | $100 | $200 | $400 |
+
+Mechanics:
+- `capital_usd = STARTING_CAPITAL_USD + realized − open_risk` — recomputed every scan
+- Kelly stake = 0.05 × live capital
+- Per-trade cap = `max(floor, capital × pct)` — `config.per_trade_cap_usd()`
+- Same pattern for daily/weekly caps via `daily_loss_cap_usd()` / `weekly_loss_cap_usd()`
 
 Subject to revision as the bot proves itself in paper.
 
