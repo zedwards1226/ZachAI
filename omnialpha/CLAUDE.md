@@ -84,7 +84,7 @@ All caps are % of LIVE capital — they scale up as the bot wins, scale down dur
 - Starting capital: $500 (paper)
 - Strategy Kelly fraction: 0.08 (bumped from 0.05 on 2026-05-03 to accelerate growth)
 - Per-trade max risk: 8% of live capital (floor $5) — matches Kelly so cap never clips
-- Daily max loss: 10% of live capital (floor $10) — circuit breaker, halts new entries for the day
+- Daily max loss: 16% of live capital (floor $10) — circuit breaker, halts new entries for the day
 - Weekly max loss: 20% of live capital (floor $20) — kill switch
 - Max concurrent positions: 8
 - Max trades per sector per day: 20 (three crypto strategies share the sector)
@@ -92,10 +92,10 @@ All caps are % of LIVE capital — they scale up as the bot wins, scale down dur
 
 | Capital | per-trade | daily | weekly |
 |---|---|---|---|
-| $250 (drawdown) | $20 | $25 | $50 |
-| $500 (today) | $40 | $50 | $100 |
-| $1000 | $80 | $100 | $200 |
-| $2000 | $160 | $200 | $400 |
+| $250 (drawdown) | $20 | $40 | $50 |
+| $500 (today) | $40 | $80 | $100 |
+| $1000 | $80 | $160 | $200 |
+| $2000 | $160 | $320 | $400 |
 
 Mechanics:
 - `capital_usd = STARTING_CAPITAL_USD + realized − open_risk` — recomputed every scan
