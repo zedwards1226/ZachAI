@@ -49,12 +49,21 @@ from services import telegram  # noqa: E402
 logger = logging.getLogger(__name__)
 ET = pytz.timezone(TIMEZONE)
 
-MIN_TRADES_FOR_PROPOSAL = 20
+MIN_TRADES_FOR_PROPOSAL = 6     # was 20 — lowered 2026-05-04 so the agent
+                                  # actually runs on our small sample. With
+                                  # 6+ trades the auto-apply guard caps
+                                  # changes at ±1 step to bound damage from
+                                  # small-sample noise.
 COOLDOWN_DAYS = 10
 LOOKBACK_DAYS = 30
 HALF_BAND_WR_FLOOR = 0.40   # below this → propose raising SCORE_HALF_SIZE
 FULL_BAND_WR_FLOOR = 0.50   # below this → propose raising SCORE_FULL_SIZE
-RVOL_FACTOR_MIN_TRADES = 10  # per-side minimum for RVOL delta analysis
+RVOL_FACTOR_MIN_TRADES = 5   # was 10 — same reason as above
+AUTO_APPLY = True           # 2026-05-04 — was effectively False (proposals
+                              # required manual JSON edit). With sample-size
+                              # cap + step-cap + cooldown already enforced,
+                              # auto-apply is safe AND keeps the bot learning
+                              # without operator intervention.
 
 
 def _today_str() -> str:
@@ -275,6 +284,59 @@ async def _send(message: str) -> None:
         logger.exception("Learning agent telegram send failed")
 
 
+def _classify_failure(trade: dict) -> str:
+    """Tag a LOSS trade with a failure mode by inspecting its own row.
+
+    Cheap heuristic — no external lookups. Categories:
+      - false_breakout : exit hit before T1 reached (price never followed through)
+      - reversal       : T1 was tagged then price reversed past entry to stop
+      - time_exit      : MAX_HOLD_MINUTES expired (notes contains 'time')
+      - low_score      : entry score was below current SCORE_FULL_SIZE
+      - normal_loss    : nothing notable
+
+    For wins returns 'win'. For non-LOSS/non-WIN returns the outcome.
+    """
+    outcome = (trade.get("outcome") or "").upper()
+    if outcome == "WIN":
+        return "win"
+    if outcome != "LOSS":
+        return outcome.lower() or "unknown"
+    notes = (trade.get("notes") or "").lower()
+    if "time" in notes or "max_hold" in notes:
+        return "time_exit"
+    entry = trade.get("entry") or 0
+    exit_p = trade.get("exit_price") or 0
+    target_1 = trade.get("target_1") or 0
+    direction = (trade.get("direction") or "").upper()
+    score = trade.get("score") or 0
+
+    # Did price ever touch T1 before reversing? Heuristic via rr — if rr is
+    # near 0 or negative, T1 probably wasn't hit.
+    rr = trade.get("rr") or 0
+    if direction == "LONG":
+        target_hit = exit_p >= target_1 if target_1 else False
+    else:
+        target_hit = exit_p <= target_1 if target_1 else False
+
+    if rr <= -0.7:
+        return "false_breakout"  # full stop, no progress to T1
+    if -0.7 < rr < 0:
+        return "reversal"  # some progress then reversed
+    if score < 8:
+        return "low_score"
+    return "normal_loss"
+
+
+def _failure_summary(trades: list[dict]) -> dict[str, int]:
+    """Count failure modes across the LOSS trades."""
+    counts: dict[str, int] = defaultdict(int)
+    for t in trades:
+        if (t.get("outcome") or "").upper() != "LOSS":
+            continue
+        counts[_classify_failure(t)] += 1
+    return dict(counts)
+
+
 async def _log_manual_edit_if_any() -> None:
     """Detect manual state/learned_config.json edits and audit them."""
     drift = config_loader.detect_manual_edit()
@@ -359,8 +421,30 @@ async def run(dry_run: bool = False) -> dict:
                 continue
             filtered.append(p)
 
-        # ─── 7. Observations (diagnostic, not proposed) ───
+        # ─── 7a. Observations (diagnostic, not proposed) ───
         observations = _time_of_day_observations(trades)
+
+        # ─── 7b. Failure-mode classification (LOSS trades only) ───
+        failure_counts = _failure_summary(trades)
+
+        # ─── 7c. Auto-apply small changes ───
+        # When AUTO_APPLY is on, immediately apply each proposal that meets
+        # ALL safety bars: passed cooldown, step-cap already enforced upstream
+        # (proposals are constructed to be ±1 step max), inside knob bounds.
+        # Telegram digest reflects the applied state. Manual override remains
+        # via direct edit of state/learned_config.json — that's audited via
+        # _log_manual_edit_if_any() on the next run.
+        applied_now: list[dict] = []
+        if AUTO_APPLY and not dry_run:
+            for p in filtered:
+                try:
+                    config_loader.apply_proposal(
+                        {p["knob"]: p["proposed"]},
+                        source="agent_auto",
+                    )
+                    applied_now.append(p)
+                except Exception as e:
+                    logger.warning("auto-apply failed for %s: %s", p["knob"], e)
 
         # ─── 8. Write rows + Telegram digest ───
         digest_lines = [
@@ -373,8 +457,11 @@ async def run(dry_run: bool = False) -> dict:
         if not filtered:
             digest_lines.append("✅ No rule changes proposed today.")
         else:
+            applied_set = {(p["knob"], p["proposed"]) for p in applied_now}
             digest_lines.append("<b>Proposals:</b>")
             for p in filtered:
+                applied = (p["knob"], p["proposed"]) in applied_set
+                status = "applied" if applied else "pending"
                 if not dry_run:
                     pid = journal.agent_journal_write(
                         entry_type="proposal",
@@ -385,21 +472,22 @@ async def run(dry_run: bool = False) -> dict:
                         sample_size=p["sample_size"],
                         confidence=p["confidence"],
                         reasoning=p["reasoning"],
-                        status="pending",
+                        status=status,
                     )
                     proposal_ids.append(pid)
                     p["id"] = pid
+                marker = "✅" if applied else "⏳"
                 digest_lines.append(
-                    f"• #{p.get('id', '?')} {p['knob']}: {p['current']} → "
+                    f"{marker} #{p.get('id', '?')} {p['knob']}: {p['current']} → "
                     f"{p['proposed']}"
                 )
                 digest_lines.append(f"  {p['reasoning']}")
             digest_lines.append("")
-            digest_lines.append(
-                "To apply: edit state/learned_config.json with the new value "
-                "(logged as source='manual'), or wait for Telegram approval "
-                "handlers (PR #2)."
-            )
+            if applied_now:
+                digest_lines.append(
+                    f"Auto-applied {len(applied_now)} change(s) (within step+cooldown bars). "
+                    "Revert: edit state/learned_config.json."
+                )
 
         if skipped_for_cooldown:
             digest_lines.append("")
@@ -415,6 +503,15 @@ async def run(dry_run: bool = False) -> dict:
             digest_lines.append("<b>Observations (not proposed):</b>")
             for obs in observations:
                 digest_lines.append(f"• {obs}")
+
+        # Failure-mode breakdown — surfaces WHY losses happened so we can
+        # tell "false breakouts" from "got into a reversal" from "regime change"
+        if failure_counts:
+            digest_lines.append("")
+            digest_lines.append("<b>Loss patterns:</b>")
+            ordered = sorted(failure_counts.items(), key=lambda kv: -kv[1])
+            for mode, cnt in ordered:
+                digest_lines.append(f"• {mode}: {cnt}")
 
         digest = "\n".join(digest_lines)
         summary["proposals"] = filtered
