@@ -30,6 +30,14 @@ trading/weather_alpha.db
 trading/journal.db
 trading/state/
 companies/tradingagents/db/*.db
+# Omnialpha runtime state — DB, PID, throttle files. Tuner artifacts
+# (strategy_bands.json, band_history.jsonl) ARE committed.
+omnialpha/state/omnialpha.db
+omnialpha/state/omnialpha.db-shm
+omnialpha/state/omnialpha.db-wal
+omnialpha/state/omnialpha.pid
+omnialpha/state/last_scan.json
+omnialpha/state/.telegram_startup_throttle
 
 # Reference repos (cloned for study, not part of project)
 reference/

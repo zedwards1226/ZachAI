@@ -8,6 +8,10 @@ state/*.db
 state/*.db-*
 *.pid
 
+# But DO commit the band-tuning artifacts (config, not runtime data)
+!state/strategy_bands.json
+!state/band_history.jsonl
+
 # Logs
 logs/*.log
 logs/*.log.*

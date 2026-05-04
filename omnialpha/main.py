@@ -27,6 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from bots import telegram_alerts
+from bots.band_tuner import (
+    apply_overrides_to_strategy,
+    load_band_overrides,
+    tune_all as tune_all_bands,
+)
 from bots.live_scanner import scan_and_trade
 from bots.risk_engine import update_my_section
 from bots.strategy_grader import grade_strategies, is_strategy_paused
@@ -299,6 +304,31 @@ def job_grade_strategies() -> None:
         log.exception("grade_strategies job failed: %s", e)
 
 
+def job_tune_bands() -> None:
+    """Weekly: sweep band variations, apply best-performing variants to
+    state/strategy_bands.json. The bot reads that file on next restart.
+    """
+    try:
+        log.info("Band tuner: starting weekly sweep across all strategies")
+        summary = tune_all_bands(_STRATEGY_REGISTRY)
+        log.info(
+            "Band tuner done: applied=%s kept=%s",
+            summary["applied"], summary["kept"],
+        )
+        if summary["applied"]:
+            try:
+                applied_list = ", ".join(summary["applied"])
+                telegram_alerts.send(
+                    f"🔧 <b>OmniAlpha auto-tuned bands</b> for {len(summary['applied'])} "
+                    f"strategy(ies):\n<code>{applied_list}</code>\n"
+                    f"Restart bot to apply: <code>OmniAlpha.vbs</code>"
+                )
+            except Exception as e:
+                log.warning("tune-bands telegram failed: %s", e)
+    except Exception as e:
+        log.exception("tune_bands job failed: %s", e)
+
+
 def main() -> int:
     _setup_logging()
     log.info("OmniAlpha starting — PAPER_MODE=%s", PAPER_MODE)
@@ -329,6 +359,22 @@ def main() -> int:
     from config import DB_PATH, PER_TRADE_MAX_RISK_PCT
     log.info("DB ready: %s", DB_PATH)
     log.info("Enabled sectors: %s", ENABLED_SECTORS or "<none — bot dormant>")
+
+    # Apply auto-tuned band overrides on top of the seed bands defined
+    # above. Sweep runs weekly via job_tune_bands and writes
+    # state/strategy_bands.json; we read it here on every startup.
+    overrides = load_band_overrides()
+    if overrides:
+        for sector_strats in _STRATEGY_REGISTRY.values():
+            for strat, _ in sector_strats:
+                if strat.name in overrides:
+                    apply_overrides_to_strategy(strat, overrides[strat.name])
+                    log.info(
+                        "Band override applied to %s from %s: no=%s yes=%s",
+                        strat.name,
+                        overrides[strat.name].get("source", "?"),
+                        strat._no_bands, strat._yes_bands,
+                    )
 
     # Drift detector: per-trade cap must >= every strategy's Kelly fraction
     # or the cap silently clips the natural Kelly stake. Surfaces config
@@ -361,6 +407,12 @@ def main() -> int:
     # Runs at 03:30 ET — after most daily markets settle, before pre-market.
     sched.add_job(job_grade_strategies, "cron", hour=3, minute=30,
                   id="grade_strategies", max_instances=1, misfire_grace_time=3600)
+    # Weekly band sweep: every Sunday 02:00 ET. Backtest variations of
+    # each strategy's bands against historical data; if a variant beats
+    # the current bands on backtest P&L (with min trade count + winrate
+    # floors), persist to state/strategy_bands.json for next restart.
+    sched.add_job(job_tune_bands, "cron", day_of_week="sun", hour=2, minute=0,
+                  id="tune_bands", max_instances=1, misfire_grace_time=21600)
 
     telegram_alerts.notify_startup()
     log.info("Scheduler started")

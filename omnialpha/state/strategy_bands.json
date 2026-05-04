@@ -1,0 +1,56 @@
+{
+  "crypto_btc15m_midband": {
+    "no_bands": [[0.15, 0.35, 0.05]],
+    "yes_bands": [[0.70, 0.90, 0.95]],
+    "updated_at": "2026-05-04T11:00:00Z",
+    "source": "sweep_2026-05-04_initial",
+    "backtest_pnl": 841.71,
+    "backtest_winrate": 0.900,
+    "backtest_trades": 140
+  },
+  "crypto_eth15m_midband": {
+    "no_bands": [[0.05, 0.35, 0.05]],
+    "yes_bands": [[0.65, 0.85, 0.95]],
+    "updated_at": "2026-05-04T11:00:00Z",
+    "source": "sweep_2026-05-04_initial",
+    "backtest_pnl": 619.88,
+    "backtest_winrate": 0.903,
+    "backtest_trades": 207
+  },
+  "crypto_btcd_midband": {
+    "no_bands": [[0.05, 0.30, 0.05]],
+    "yes_bands": [[0.60, 0.90, 0.95]],
+    "updated_at": "2026-05-04T11:00:00Z",
+    "source": "sweep_2026-05-04_initial",
+    "backtest_pnl": 173.58,
+    "backtest_winrate": 1.000,
+    "backtest_trades": 34
+  },
+  "crypto_eth_hourly_midband": {
+    "no_bands": [[0.05, 0.35, 0.05]],
+    "yes_bands": [[0.60, 0.85, 0.95]],
+    "updated_at": "2026-05-04T11:00:00Z",
+    "source": "sweep_2026-05-04_initial",
+    "backtest_pnl": 379.75,
+    "backtest_winrate": 0.872,
+    "backtest_trades": 141
+  },
+  "crypto_sol15m_midband": {
+    "no_bands": [],
+    "yes_bands": [[0.60, 0.90, 0.95]],
+    "updated_at": "2026-05-04T11:00:00Z",
+    "source": "sweep_2026-05-04_initial",
+    "backtest_pnl": 251.82,
+    "backtest_winrate": 0.938,
+    "backtest_trades": 32
+  },
+  "crypto_ethd_midband": {
+    "no_bands": [[0.05, 0.40, 0.05]],
+    "yes_bands": [],
+    "updated_at": "2026-05-04T11:00:00Z",
+    "source": "sweep_2026-05-04_initial",
+    "backtest_pnl": 125.14,
+    "backtest_winrate": 0.951,
+    "backtest_trades": 61
+  }
+}
