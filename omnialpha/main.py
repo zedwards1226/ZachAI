@@ -29,6 +29,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from bots import telegram_alerts
 from bots.live_scanner import scan_and_trade
 from bots.risk_engine import update_my_section
+from bots.strategy_grader import grade_strategies, is_strategy_paused
 from bots.trade_monitor import settle_resolved_trades, write_pnl_snapshot
 from config import (
     ENABLED_SECTORS,
@@ -177,6 +178,15 @@ def job_strategy_poll() -> None:
     }
     for sector in ENABLED_SECTORS:
         for strategy, series_ticker in _STRATEGY_REGISTRY.get(sector, []):
+            # Auto-pause: strategy_grader sets paused_at when win rate + P&L
+            # both go bad. Resume is manual (clear paused_at in DB).
+            if is_strategy_paused(strategy.name):
+                pass_summary["by_series"][series_ticker] = {
+                    "sector": sector,
+                    "strategy": strategy.name,
+                    "skipped": "paused",
+                }
+                continue
             try:
                 result = scan_and_trade(
                     strategy=strategy,
@@ -274,6 +284,21 @@ def job_daily_summary() -> None:
         log.exception("daily_summary job failed: %s", e)
 
 
+def job_grade_strategies() -> None:
+    """Nightly: review each strategy's recent settled trades, auto-pause
+    underperformers. Resumes are manual."""
+    try:
+        summary = grade_strategies()
+        log.info(
+            "grader run: reviewed %d strategies, paused %d this run: %s",
+            len(summary["by_strategy"]),
+            len(summary["paused_this_run"]),
+            summary["paused_this_run"] or "[]",
+        )
+    except Exception as e:
+        log.exception("grade_strategies job failed: %s", e)
+
+
 def main() -> int:
     _setup_logging()
     log.info("OmniAlpha starting — PAPER_MODE=%s", PAPER_MODE)
@@ -317,6 +342,11 @@ def main() -> int:
                   max_instances=1, misfire_grace_time=300)
     sched.add_job(job_daily_summary, "cron", hour=7, minute=0,
                   id="daily_summary", max_instances=1, misfire_grace_time=3600)
+    # Nightly auto-grading: pause strategies whose live performance has
+    # decayed below the bar (winrate + P&L both bad over last 30 days).
+    # Runs at 03:30 ET — after most daily markets settle, before pre-market.
+    sched.add_job(job_grade_strategies, "cron", hour=3, minute=30,
+                  id="grade_strategies", max_instances=1, misfire_grace_time=3600)
 
     telegram_alerts.notify_startup()
     log.info("Scheduler started")

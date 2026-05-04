@@ -190,6 +190,19 @@ CREATE TABLE IF NOT EXISTS sector_state (
     consecutive_losses  INTEGER NOT NULL DEFAULT 0,
     notes               TEXT
 );
+
+-- Per-strategy auto-pause state. Filled in by bots.strategy_grader on its
+-- nightly run. Strategies missing from this table are treated as active.
+-- paused_at = NULL means active; non-null means paused (manual resume only).
+CREATE TABLE IF NOT EXISTS strategy_state (
+    strategy_name       TEXT    PRIMARY KEY,
+    paused_at           TEXT,                       -- NULL or ISO timestamp
+    last_review_at      TEXT,                       -- ISO timestamp of last grading run
+    last_review_n       INTEGER NOT NULL DEFAULT 0, -- trades in the most recent review window
+    last_review_winrate REAL,                       -- win rate in last review window (0-1)
+    last_review_pnl     REAL,                       -- realized P&L over review window
+    pause_reason        TEXT
+);
 """
 
 
