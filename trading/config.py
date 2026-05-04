@@ -63,6 +63,14 @@ ROLLING_WR_ALERT_WEEKS = 2  # For 2 consecutive weeks
 MAX_RISK_PER_TRADE_DOLLARS = 350   # 7% — bumped 2026-04-30 from $250. Today's 101pt ORB needed $308-341 risk; $250 was blocking most NQ ORBs in the wider 100-150pt regime.
 DAILY_LOSS_LIMIT_DOLLARS = 200     # 4% — bumped from $150 to keep ratio with per-trade cap. One losing trade can't blow the day twice.
 
+# Per-trade $ risk gate (combiner.py). When False, the gate is skipped and
+# wide-OR signals fire regardless of stop distance. Set False on 2026-05-04
+# at Zach's call after the cap was blocking most signals in the 200+ pt
+# volatility regime. The bracket order's stop-loss still caps actual losses
+# at MAX_RISK_PER_TRADE_DOLLARS — this flag only controls whether the
+# signal-generator pre-veto fires.
+RISK_CAP_ENABLED = False
+
 # Mid-trade intervention thresholds (used by tv_trader.monitor_trades)
 VIX_INTERVENTION_PCT = 0.20        # Close trade if VIX rises 20%+ from trade-open VIX
 

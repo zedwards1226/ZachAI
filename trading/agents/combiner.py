@@ -327,9 +327,14 @@ async def poll() -> Optional[dict]:
     risk = abs(price - stop)
     rr = abs(target_2 - price) / risk if risk > 0 else 0  # RR vs T2 (actual TP)
 
-    # Per-trade $ risk cap — skip wide-ORB trades that exceed account-size budget.
+    # Per-trade $ risk pre-veto. Disabled 2026-05-04 — the bracket-order
+    # stop-loss already caps actual loss at risk_dollars, and Zach wants
+    # the bot to TRADE in the current 200+ pt volatility regime so it can
+    # learn from real outcomes. RISK_CAP_ENABLED gates this back on if/when
+    # account size or volatility regime changes.
     risk_dollars = risk * MULTIPLIER
-    if risk_dollars > MAX_RISK_PER_TRADE_DOLLARS:
+    from config import RISK_CAP_ENABLED
+    if RISK_CAP_ENABLED and risk_dollars > MAX_RISK_PER_TRADE_DOLLARS:
         logger.info(
             "Trade skipped: stop $%.0f exceeds per-trade cap $%d (ORB range %.1f too wide)",
             risk_dollars, MAX_RISK_PER_TRADE_DOLLARS, orb_range,
