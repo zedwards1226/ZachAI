@@ -303,6 +303,20 @@ def main() -> int:
     _setup_logging()
     log.info("OmniAlpha starting — PAPER_MODE=%s", PAPER_MODE)
 
+    # Write our PID to a state file so external kill scripts can target
+    # this process unambiguously. Without this, filtering by "python main.py"
+    # in WMI catches every Python `main.py` on the box (e.g. the ORB bot's
+    # main.py too), which is how we accidentally killed ORB on 2026-05-04.
+    try:
+        import os
+        from config import BASE_DIR
+        pid_file = BASE_DIR / "state" / "omnialpha.pid"
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(str(os.getpid()))
+        log.info("PID file written: %s = %d", pid_file, os.getpid())
+    except Exception as e:
+        log.warning("PID file write failed (non-fatal): %s", e)
+
     if not PAPER_MODE:
         log.error("PAPER_MODE is off; refusing to start without explicit approval. "
                   "Set PAPER_MODE=true in omnialpha/.env.")
