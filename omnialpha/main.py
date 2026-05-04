@@ -83,6 +83,13 @@ _STRATEGY_REGISTRY: dict[str, list[tuple]] = {
 
 def _setup_logging() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    # Force UTF-8 on stdout so log lines containing Unicode (e.g. "→") don't
+    # crash the StreamHandler when stdout is the Windows cp1252 console or
+    # a redirected file. File handler is already UTF-8 below.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
