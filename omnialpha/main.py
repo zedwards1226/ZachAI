@@ -70,6 +70,41 @@ _BTCD_STRATEGY = CryptoMidBandStrategy(
     min_seconds_to_close=60,
 )
 
+# ── ADDED 2026-05-03: 3 new crypto series, calibrated from /historical/* sweep.
+# Quality bar: n >= 50 per band, edge sign consistent. Each series gets its own
+# bands because the calibration shape is NOT transferable across series.
+
+_ETH_HOURLY_STRATEGY = CryptoMidBandStrategy(
+    name="crypto_eth_hourly_midband",
+    # KXETH (ETH hourly): NO HEAVILY overpriced — opposite shape from BTC15M.
+    # NO [0.10,0.30] combined n=207, actual 2.4% (forecast 15-25%, miscal -14 to -20).
+    # YES side has NEGATIVE edge — actual rate at 0.70-0.90 forecast is 64-74%.
+    # So we skip YES entirely on this series; NO-only strategy.
+    no_bands=[(0.10, 0.30, 0.10)],
+    yes_bands=[],
+)
+
+_SOL15M_STRATEGY = CryptoMidBandStrategy(
+    name="crypto_sol15m_midband",
+    # KXSOL15M (Solana 15m): same shape as KXBTC15M — NO over, YES under.
+    # NO [0.15,0.30] n=271, actual ~10% (conservative 10).
+    # YES [0.70,0.85] n=200, actual ~89% (conservative 85).
+    no_bands=[(0.15, 0.30, 0.10)],
+    yes_bands=[(0.70, 0.85, 0.85)],
+)
+
+_ETHD_STRATEGY = CryptoMidBandStrategy(
+    name="crypto_ethd_midband",
+    # KXETHD (ETH daily): cleanest signal of the bunch. Massive samples + strong edges.
+    # NO [0.15,0.30] n=4478, actual ~5% (conservative 8).
+    # YES [0.65,0.85] n~3679, actual ~92% (conservative 90).
+    no_bands=[(0.15, 0.30, 0.08)],
+    yes_bands=[(0.65, 0.85, 0.90)],
+    # Daily markets — same timing as KXBTCD.
+    max_seconds_to_close=900,
+    min_seconds_to_close=60,
+)
+
 # Sector → list of (Strategy instance, series_ticker_to_scan).
 # Add a sector here once at least one strategy is built and validated.
 _STRATEGY_REGISTRY: dict[str, list[tuple]] = {
@@ -77,6 +112,9 @@ _STRATEGY_REGISTRY: dict[str, list[tuple]] = {
         (_BTC15M_STRATEGY, "KXBTC15M"),
         (_ETH15M_STRATEGY, "KXETH15M"),
         (_BTCD_STRATEGY,  "KXBTCD"),
+        (_ETH_HOURLY_STRATEGY, "KXETH"),
+        (_SOL15M_STRATEGY, "KXSOL15M"),
+        (_ETHD_STRATEGY, "KXETHD"),
     ],
 }
 
