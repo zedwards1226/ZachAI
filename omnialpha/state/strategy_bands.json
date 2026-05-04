@@ -1,35 +1,23 @@
 {
   "crypto_eth15m_midband": {
-    "no_bands": [[0.25, 0.35, 0.15]],
-    "yes_bands": [[0.65, 0.70, 0.95]],
-    "updated_at": "2026-05-04T15:00:00Z",
-    "source": "sweep_2026-05-04_pf_objective",
-    "backtest_pnl": 230.90,
-    "backtest_winrate": 0.871,
-    "backtest_trades": 31,
-    "backtest_profit_factor": 3.11,
-    "note": "Tightened from wider bands; PF improved 1.75 -> 3.11"
+    "no_bands": [[0.15, 0.35, 0.10]],
+    "yes_bands": [[0.60, 0.80, 0.90]],
+    "updated_at": "2026-05-04T17:00:00Z",
+    "source": "rebalanced_2026-05-04",
+    "note": "Widened from PF-sweep bands ([0.25-0.35]/[0.65-0.70]) which produced 0 live trades in 3.5h. Skip <0.15 NO and >0.85 YES (bad R/R) but accept the 0.15-0.35 / 0.60-0.80 middle band where markets actually trade."
   },
   "crypto_eth_hourly_midband": {
-    "no_bands": [[0.15, 0.30, 0.05]],
+    "no_bands": [[0.10, 0.30, 0.08]],
     "yes_bands": [],
-    "updated_at": "2026-05-04T15:00:00Z",
-    "source": "sweep_2026-05-04_pf_objective",
-    "backtest_pnl": 161.98,
-    "backtest_winrate": 0.933,
-    "backtest_trades": 30,
-    "backtest_profit_factor": 3.53,
-    "note": "PF improved 2.66 -> 3.53"
+    "updated_at": "2026-05-04T17:00:00Z",
+    "source": "rebalanced_2026-05-04",
+    "note": "Slightly widened NO band lower bound. KXETH calibration showed YES has no edge — keeping NO-only."
   },
   "crypto_sol15m_midband": {
-    "no_bands": [[0.15, 0.30, 0.15]],
-    "yes_bands": [[0.60, 0.75, 0.95]],
-    "updated_at": "2026-05-04T15:00:00Z",
-    "source": "sweep_2026-05-04_pf_objective",
-    "backtest_pnl": 199.61,
-    "backtest_winrate": 0.872,
-    "backtest_trades": 39,
-    "backtest_profit_factor": 3.54,
-    "note": "Massive improvement: PF 1.31 -> 3.54, pnl $46 -> $200"
+    "no_bands": [[0.15, 0.30, 0.12]],
+    "yes_bands": [[0.60, 0.80, 0.90]],
+    "updated_at": "2026-05-04T17:00:00Z",
+    "source": "rebalanced_2026-05-04",
+    "note": "Widened YES upper from 0.75 to 0.80 — still skips the bad-R/R 0.80-0.90 zone."
   }
 }
