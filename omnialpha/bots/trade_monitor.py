@@ -21,8 +21,20 @@ from data_layer.database import get_conn
 
 logger = logging.getLogger(__name__)
 
-# Kalshi binary fee on winning side
-KALSHI_FEE_RATE = 0.07
+# Kalshi per-trade fee formula: ceil(0.07 * C * P * (1-P) * 100) / 100 in USD.
+# Charged on every BUY (entry); no exit fee since contracts settle at $0/$1.
+# Smaller than the previous flat-7%-on-gross approximation, especially at
+# extreme prices — at 11¢ the fee is ~$0.69/100ct vs the old code's ~$6.23.
+import math
+
+
+def _kalshi_fee_usd(contracts: int, price_cents: int) -> float:
+    if contracts <= 0:
+        return 0.0
+    p = price_cents / 100.0
+    if not 0.0 < p < 1.0:
+        return 0.0
+    return math.ceil(0.07 * contracts * p * (1.0 - p) * 100.0) / 100.0
 
 
 def _open_trades(paper_only: bool = True) -> Iterable[dict]:
@@ -101,13 +113,14 @@ def _compute_pnl(trade: dict, market: dict) -> tuple[float, bool]:
     n = int(trade["contracts"])
     yes_won = (result == "yes")
     bet_won = (side == "yes" and yes_won) or (side == "no" and not yes_won)
+    fee_usd = _kalshi_fee_usd(n, p)
     if bet_won:
-        gross_cents = n * (100 - p)
-        fee_cents = gross_cents * KALSHI_FEE_RATE
-        net_usd = (gross_cents - fee_cents) / 100.0
-        return net_usd, True
+        # Win: payout $1/contract, minus stake (price), minus entry fee
+        gross_profit_usd = n * (100 - p) / 100.0
+        return gross_profit_usd - fee_usd, True
+    # Loss: stake gone + fee already paid
     loss_usd = (n * p) / 100.0
-    return -loss_usd, False
+    return -(loss_usd + fee_usd), False
 
 
 def settle_resolved_trades() -> dict:

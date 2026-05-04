@@ -23,6 +23,7 @@ from weather import fetch_all_forecasts
 from kalshi_client import get_client
 from edge import prob_exceeds, prob_between, best_side, effective_edge, parse_strike_from_ticker
 from kelly import size_stake
+from fees import net_pnl_after_fee
 from guardrails import all_checks
 
 log = logging.getLogger(__name__)
@@ -541,8 +542,7 @@ def resolve_expired_trades() -> None:
                 )
 
             won = (yes_won and trade["side"] == "YES") or (not yes_won and trade["side"] == "NO")
-            pnl = (trade["contracts"] * (1 - trade["price_cents"] / 100) if won
-                   else -trade["contracts"] * trade["price_cents"] / 100)
+            pnl = net_pnl_after_fee(trade["contracts"], trade["price_cents"], won)
             resolve_trade(trade["id"], won, pnl)
             settle_signal_by_trade(trade["id"], "YES" if yes_won else "NO", won)
             gs = get_guardrail_state()
@@ -554,7 +554,7 @@ def resolve_expired_trades() -> None:
                 daily_trades=gs["daily_trades"],
             )
             log.info(
-                "RESOLVED [%s] %s %s -- actual %.1fF vs %.1fF %s -> %s  P&L=$%.2f",
+                "RESOLVED [%s] %s %s -- actual %.1fF vs %.1fF %s -> %s  P&L=$%.2f (fees included)",
                 city_code, trade["market_id"], trade["side"],
                 actual_high, strike_f, trade_strike_type,
                 "WON" if won else "LOST", pnl,
@@ -567,8 +567,7 @@ def resolve_expired_trades() -> None:
                     result = market.get("result")  # "yes" or "no"
                     won = (result == "yes" and trade["side"] == "YES") or \
                           (result == "no" and trade["side"] == "NO")
-                    pnl = (trade["contracts"] * (1 - trade["price_cents"] / 100) if won
-                           else -trade["contracts"] * trade["price_cents"] / 100)
+                    pnl = net_pnl_after_fee(trade["contracts"], trade["price_cents"], won)
                     resolve_trade(trade["id"], won, pnl)
                     settle_signal_by_trade(trade["id"], result.upper(), won)
                     gs = get_guardrail_state()
