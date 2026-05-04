@@ -51,17 +51,26 @@ logger = logging.getLogger(__name__)
 # ── Tunables ─────────────────────────────────────────────────────────────
 MIN_TRADES = 30          # backtest must place at least this many trades
 MIN_WINRATE = 0.65       # backtested win rate floor; below = gambling
+MIN_PROFIT_FACTOR = 1.30 # sum(wins)/|sum(losses)| — drops break-even strategies
 STARTING_CAPITAL = 500.0
+SCORE_BY = "profit_factor"  # "pnl" or "profit_factor". Profit factor avoids
+                              # the 78%-winrate-but-1.04x-PF trap (fixed
+                              # 2026-05-04: bot was barely profitable because
+                              # it took every YES band entry from 60-90c, and
+                              # entries at 80-90c had near-zero R/R skew).
 
 
-# Band sweep grid. Coarse on purpose — fine sweeps explode the search
-# space without changing the winner much.
-NO_LOW_GRID = [0.05, 0.10, 0.15, 0.20]
-NO_HIGH_GRID = [0.25, 0.30, 0.35, 0.40]
+# Band sweep grid. Two changes from the initial sweep on 2026-05-04:
+# 1) YES_HIGH capped at 0.75 — stops buying YES at 80-90c where each contract
+#    only has 10-20c of upside but full price loss on the wrong side.
+# 2) NO_LOW floored at 0.15 — same reason in reverse: buying NO at 90-95c
+#    pays full price for 5-10c of upside.
+NO_LOW_GRID = [0.15, 0.20, 0.25]
+NO_HIGH_GRID = [0.30, 0.35, 0.40]
 NO_FORECAST_GRID = [0.05, 0.08, 0.10, 0.12, 0.15]
 
-YES_LOW_GRID = [0.60, 0.65, 0.70, 0.75]
-YES_HIGH_GRID = [0.80, 0.85, 0.90]
+YES_LOW_GRID = [0.55, 0.60, 0.65]
+YES_HIGH_GRID = [0.70, 0.72, 0.75]
 YES_FORECAST_GRID = [0.80, 0.85, 0.88, 0.90, 0.92, 0.95]
 
 
@@ -265,6 +274,7 @@ def sweep_strategy(
         "pnl": baseline_result.realized_pnl_usd if baseline_result else 0.0,
         "winrate": baseline_result.win_rate if baseline_result else 0.0,
         "trades": baseline_result.n_trades if baseline_result else 0,
+        "profit_factor": baseline_result.profit_factor if baseline_result else 0.0,
         "no_bands": deepcopy(strategy._no_bands),
         "yes_bands": deepcopy(strategy._yes_bands),
     }
@@ -293,6 +303,10 @@ def sweep_strategy(
             continue
         if result.win_rate < MIN_WINRATE:
             continue
+        # Profit factor floor — drops break-even noise where wins are small
+        # and losses are big (the 1.04x trap).
+        if result.profit_factor < MIN_PROFIT_FACTOR:
+            continue
         candidates.append((result, nb, yb))
 
     if not candidates:
@@ -305,15 +319,19 @@ def sweep_strategy(
             "reason": "no candidates passed MIN_TRADES + MIN_WINRATE",
         }
 
-    # Score: realized P&L, descending. Simple is fine. Trade count is
-    # already enforced via MIN_TRADES; win rate via MIN_WINRATE; this
-    # leaves us picking the variant that made the most money.
-    candidates.sort(key=lambda c: c[0].realized_pnl_usd, reverse=True)
+    # Score: configurable. "profit_factor" prioritizes R/R skew so we don't
+    # ship variants that are 78% winrate but 1.04x PF (the trap that broke
+    # the initial sweep). "pnl" is the legacy total-money objective.
+    if SCORE_BY == "profit_factor":
+        candidates.sort(key=lambda c: (c[0].profit_factor, c[0].realized_pnl_usd), reverse=True)
+    else:
+        candidates.sort(key=lambda c: c[0].realized_pnl_usd, reverse=True)
     best_result, best_nb, best_yb = candidates[0]
     best = {
         "pnl": best_result.realized_pnl_usd,
         "winrate": best_result.win_rate,
         "trades": best_result.n_trades,
+        "profit_factor": best_result.profit_factor,
         "no_bands": best_nb,
         "yes_bands": best_yb,
     }
