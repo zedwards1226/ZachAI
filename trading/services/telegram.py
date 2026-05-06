@@ -328,6 +328,36 @@ async def notify_strategy_review(rolling_wr: float, weeks: int) -> bool:
     return await send(msg)
 
 
+async def notify_arm_blocked(arm_status: dict) -> bool:
+    """9:25 arm gate failed — bot is sitting out the open. Lists the
+    failing hard checks and tells Zach how to override."""
+    checks = arm_status.get("checks", {}) or {}
+    failing_lines = []
+    for key, info in checks.items():
+        if not info.get("ok"):
+            label = {
+                "cdp_symbol": "TradingView chart",
+                "broker":     "Paper Trading broker",
+                "dom_paper":  "Trade panel (DOM)",
+            }.get(key, key)
+            failing_lines.append(f"  • {label} — {info.get('msg', 'failing')}")
+
+    if not failing_lines:
+        # Defensive — should never hit since we only call this when armed=false
+        failing_lines.append("  • (no specific failure recorded)")
+
+    msg = (
+        f"🚫 <b>Bot didn't arm at 9:25 — sitting out today's open</b>\n\n"
+        f"<b>Failing checks:</b>\n"
+        + "\n".join(failing_lines)
+        + "\n\n"
+        f"<i>I won't place any trades until this clears. If you eyeball "
+        f"the chart and decide it's actually fine, tell Jarvis: "
+        f"\"arm orb anyway\".</i>"
+    )
+    return await send(msg)
+
+
 async def close() -> None:
     """Close the httpx client on shutdown."""
     global _client
