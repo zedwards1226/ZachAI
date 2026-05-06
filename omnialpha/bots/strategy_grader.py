@@ -154,12 +154,17 @@ def grade_strategies() -> dict:
                 # Telegram alert (best-effort, don't crash the grader on failure)
                 try:
                     from bots import telegram_alerts
+                    from bots.strategy_labels import label_strategy, short_resume_hint
+                    pretty = label_strategy(name)
+                    hint = short_resume_hint(name)
                     telegram_alerts.send(
-                        f"⚠️ <b>OmniAlpha auto-paused strategy</b>: <code>{name}</code>\n"
-                        f"{entry['reason']}\n"
-                        f"Resume manually:\n"
-                        f"<code>UPDATE strategy_state SET paused_at=NULL "
-                        f"WHERE strategy_name='{name}'</code>"
+                        f"⚠️ <b>I paused a strategy</b>\n"
+                        f"The {pretty} strategy has been losing too often "
+                        f"({entry['reason']}). I've stopped it from placing "
+                        f"new trades so it doesn't keep bleeding while we "
+                        f"figure out what's wrong.\n\n"
+                        f"<i>To turn it back on, ask Jarvis: "
+                        f"\"resume {hint}\".</i>"
                     )
                 except Exception as e:
                     logger.warning("pause telegram failed: %s", e)

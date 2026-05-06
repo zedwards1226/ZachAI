@@ -16,7 +16,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `agents/__init__.py`
 - `agents/sentinel.py` — 8 AM initial + 60s poll (news/truth watch)
 - `agents/structure.py` — 8:45 AM (daily levels, VIX, ATR)
-- `agents/briefing.py` — 8:50 AM (morning Telegram report)
+- `agents/briefing.py` — 8:50 AM (morning Telegram report — plain-English narrative, no abbreviations on first use)
 - `agents/combiner.py` — 15s poll during 9:30–15:00 (ORB scoring + trades)
 - `agents/preflight.py` — 7:00 AM (stack verification)
 - `agents/memory.py` — 7:30 AM + 6:00 PM (daily memory + EOD)
@@ -28,7 +28,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `services/__init__.py`
 - `services/tv_client.py` — TradingView CDP wrapper
 - `services/tv_trader.py` — order placement + trade monitoring
-- `services/telegram.py` — Telegram send/close
+- `services/telegram.py` — Telegram send/close, with plain-English label maps for score-breakdown keys + skip/block reasons (`_SCORE_KEY_PHRASE`, `_humanize_skip_reason`)
 - `services/state_manager.py` — state.json reads/writes
 
 ## Backtest
@@ -41,6 +41,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `tests/test_combiner_reversal.py`
 - `tests/test_config_loader.py`
 - `tests/test_learning_agent.py`
+- `tests/test_telegram_labels.py` — regression guard: skip reasons + score-breakdown keys translate to plain English (no `risk_too_wide:$X>Y`, `htf_bias` codenames in user text)
 
 ## Research
 - `research/production_patterns_2026-04-30.md` — pattern audit from 5 parallel research subagents

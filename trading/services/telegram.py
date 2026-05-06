@@ -24,6 +24,59 @@ _client: Optional[httpx.AsyncClient] = None
 # the message text so Zach sees "$50 risk" instead of "1.0 R:R".
 MNQ_POINT_VALUE = 2.00
 
+# Plain-English labels for score-breakdown keys (used in trade-entry "Why
+# we took it" / "Working against us" sections) and skip/block reasons.
+# Internal log lines and DB rows keep the raw codenames; only outbound
+# Telegram text gets translated. Missing keys fall back to underscore-
+# replacement and a logger.warning so we catch any new gates.
+_SCORE_KEY_PHRASE: dict[str, str] = {
+    "orb_candle_direction": "opening range candle agrees with the breakout direction",
+    "htf_bias":             "higher-timeframe bias supports the trade",
+    "bias_conflict":        "higher-timeframe bias disagrees with the trade",
+    "second_break":         "this is a second-attempt breakout (after a failed first try — strong edge)",
+    "open_air":             "no major level in the way for at least 20 points",
+    "approaching_wall":     "price is too close to a major level — limited room",
+    "at_level":             "price is sitting right on a key level — choppy zone",
+    "rvol":                 "trading volume is above average",
+    "vwap_alignment":       "price is on the right side of VWAP",
+    "vix_regime":           "volatility (VIX) is in the bot's sweet spot",
+    "prior_day_direction":  "yesterday closed in the same direction",
+    "no_news_block":        "no news block active (clear to trade)",
+    "no_truth_block":       "no market-moving social media block (clear to trade)",
+    "news_block":           "news block active (high-impact event nearby)",
+    "truth_block":          "market-moving news block active",
+}
+
+
+def _score_label(key: str) -> str:
+    if key in _SCORE_KEY_PHRASE:
+        return _SCORE_KEY_PHRASE[key]
+    logger.warning("No plain-English label for score key %r — falling back", key)
+    return key.replace("_", " ")
+
+
+def _humanize_skip_reason(raw: str) -> str:
+    """Translate the cascade/skip reason string into a sentence Zach can read.
+    Recognized patterns:
+      - "risk_too_wide:$540>350"  → "the stop would risk $540, above the $350-per-trade cap"
+      - "cascade:htf_bias_conflict" → "higher-timeframe bias disagrees with the trade"
+      - bare key   → underscore-replaced fallback (logged as warning)
+    """
+    if raw.startswith("risk_too_wide:"):
+        # format is risk_too_wide:$NNN>MMM
+        try:
+            tail = raw.split(":", 1)[1]
+            risk_part, cap_part = tail.split(">", 1)
+            return (
+                f"the stop would risk {risk_part}, above the ${cap_part}-per-trade cap"
+            )
+        except Exception:
+            return "the stop is too wide for our per-trade risk cap"
+    if raw.startswith("cascade:"):
+        key = raw[len("cascade:"):]
+        return _SCORE_KEY_PHRASE.get(key, key.replace("_", " "))
+    return _SCORE_KEY_PHRASE.get(raw, raw.replace("_", " "))
+
 
 def _get_client() -> httpx.AsyncClient:
     global _client
@@ -99,8 +152,8 @@ async def notify_trade_entry(direction: str, score: int, size: str,
     positives.sort(key=lambda x: x[1], reverse=True)
     negatives.sort(key=lambda x: x[1])
 
-    pos_text = "\n".join(f"  • {k.replace('_', ' ')} (+{v})" for k, v in positives[:3]) or "  (none)"
-    neg_text = "\n".join(f"  • {k.replace('_', ' ')} ({v})" for k, v in negatives[:3]) or "  (none)"
+    pos_text = "\n".join(f"  • {_score_label(k)} (+{v})" for k, v in positives[:3]) or "  (none)"
+    neg_text = "\n".join(f"  • {_score_label(k)} ({v})" for k, v in negatives[:3]) or "  (none)"
 
     # Risk vs reward in dollars (MNQ = $2/point)
     risk_pts = abs(entry - stop)
@@ -197,24 +250,27 @@ async def notify_skip(direction: str, score: int, reason: str) -> bool:
     not a score threshold. Skip means ONE gate failed; score is kept for
     context only.
     """
-    direction_word = "long" if direction == "LONG" else "short"
-    gate_name = reason.replace("cascade:", "").replace("_", " ")
+    direction_word = "buy" if direction == "LONG" else "short-sell"
+    plain_reason = _humanize_skip_reason(reason)
     msg = (
-        f"⏭️ <b>SKIPPED A {direction_word.upper()} SETUP</b>\n\n"
-        f"A safety gate blocked the trade: <b>{gate_name}</b>\n"
-        f"<i>(score {score}/10, kept for review — not the reason for skipping)</i>\n\n"
-        f"<i>No trade placed. Watching for the next setup.</i>"
+        f"⏭️ <b>Skipped a {direction_word} setup</b>\n\n"
+        f"A safety check blocked the trade: <b>{plain_reason}</b>.\n"
+        f"<i>(Confidence score was {score}/10 — recorded for review, but the "
+        f"safety check is what stopped us, not the score.)</i>\n\n"
+        f"<i>No trade placed. Bot is watching for the next setup.</i>"
     )
     return await send(msg)
 
 
 async def notify_be_move(trade_id: int, direction: str, entry: float) -> bool:
     """Notify that virtual stop has moved to breakeven after T1 reached."""
+    direction_word = "long" if direction == "LONG" else "short"
     msg = (
-        f"🎯 <b>T1 REACHED — STOP TO BREAKEVEN</b>\n\n"
-        f"Trade #{trade_id} ({direction}) hit T1.\n"
-        f"Virtual stop now at entry <b>{entry:.2f}</b>.\n\n"
-        f"<i>Worst case from here: scratch. Bot now targeting T2.</i>"
+        f"🎯 <b>First target hit — stop moved to breakeven</b>\n\n"
+        f"Trade #{trade_id} ({direction_word}) reached its first target.\n"
+        f"The bot just moved the stop up to entry price <b>{entry:.2f}</b>.\n\n"
+        f"<i>Worst case from here: we exit flat. The bot is now letting "
+        f"the rest run for the second target.</i>"
     )
     return await send(msg)
 
@@ -222,10 +278,10 @@ async def notify_be_move(trade_id: int, direction: str, entry: float) -> bool:
 async def notify_hard_block(reason: str) -> bool:
     """Send notification when trading is hard-blocked (won't take any trades)."""
     msg = (
-        f"🚫 <b>TRADING BLOCKED</b>\n\n"
-        f"Not taking any new trades right now.\n\n"
-        f"<b>Reason:</b> {reason}\n\n"
-        f"<i>Block clears automatically when the condition resolves.</i>"
+        f"🚫 <b>Bot is paused — won't trade right now</b>\n\n"
+        f"<b>Why:</b> {reason}\n\n"
+        f"<i>The block clears automatically once the condition is gone "
+        f"(news event passes, VIX cools off, etc).</i>"
     )
     return await send(msg)
 
@@ -233,11 +289,11 @@ async def notify_hard_block(reason: str) -> bool:
 async def notify_circuit_breaker(losses: int, daily_pnl: float) -> bool:
     """Send circuit breaker alert — too many losses, stopping for the day."""
     msg = (
-        f"⚠️ <b>STOPPING TRADING FOR TODAY</b>\n\n"
-        f"We've hit {losses} losses in a row.\n"
-        f"Today's profit/loss: ${daily_pnl:+.2f}\n\n"
-        f"Circuit breaker tripped — no more trades until tomorrow.\n"
-        f"<i>This protects us from revenge trading after a bad streak.</i>"
+        f"⚠️ <b>Stopping for the day</b>\n\n"
+        f"We've taken {losses} losses in a row.\n"
+        f"Today's net: <b>${daily_pnl:+.2f}</b>\n\n"
+        f"The circuit breaker tripped — no more trades until tomorrow.\n"
+        f"<i>This protects us from revenge-trading after a bad streak.</i>"
     )
     return await send(msg)
 
@@ -245,11 +301,11 @@ async def notify_circuit_breaker(losses: int, daily_pnl: float) -> bool:
 async def notify_sentinel_alert(alert_type: str, details: str) -> bool:
     """Send sentinel alert — news or social media event that may move markets."""
     msg = (
-        f"🚨 <b>MARKET-MOVING NEWS DETECTED</b>\n\n"
-        f"<b>Type:</b> {alert_type}\n"
+        f"🚨 <b>Heads up — news that could move the market</b>\n\n"
+        f"<b>What:</b> {alert_type}\n"
         f"<b>Details:</b> {details}\n\n"
-        f"<i>Heads up — this could shake things up. The bot may pause or "
-        f"tighten stops depending on the rules.</i>"
+        f"<i>This could shake things up. The bot may pause new entries or "
+        f"tighten stops on open trades depending on the rules.</i>"
     )
     return await send(msg)
 
@@ -262,12 +318,12 @@ async def notify_weekly_report(report_text: str) -> bool:
 async def notify_strategy_review(rolling_wr: float, weeks: int) -> bool:
     """Send alert when rolling win rate drops below threshold."""
     msg = (
-        f"⚠️ <b>STRATEGY MAY NEED A REVIEW</b>\n\n"
+        f"⚠️ <b>The strategy might need a review</b>\n\n"
         f"Win rate over the last 20 trades: <b>{rolling_wr:.0%}</b>\n"
         f"It's been below 40% for {weeks} weeks in a row.\n\n"
-        f"<i>The strategy might be drifting. Time to look at recent trades "
-        f"and decide if anything needs adjusting (parameters, filters, or "
-        f"pausing live trading until conditions change).</i>"
+        f"<i>The strategy might be drifting out of edge. Worth a look at "
+        f"recent trades to decide if anything needs adjusting — parameters, "
+        f"filters, or pausing live trading until conditions change.</i>"
     )
     return await send(msg)
 

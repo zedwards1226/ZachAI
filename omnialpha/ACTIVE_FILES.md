@@ -19,7 +19,8 @@ Per master CLAUDE.md hygiene rule: every file in this directory MUST appear here
 - `order_placer.py` — paper-order writer; HARD LOCK via `assert_paper_mode()` at top of `place()` (live cutover requires deleting that line in a separate diff)
 - `live_scanner.py` — live universe scanner — pulls Kalshi public markets, hands snapshots to strategies, places orders. Invalidates ctx_cache after each placement so concentration gate doesn't go stale intra-pass
 - `trade_monitor.py` — settles open paper trades + writes pnl_snapshots. Falls back to live `/markets/{ticker}` when local DB row is stale. Computes Kalshi-correct entry fee on win + loss
-- `telegram_alerts.py` — Jarvis-bot send-only with [OmniAlpha] prefix. Plain-English entry/exit messages with strike + close time. Anti-spam: `notify_error` throttled 30 min per (where, exc-type, msg); `notify_startup` rate-limited to 1/hr via sidecar file
+- `telegram_alerts.py` — Jarvis-bot send-only with [OmniAlpha] prefix. Plain-English entry/exit/daily-summary/halt/startup messages with strike + close time, narrative EOD digest with per-strategy breakdown + open positions. Anti-spam: `notify_error` throttled 30 min per (where, exc-type, msg); `notify_startup` rate-limited to 1/hr via sidecar file
+- `strategy_labels.py` — codename → plain-English lookup (`crypto_btc15m_midband` → "BTC 15-minute middle-band") used by every Telegram-bound message in the bot. Single source of truth — new strategies must add an entry here
 - `risk_engine.py` — 6-gate pre-trade filter (paper-mode, per-trade cap, liquidity, concentration, drawdown, cross-bot halt) + cross-bot risk_state.json coupling. All caps are % of LIVE capital so they compound
 
 ## `data_layer/`
@@ -57,6 +58,7 @@ Per master CLAUDE.md hygiene rule: every file in this directory MUST appear here
 - `test_order_placer.py` — 4 tests (paper writes correctly, live refused without explicit flag)
 - `test_live_scanner.py` — 9 tests (snapshot conversion, scan-and-trade, already-taken, HTTP failure)
 - `test_end_to_end.py` — 1 test, full lifecycle (strategy → risk → place → settle → P&L)
+- `test_strategy_labels.py` — regression guard: every Telegram-bound message must use plain-English labels (no `crypto_*_midband` codenames in user text)
 
 ## `state/` (gitignored)
 - `omnialpha.db` — SQLite store

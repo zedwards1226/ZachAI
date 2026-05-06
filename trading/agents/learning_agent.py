@@ -65,6 +65,32 @@ AUTO_APPLY = True           # 2026-05-04 — was effectively False (proposals
                               # auto-apply is safe AND keeps the bot learning
                               # without operator intervention.
 
+# Plain-English labels for Telegram-bound text. Internal log lines and DB
+# rows keep the raw knob/mode names — only the digest/heartbeat sent to
+# Zach gets translated. New knobs/failure modes must add an entry here OR
+# fall back gracefully (underscore-replaced) so a missing entry never
+# breaks a notification.
+_KNOB_PHRASE = {
+    "SCORE_HALF_SIZE": "minimum confidence to take a half-size trade",
+    "SCORE_FULL_SIZE": "minimum confidence to go full size",
+    "RVOL_THRESHOLD":  "minimum volume requirement",
+}
+_FAILURE_PHRASE = {
+    "false_breakout": "broke out then immediately failed",
+    "reversal":       "went our way then turned around past entry",
+    "time_exit":      "ran out of time before hitting target",
+    "low_score":      "low-confidence setup that didn't work",
+    "normal_loss":    "ordinary stop-out",
+}
+
+
+def _knob_label(name: str) -> str:
+    return _KNOB_PHRASE.get(name, name.replace("_", " ").lower())
+
+
+def _failure_label(name: str) -> str:
+    return _FAILURE_PHRASE.get(name, name.replace("_", " "))
+
 
 def _today_str() -> str:
     return datetime.now(ET).strftime("%Y-%m-%d")
@@ -387,10 +413,13 @@ async def run(dry_run: bool = False) -> dict:
 
         # ─── 4. Sample check + heartbeat ───
         if total < MIN_TRADES_FOR_PROPOSAL:
+            time_str = datetime.now(ET).strftime("%I:%M %p ET").lstrip("0")
             heartbeat = (
-                f"🧠 ORB Learning Agent — ran at {datetime.now(ET).strftime('%I:%M %p ET')}"
-                f" — {total}/{MIN_TRADES_FOR_PROPOSAL} trades accumulated —"
-                " no proposal yet"
+                f"🧠 <b>ORB Learning Agent</b> — checked in at {time_str}\n"
+                f"Only {total} trade{'s' if total != 1 else ''} in the last "
+                f"{LOOKBACK_DAYS} days so far — bot needs at least "
+                f"{MIN_TRADES_FOR_PROPOSAL} before it'll suggest any rule "
+                f"changes. Just keeping you posted that I'm alive."
             )
             if not dry_run:
                 journal.agent_journal_write(
@@ -447,18 +476,22 @@ async def run(dry_run: bool = False) -> dict:
                     logger.warning("auto-apply failed for %s: %s", p["knob"], e)
 
         # ─── 8. Write rows + Telegram digest ───
+        weekday = datetime.now(ET).strftime("%A")
         digest_lines = [
-            f"🧠 <b>ORB Learning Agent</b> — {datetime.now(ET).strftime('%a %b %d %I:%M %p ET')}",
-            f"Reviewed {total} trades over last {LOOKBACK_DAYS} days",
+            f"🧠 <b>ORB Learning Agent</b> — {weekday} evening review",
+            f"Looked at the last {LOOKBACK_DAYS} days — {total} trade"
+            f"{'s' if total != 1 else ''} reviewed.",
             "",
         ]
 
         proposal_ids: list[int] = []
         if not filtered:
-            digest_lines.append("✅ No rule changes proposed today.")
+            digest_lines.append(
+                "✅ No rule changes today. The bot's settings still look right."
+            )
         else:
             applied_set = {(p["knob"], p["proposed"]) for p in applied_now}
-            digest_lines.append("<b>Proposals:</b>")
+            digest_lines.append("<b>What I'm changing:</b>" if applied_now else "<b>What I'd like to change:</b>")
             for p in filtered:
                 applied = (p["knob"], p["proposed"]) in applied_set
                 status = "applied" if applied else "pending"
@@ -477,41 +510,52 @@ async def run(dry_run: bool = False) -> dict:
                     proposal_ids.append(pid)
                     p["id"] = pid
                 marker = "✅" if applied else "⏳"
+                action = "Changed" if applied else "Proposed"
                 digest_lines.append(
-                    f"{marker} #{p.get('id', '?')} {p['knob']}: {p['current']} → "
-                    f"{p['proposed']}"
+                    f"{marker} #{p.get('id', '?')} — {action} the "
+                    f"{_knob_label(p['knob'])} from <b>{p['current']}</b> to "
+                    f"<b>{p['proposed']}</b>."
                 )
-                digest_lines.append(f"  {p['reasoning']}")
-            digest_lines.append("")
+                digest_lines.append(f"  <i>Why: {p['reasoning']}</i>")
             if applied_now:
+                digest_lines.append("")
                 digest_lines.append(
-                    f"Auto-applied {len(applied_now)} change(s) (within step+cooldown bars). "
-                    "Revert: edit state/learned_config.json."
+                    f"<i>I auto-applied {len(applied_now)} change(s) "
+                    f"(within the safety caps). To revert, edit "
+                    f"state/learned_config.json.</i>"
                 )
 
         if skipped_for_cooldown:
             digest_lines.append("")
-            digest_lines.append("<b>Skipped (cooldown):</b>")
+            digest_lines.append(
+                "<b>Wanted to change but waiting:</b>"
+            )
             for p in skipped_for_cooldown:
                 digest_lines.append(
-                    f"• {p['knob']} — last changed {p['cooldown_since']}, "
-                    f"within {COOLDOWN_DAYS}d cooldown"
+                    f"• {_knob_label(p['knob'])} — last changed "
+                    f"{p['cooldown_since']}, within the "
+                    f"{COOLDOWN_DAYS}-day cooldown window."
                 )
 
         if observations:
             digest_lines.append("")
-            digest_lines.append("<b>Observations (not proposed):</b>")
+            digest_lines.append("<b>Things to keep an eye on:</b>")
             for obs in observations:
                 digest_lines.append(f"• {obs}")
 
         # Failure-mode breakdown — surfaces WHY losses happened so we can
         # tell "false breakouts" from "got into a reversal" from "regime change"
-        if failure_counts:
+        loss_count = sum(failure_counts.values())
+        if loss_count:
             digest_lines.append("")
-            digest_lines.append("<b>Loss patterns:</b>")
+            digest_lines.append(
+                f"<b>Why our {loss_count} loss{'es' if loss_count != 1 else ''} happened:</b>"
+            )
             ordered = sorted(failure_counts.items(), key=lambda kv: -kv[1])
             for mode, cnt in ordered:
-                digest_lines.append(f"• {mode}: {cnt}")
+                digest_lines.append(
+                    f"• {cnt} — {_failure_label(mode)}"
+                )
 
         digest = "\n".join(digest_lines)
         summary["proposals"] = filtered
@@ -549,7 +593,12 @@ async def run(dry_run: bool = False) -> dict:
                 )
         except Exception:
             logger.exception("Could not write error row to agent_journal")
-        await _send(f"🚨 ORB Learning Agent errored — {exc}")
+        await _send(
+            f"🚨 <b>ORB Learning Agent hit an error</b>\n"
+            f"I couldn't finish my nightly review. The bot is still trading "
+            f"normally — only the learning step failed.\n"
+            f"<i>Technical detail: {exc}</i>"
+        )
         return summary
 
 
@@ -569,34 +618,37 @@ async def run_weekly_digest() -> bool:
         manual = [r for r in rows if r["entry_type"] == "manual_edit"]
         errors = [r for r in rows if r["entry_type"] == "error"]
 
+        total_runs = heartbeats + len([r for r in rows if r['entry_type'] == 'digest'])
         lines = [
-            "🧠 <b>ORB Learning Agent — Weekly Digest</b>",
-            f"Week ending {datetime.now(ET).strftime('%b %d')}",
+            "🧠 <b>ORB Learning Agent — weekly recap</b>",
+            f"<i>Week ending {datetime.now(ET).strftime('%b %d')}.</i>",
             "",
-            f"Runs: {heartbeats + len([r for r in rows if r['entry_type'] == 'digest'])} "
-            f"({heartbeats} heartbeat-only)",
-            f"Proposals: {len(proposals)}",
-            f"Manual edits: {len(manual)}",
-            f"Errors: {len(errors)}",
+            f"Ran {total_runs} time{'s' if total_runs != 1 else ''} this week "
+            f"({heartbeats} were quiet heartbeats — not enough trades to review).",
+            f"Suggested {len(proposals)} rule change"
+            f"{'s' if len(proposals) != 1 else ''}.",
+            f"Manual edits to settings: {len(manual)}.",
+            f"Errors: {len(errors)}.",
         ]
 
         if proposals:
             lines.append("")
-            lines.append("<b>This week's proposals:</b>")
+            lines.append("<b>This week's rule-change proposals:</b>")
             for p in proposals:
                 status_emoji = {"pending": "⏳", "approved": "✅",
-                                "rejected": "❌", "reverted": "↩️"}.get(
+                                "rejected": "❌", "reverted": "↩️",
+                                "applied": "✅"}.get(
                     p.get("status", "pending"), "•"
                 )
                 lines.append(
-                    f"{status_emoji} #{p['id']} {p['knob']}: "
+                    f"{status_emoji} #{p['id']} — {_knob_label(p['knob'])}: "
                     f"{p['current_value']} → {p['proposed_value']} "
                     f"({p.get('status', 'pending')})"
                 )
 
         if errors:
             lines.append("")
-            lines.append("⚠️ <b>Errors this week:</b>")
+            lines.append("⚠️ <b>Errors hit this week:</b>")
             for e in errors[-3:]:
                 reason = (e.get("reasoning") or "")[:120]
                 lines.append(f"• {e['date']}: {reason}")
