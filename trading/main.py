@@ -231,6 +231,19 @@ async def run_preflight():
         logger.error("Preflight failed: %s", e, exc_info=True)
 
 
+async def run_arm_check():
+    """9:25 AM ET arm gate. Runs the 3 hard at-open checks and writes
+    state/arm_status.json. The combiner reads that file on every poll and
+    sits out if armed=false."""
+    try:
+        if not is_trading_day():
+            return
+        from agents.preflight import run_arm_check
+        await run_arm_check()
+    except Exception as e:
+        logger.error("Arm check failed: %s", e, exc_info=True)
+
+
 async def run_journal_backup():
     """Daily backup of journal.db — keeps last 30 days.
 
@@ -358,6 +371,13 @@ async def main():
     # Heartbeat: 8:55 AM ET — confirms briefing/structure/sentinel fired
     scheduler.add_job(run_briefing_heartbeat, "cron", hour=8, minute=55,
                       id="briefing_heartbeat", name="Briefing Heartbeat")
+
+    # Arm check: 9:25 AM ET — gates the combiner. Runs CDP/symbol +
+    # broker + DOM checks and writes state/arm_status.json. If any
+    # hard check fails, the combiner sits out the day until manual
+    # override (Jarvis writes arm_status.json with source="manual").
+    scheduler.add_job(run_arm_check, "cron", hour=9, minute=25,
+                      id="arm_check", name="9:25 Arm Check")
 
     # Heartbeat: 9:31 AM ET — confirms combiner is active at market open
     scheduler.add_job(run_combiner_heartbeat, "cron", hour=9, minute=31,

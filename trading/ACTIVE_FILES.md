@@ -18,7 +18,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `agents/structure.py` — 8:45 AM (daily levels, VIX, ATR)
 - `agents/briefing.py` — 8:50 AM (morning Telegram report — plain-English narrative, no abbreviations on first use)
 - `agents/combiner.py` — 15s poll during 9:30–15:00 (ORB scoring + trades)
-- `agents/preflight.py` — 7:00 AM (stack verification)
+- `agents/preflight.py` — `run()` 7:00 AM informational stack brief; `run_arm_check()` 9:25 AM hard-gate (CDP + broker + DOM) writing `state/arm_status.json`
 - `agents/memory.py` — 7:30 AM + 6:00 PM (daily memory + EOD)
 - `agents/journal.py` — journal DB + weekly report + agent_journal audit table
 - `agents/learning_agent.py` — 6:30 PM daily + Sun 7:05 AM weekly; reviews trades, proposes knob changes
@@ -42,6 +42,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `tests/test_config_loader.py`
 - `tests/test_learning_agent.py`
 - `tests/test_telegram_labels.py` — regression guard: skip reasons + score-breakdown keys translate to plain English (no `risk_too_wide:$X>Y`, `htf_bias` codenames in user text)
+- `tests/test_arm_gate.py` — 4 tests covering the 9:25 arm gate: happy path, hard-check failure blocks arming, combiner short-circuits + once-per-day alert, manual override path
 
 ## Research
 - `research/production_patterns_2026-04-30.md` — pattern audit from 5 parallel research subagents
@@ -53,6 +54,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `state/backups/journal_*.db` — daily journal DB backup (keeps 30 days)
 - `state/learned_config.json` — learning agent's approved knob overrides (manual edits detected + logged)
 - `state/learned_config.meta.json` — checksum + snapshot for manual-edit detection
+- `state/arm_status.json` — written by 9:25 arm gate; read by combiner on every poll. Schema: `{date, armed, source ("preflight"|"manual"), checks: {cdp_symbol, broker, dom_paper}, warnings: {calendar, disk, journal}, blocker}`. Combiner sits out if `armed=false` or file is missing/stale
 - `journal.db` — SQLite journal (includes `agent_journal` audit table)
 - `logs/trading.log*` — rotated daily, 14-day retention
 
@@ -65,6 +67,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 | `structure` | 8:45 AM ET | Daily levels, VIX, ATR |
 | `briefing` | 8:50 AM ET | Morning Telegram report |
 | `briefing_heartbeat` | 8:55 AM ET | Confirms morning agents ran |
+| `arm_check` | 9:25 AM ET | Gates combiner — 3 hard checks (CDP/broker/DOM) → writes `state/arm_status.json` |
 | `combiner_heartbeat` | 9:31 AM ET | Confirms combiner armed |
 | `sweep_poll` | every 15s | Sweep detection (internal clock gate) |
 | `sentinel_poll` | every 60s | News/truth poll |

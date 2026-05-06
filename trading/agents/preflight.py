@@ -1,14 +1,19 @@
 """Morning Preflight Agent.
 
-Runs at 7:00 AM ET. Verifies the full stack is ready before the 9:30 open:
-  - TradingView CDP reachable
-  - CDP symbol locked to DEFAULT_SYMBOL
-  - Today's high-impact economic events (CPI/NFP/FOMC)
-  - Disk space on C:
-  - Journal DB healthy
-  - Quote pull sanity check
+Two entry points:
 
-Sends Telegram brief with PASS/FAIL checklist.
+`run()` — 7:00 AM ET informational brief. Runs every check (CDP, symbol,
+broker, calendar, disk, journal, quote) and sends a PASS/FAIL Telegram.
+Situational awareness only; does NOT gate trading.
+
+`run_arm_check()` — 9:25 AM ET arm gate. Runs ONLY the 3 hard at-open
+checks (CDP/symbol, broker connected, DOM ready) and writes
+`state/arm_status.json`. The combiner reads that file on every poll and
+short-circuits if `armed=false` so it doesn't waste attempts at the open
+when the chart is in a broken state. Soft checks (calendar/disk/journal)
+are recorded as warnings but never block arming. Manual override path:
+Jarvis writes `arm_status.json` with `source="manual"` when Zach asks
+"arm orb anyway" after eyeballing.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ import pytz
 
 from config import DEFAULT_SYMBOL, JOURNAL_DB, TIMEZONE
 from services import telegram
+from services.state_manager import write_state
 from services.tv_client import get_client
 
 logger = logging.getLogger(__name__)
@@ -184,6 +190,85 @@ def _check_journal_db() -> tuple[bool, str]:
         return False, "journal.db missing"
     size_mb = JOURNAL_DB.stat().st_size / 1e6
     return True, f"journal.db {size_mb:.1f} MB"
+
+
+async def _check_dom_ready() -> tuple[bool, str]:
+    """Mirror the per-placement DOM probe from tv_trader.tv_dom_ready so the
+    arm gate catches the same `dom_not_ready:paper_trading_not_active` state
+    that produced the 5/4 cluster failures BEFORE the bot starts polling,
+    not after it logs three FAILED_PLACEMENT rows."""
+    try:
+        from services.tv_trader import tv_dom_ready
+        tv = await get_client()
+        ready, reason = await tv_dom_ready(tv)
+        if ready:
+            return True, "DOM ready, paper trading active"
+        return False, f"DOM not ready: {reason}"
+    except Exception as e:
+        return False, f"DOM check error: {e}"
+
+
+async def run_arm_check() -> dict:
+    """9:25 AM arm gate. Runs the 3 HARD checks only and writes
+    `state/arm_status.json`. Returns the same dict it wrote.
+
+    `armed=true` only if CDP/symbol AND broker AND DOM/paper all pass.
+    Soft checks (calendar/disk/journal) are recorded as warnings — they
+    never affect `armed`.
+
+    Sends a Telegram alert ONLY if armed=false (situational alert; the
+    7 AM informational brief covers the green-arm case).
+    """
+    logger.info("Arm check starting (9:25 gate)")
+
+    # Hard checks — these gate arming
+    cdp_ok, cdp_msg = await _check_cdp_and_symbol()
+    broker_ok, broker_msg = await _check_paper_broker()
+    dom_ok, dom_msg = await _check_dom_ready()
+
+    # Soft checks — informational only, do not gate
+    calendar_ok, calendar_msg = _check_calendar()
+    disk_ok, disk_msg = _check_disk()
+    journal_ok, journal_msg = _check_journal_db()
+
+    armed = cdp_ok and broker_ok and dom_ok
+    now = datetime.now(ET)
+
+    # Build a short blocker line for the Telegram
+    failing = []
+    if not cdp_ok:    failing.append(f"CDP/symbol: {cdp_msg}")
+    if not broker_ok: failing.append(f"broker: {broker_msg}")
+    if not dom_ok:    failing.append(f"DOM/paper: {dom_msg}")
+    blocker = " | ".join(failing) if failing else None
+
+    status = {
+        "date": now.strftime("%Y-%m-%d"),
+        "armed": armed,
+        "source": "preflight",
+        "checks": {
+            "cdp_symbol": {"ok": cdp_ok,    "msg": cdp_msg},
+            "broker":     {"ok": broker_ok, "msg": broker_msg},
+            "dom_paper":  {"ok": dom_ok,    "msg": dom_msg},
+        },
+        "warnings": {
+            "calendar": calendar_msg if not calendar_ok else None,
+            "disk":     disk_msg     if not disk_ok     else None,
+            "journal":  journal_msg  if not journal_ok  else None,
+        },
+        "armed_at": now.isoformat(),
+        "blocker": blocker,
+    }
+
+    write_state("arm_status", status)
+    logger.info("Arm check complete: armed=%s, blocker=%s", armed, blocker)
+
+    if not armed:
+        try:
+            await telegram.notify_arm_blocked(status)
+        except Exception as e:
+            logger.warning("notify_arm_blocked failed: %s", e)
+
+    return status
 
 
 async def run() -> None:

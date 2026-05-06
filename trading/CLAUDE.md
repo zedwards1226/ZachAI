@@ -17,6 +17,7 @@ NQ/MNQ futures ORB scalp system. Captures 15-min opening range (9:30-9:45 ET), w
 - **structure** — 8:45 AM (daily levels, VIX, ATR)
 - **briefing** — 8:50 AM (Telegram morning report)
 - **briefing_heartbeat** — 8:55 AM (Telegram ping confirming morning agents ran)
+- **arm_check** — 9:25 AM (gates combiner; runs CDP/symbol + broker + DOM hard checks, writes `state/arm_status.json`. Combiner sits out the day if any hard check fails. Soft checks like calendar/disk are recorded as warnings only.)
 - **combiner_heartbeat** — 9:31 AM (Telegram ping at market open)
 - **combiner** — every 15s during 9:30-15:00 (ORB scoring + trade execution)
 - **trade_monitor** — every 30s (stop/TP reconciliation, time exits)
@@ -48,6 +49,16 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 - **One position at a time** — combiner blocks new entries while `tv_trader.get_active_orders()` is non-empty. Prevents overlapping setups (e.g. long open + second-break short attempt).
 - **VIX > 30** — `VIX_HARD_BLOCK=30` — pause day
 - **High-impact news day** — CPI/NFP/FOMC scheduled in session window — pause day
+
+## ARM GATE (9:25 AM ET)
+The combiner reads `state/arm_status.json` on every 15-second poll. If
+`armed=false` (or the file is missing/stale), the bot sits out the day
+and fires a Telegram alert exactly once explaining which hard check
+failed. **Manual override:** ask Jarvis "arm orb anyway" — Jarvis writes
+`arm_status.json` with `source="manual", armed=true` and the combiner
+picks it up on the next tick. Three hard checks gate arming: TradingView
+CDP/symbol, paper broker connected, DOM/paper-trading active. Calendar,
+disk, journal are recorded as warnings only.
 
 ## TRADE MANAGEMENT (`monitor_trades` runs every 30s)
 - **T1 reached → BE move:** virtual_stop = entry, Telegram alert via `notify_be_move`. Original TV bracket SL stays as backstop.

@@ -45,6 +45,9 @@ _breakout_processed: bool = False
 # Risk-cap notification flags — set on first hit so we don't spam Telegram every 15s
 _logged_daily_cap: bool = False
 _logged_weekly_cap: bool = False
+# Arm-gate notification flag — same once-per-day pattern. Set when the
+# 9:25 preflight gate has blocked arming and we've already told Zach.
+_logged_arm_block: bool = False
 
 
 def _persist_session() -> None:
@@ -95,7 +98,7 @@ def _reset_session():
     """Reset session state for a new day."""
     global _orb, _first_break_direction, _first_break_failed
     global _trades_today, _session_date, _signals, _breakout_processed
-    global _logged_daily_cap, _logged_weekly_cap
+    global _logged_daily_cap, _logged_weekly_cap, _logged_arm_block
     _orb = None
     _first_break_direction = None
     _first_break_failed = False
@@ -105,6 +108,20 @@ def _reset_session():
     _breakout_processed = False
     _logged_daily_cap = False
     _logged_weekly_cap = False
+    _logged_arm_block = False
+
+
+def _arm_status_for_today() -> Optional[dict]:
+    """Return today's arm_status dict if it exists and is dated today,
+    else None. Stale rows (yesterday's status) count as not-armed so the
+    bot fails closed if the 9:25 job didn't run for some reason."""
+    status = read_state("arm_status")
+    if not status:
+        return None
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    if status.get("date") != today:
+        return None
+    return status
 
 
 async def poll() -> Optional[dict]:
@@ -124,6 +141,32 @@ async def poll() -> Optional[dict]:
     session_start = now.replace(hour=ORB_START_HOUR, minute=ORB_START_MINUTE, second=0)
     session_end = now.replace(hour=SESSION_END_HOUR, minute=SESSION_END_MINUTE, second=0)
     if now < session_start or now > session_end:
+        return None
+
+    # 9:25 arm gate. Combiner sits out if today's preflight didn't pass
+    # the 3 hard checks (CDP/symbol, broker, DOM/paper). Manual override:
+    # Jarvis writes arm_status.json with source="manual", armed=true.
+    # No status file or stale (not today) → fail closed.
+    global _logged_arm_block
+    arm = _arm_status_for_today()
+    if not arm or not arm.get("armed"):
+        if not _logged_arm_block:
+            # Synthesize a minimal status if the file is missing entirely
+            # so notify_arm_blocked has something useful to surface.
+            blocked_status = arm or {
+                "date": today,
+                "armed": False,
+                "source": "missing",
+                "checks": {
+                    "cdp_symbol": {"ok": False, "msg": "no arm status for today — 9:25 check did not run"},
+                },
+                "blocker": "9:25 arm check did not run",
+            }
+            try:
+                await telegram.notify_arm_blocked(blocked_status)
+            except Exception as e:
+                logger.warning("notify_arm_blocked failed: %s", e)
+            _logged_arm_block = True
         return None
 
     # One position at a time — block new entries while any existing position is open.
