@@ -7,8 +7,19 @@ Uses 31-member GFS ensemble for probability (not normal distribution).
 import logging
 import time
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import requests
+
+# IANA timezones per city — used for same-day resolution gate and current-time checks.
+CITY_TZ = {
+    "NYC": "America/New_York",
+    "CHI": "America/Chicago",
+    "MIA": "America/New_York",
+    "LAX": "America/Los_Angeles",
+    "DEN": "America/Denver",
+    "MEM": "America/Chicago",
+}
 
 from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, SHIN_Z
 from calibration import get_shrinkage
@@ -430,11 +441,41 @@ def scan_and_trade() -> list[dict]:
 
 
 def _fetch_actual_high(city_code: str, dt: date) -> float | None:
-    """Fetch the actual recorded high temp (degF) for a city on a given date via Open-Meteo archive."""
+    """Fetch the recorded high temp (degF) for a city on a given date.
+
+    For past dates, uses Open-Meteo's archive endpoint.
+    For today, uses the forecast endpoint with past_days=0 — returns the
+    running observed max for the current day in the city's timezone.
+    Falls back to archive if forecast returns nothing.
+    """
     from weather import _get_with_retry
     city = CITIES.get(city_code)
     if not city:
         return None
+
+    is_today = dt == date.today()
+
+    if is_today:
+        try:
+            r = _get_with_retry(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": city["lat"], "longitude": city["lon"],
+                    "daily": "temperature_2m_max",
+                    "temperature_unit": "fahrenheit",
+                    "timezone": "auto",
+                    "past_days": 0,
+                    "forecast_days": 1,
+                },
+                timeout=10,
+            )
+            val = r.json()["daily"]["temperature_2m_max"][0]
+            if val is not None:
+                return val
+        except Exception as exc:
+            log.warning("Forecast weather fetch failed for %s %s: %s", city_code, dt, exc)
+        # fall through to archive as defensive backstop
+
     try:
         ds = dt.isoformat()
         r = _get_with_retry(
@@ -509,9 +550,19 @@ def resolve_expired_trades() -> None:
                 continue
             city_code, market_date, strike_type, strike_f = parsed
 
-            # Only resolve if market date has fully passed
-            if market_date >= today:
+            # Resolution gate:
+            #   future date          -> skip
+            #   past date            -> resolve
+            #   today (city local)   -> only after 21:00 local in the city's TZ
+            #                          (NWS daily highs are effectively locked
+            #                          by ~7 PM local; 9 PM gives margin).
+            if market_date > today:
                 continue
+            if market_date == today:
+                tz_name = CITY_TZ.get(city_code, "America/Chicago")
+                local_now = datetime.now(ZoneInfo(tz_name))
+                if local_now.hour < 21:
+                    continue
 
             actual_high = _fetch_actual_high(city_code, market_date)
             if actual_high is None:
