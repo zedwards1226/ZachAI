@@ -82,7 +82,16 @@ def test_insufficient_data_fires_heartbeat(ephemeral_journal):
 
     assert result["status"] == "ok"
     assert result["proposals"] == []
-    assert result["heartbeat"] and "5/20" in result["heartbeat"]
+    # Heartbeat fires for any sub-threshold sample. We assert behavior
+    # (heartbeat populated, mentions trade count and threshold) instead
+    # of a literal substring so tone-rewrites don't break this test.
+    hb = result["heartbeat"] or ""
+    assert hb, "expected a heartbeat string"
+    assert "5" in hb, f"heartbeat should mention trade count (5): {hb!r}"
+    assert str(la.MIN_TRADES_FOR_PROPOSAL) in hb, (
+        f"heartbeat should mention MIN_TRADES_FOR_PROPOSAL "
+        f"({la.MIN_TRADES_FOR_PROPOSAL}): {hb!r}"
+    )
     # Exactly one heartbeat row, no proposals
     j = ephemeral_journal["journal"]
     with j.get_conn() as conn:
@@ -132,7 +141,9 @@ def test_threshold_proposal_when_half_band_losing(ephemeral_journal):
             "SELECT * FROM agent_journal WHERE entry_type='proposal'"
         ).fetchall()]
     assert len(rows) >= 1
-    assert rows[0]["status"] == "pending"
+    # AUTO_APPLY landed 2026-05-04 — proposals that pass cooldown + step
+    # caps are auto-applied. Either status is valid behavior here.
+    assert rows[0]["status"] in ("pending", "applied")
     assert rows[0]["knob"] == "SCORE_HALF_SIZE"
 
 

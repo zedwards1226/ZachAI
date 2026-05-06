@@ -1,7 +1,12 @@
 """BRIEFING AGENT — Runs at 8:50 AM ET.
 
-Sends Zach the same analysis the agents use to make decisions via Telegram.
-Reads structure.json, memory.json, sentinel.json and compiles into a morning report.
+Sends Zach the same analysis the agents use to make decisions via Telegram —
+but in plain English. Reads structure.json, memory.json, sentinel.json and
+compiles a morning report a human can read on a phone in 10 seconds.
+
+Style template = WeatherAlpha's daily digest (see kalshi/bots/monitor.py
+send_daily_digest). Section headers + 1-2 sentence narrative bullets.
+Abbreviations only appear in parens after their first plain-English use.
 """
 from __future__ import annotations
 
@@ -19,6 +24,27 @@ logger = logging.getLogger(__name__)
 ET = pytz.timezone(TIMEZONE)
 
 
+# Plain-English maps for the few internal labels that leak into the briefing.
+# Keep these tiny — the briefing should mostly read as prose, not a glossary.
+_ZONE_PHRASE = {
+    "DISCOUNT":   "lower half of yesterday's range (good for buying)",
+    "PREMIUM":    "upper half of yesterday's range (good for selling)",
+    "EQUILIBRIUM": "middle of yesterday's range (no edge either way)",
+}
+_VIX_PHRASE = {
+    "SWEET_SPOT": "calm — right in the bot's sweet spot (15-25)",
+    "LOW":        "very calm — small ranges expected",
+    "NORMAL":     "normal levels",
+    "ELEVATED":   "elevated — bigger moves possible",
+    "EXTREME":    "wild — VIX above 30, bot will hard-block",
+}
+_KNOB_PHRASE = {
+    "SCORE_HALF_SIZE": "minimum confidence to take a half-size trade",
+    "SCORE_FULL_SIZE": "minimum confidence to go full size",
+    "RVOL_THRESHOLD":  "minimum volume requirement (vs. average)",
+}
+
+
 async def run() -> bool:
     """Generate and send the morning briefing. Returns True if sent."""
     logger.info("Briefing agent starting")
@@ -28,189 +54,236 @@ async def run() -> bool:
     sentinel = read_state("sentinel")
 
     today = datetime.now(ET)
-    day_name = today.strftime("%a %b %d")
+    day_name = today.strftime("%A %b %d")
 
-    lines = [f"📊 <b>ORB MORNING BRIEFING — {day_name}</b>", ""]
+    lines = [
+        f"📊 <b>ORB morning briefing — {day_name}</b>",
+        "<i>Here's the lay of the land before today's open.</i>",
+        "",
+    ]
 
-    # --- STRUCTURE ---
-    lines.append("━━━ <b>STRUCTURE</b> ━━━")
+    # --- WHAT YESTERDAY DID + WHERE PRICE IS NOW ---
+    lines.append("<b>The setup</b>")
     if structure.get("error"):
-        lines.append(f"⚠️ Error: {structure['error']}")
+        lines.append(f"  ⚠️ Couldn't read the chart: {structure['error']}")
     elif not is_state_today("structure"):
-        lines.append("⚠️ Stale data (not from today)")
+        lines.append("  ⚠️ Chart data is stale (not from today) — bot may not trade until it refreshes.")
     else:
-        pd = structure.get("prior_day", {})
-        pw = structure.get("prior_week", {})
-        on = structure.get("overnight", {})
-        pm = structure.get("premarket", {})
+        pd = structure.get("prior_day", {}) or {}
+        pw = structure.get("prior_week", {}) or {}
+        on = structure.get("overnight", {}) or {}
+        pm = structure.get("premarket", {}) or {}
 
-        lines.append(
-            f"PDH: {_fmt(pd.get('high'))} | PDL: {_fmt(pd.get('low'))} | PDC: {_fmt(pd.get('close'))}"
-        )
-        lines.append(f"PWH: {_fmt(pw.get('high'))} | PWL: {_fmt(pw.get('low'))}")
-        lines.append(f"ON H: {_fmt(on.get('high'))} | ON L: {_fmt(on.get('low'))}")
-        lines.append(f"PM H: {_fmt(pm.get('high'))} | PM L: {_fmt(pm.get('low'))}")
-        lines.append(f"Equilibrium: {_fmt(structure.get('equilibrium'))}")
-        lines.append(f"Zone: {structure.get('zone', '?')}")
+        if pd.get("close") is not None:
+            lines.append(
+                f"  • Yesterday closed at {_fmt(pd.get('close'))} — "
+                f"high {_fmt(pd.get('high'))}, low {_fmt(pd.get('low'))}."
+            )
+        if pw.get("high") is not None:
+            lines.append(
+                f"  • Last week's range: {_fmt(pw.get('low'))} to {_fmt(pw.get('high'))}."
+            )
+        if on.get("high") is not None:
+            lines.append(
+                f"  • Overnight stretched from {_fmt(on.get('low'))} to {_fmt(on.get('high'))}."
+            )
+        if pm.get("high") is not None:
+            lines.append(
+                f"  • Premarket so far: {_fmt(pm.get('low'))} to {_fmt(pm.get('high'))}."
+            )
 
-        loc = structure.get("price_location", "?")
-        nearest = structure.get("nearest_level", {})
-        lines.append(
-            f"Price Location: {loc} ({nearest.get('distance_pts', '?')} pts from {nearest.get('name', '?')})"
-        )
+        zone = structure.get("zone", "?")
+        zone_phrase = _ZONE_PHRASE.get(zone)
+        if zone_phrase:
+            lines.append(f"  • Price is sitting in the {zone_phrase}.")
+
+        nearest = structure.get("nearest_level", {}) or {}
+        if nearest.get("name"):
+            lines.append(
+                f"  • Right now we're {nearest.get('distance_pts', '?')} points from "
+                f"{nearest.get('name', '?')} — that's the closest meaningful level."
+            )
 
         vix = structure.get("vix")
         vix_regime = structure.get("vix_regime", "?")
-        vix_emoji = "✓" if vix_regime == "SWEET_SPOT" else "⚠️" if vix_regime == "EXTREME" else ""
-        lines.append(f"VIX: {vix or '?'} ({vix_regime}) {vix_emoji}")
+        vix_phrase = _VIX_PHRASE.get(vix_regime, "")
+        if vix is not None:
+            if vix_phrase:
+                lines.append(f"  • Volatility (VIX): {vix} — {vix_phrase}.")
+            else:
+                lines.append(f"  • Volatility (VIX): {vix}.")
 
         rvol = structure.get("rvol")
         if rvol:
-            lines.append(f"RVOL: {rvol:.1f}x")
+            descriptor = (
+                "below average" if rvol < 0.9
+                else "above average" if rvol > 1.1
+                else "near average"
+            )
+            lines.append(f"  • Volume so far is {descriptor} ({rvol:.1f}× normal).")
 
         atr = structure.get("atr_14")
         if atr:
-            lines.append(f"ATR(14): {atr:.2f}")
+            lines.append(f"  • Typical daily move (14-day average): {atr:.1f} points.")
 
     lines.append("")
 
-    # --- MEMORY ---
-    lines.append("━━━ <b>MEMORY</b> ━━━")
+    # --- WHAT THE BOT REMEMBERS FROM RECENT DAYS ---
+    lines.append("<b>What the bot's been seeing lately</b>")
     if memory.get("error"):
-        lines.append(f"⚠️ Error: {memory['error']}")
+        lines.append(f"  ⚠️ Memory unavailable: {memory['error']}")
     elif not memory.get("morning_bias"):
-        lines.append("⚠️ No memory data available")
+        lines.append("  ⚠️ No memory data yet — bot needs a few sessions to form a view.")
     else:
         bias = memory.get("morning_bias", "?")
         conf = memory.get("bias_confidence", 0)
-        reasons = memory.get("bias_reasons", [])
+        reasons = memory.get("bias_reasons", []) or []
 
-        bias_emoji = "🟢" if "BULLISH" in bias else "🔴" if "BEARISH" in bias else "⚪"
-        lines.append(f"Bias: {bias_emoji} {bias} (confidence {conf:.0%})")
+        if "BULLISH" in bias:
+            bias_phrase = f"leaning <b>bullish</b> ({conf:.0%} confidence)"
+        elif "BEARISH" in bias:
+            bias_phrase = f"leaning <b>bearish</b> ({conf:.0%} confidence)"
+        else:
+            bias_phrase = f"<b>neutral</b> ({conf:.0%} confidence)"
+        lines.append(f"  • Today's bias: {bias_phrase}.")
+
         for r in reasons[:3]:
-            lines.append(f"  • {r}")
+            lines.append(f"    – {r}")
 
-        recent = memory.get("recent_days", [])
+        recent = memory.get("recent_days", []) or []
         if recent:
             day_strs = []
             for d in recent[-3:]:
-                arrow = "↑" if d.get("direction") == "BULLISH" else "↓"
-                day_strs.append(f"{d.get('day_type', '?')} {arrow}")
-            lines.append(f"Last 3: {' | '.join(day_strs)}")
+                day_type = d.get("day_type", "?").lower()
+                direction = (d.get("direction") or "?").lower()
+                day_strs.append(f"{day_type} day, {direction}")
+            lines.append(f"  • Last 3 days: {' / '.join(day_strs)}.")
 
-        rolling = memory.get("rolling_10day", {})
-        if rolling:
-            lines.append(f"10-day avg range: {rolling.get('avg_range', '?')} pts")
+        rolling = memory.get("rolling_10day", {}) or {}
+        if rolling.get("avg_range"):
+            lines.append(
+                f"  • 10-day average daily range: {rolling['avg_range']} points."
+            )
 
     lines.append("")
 
-    # --- SENTINEL ---
-    lines.append("━━━ <b>SENTINEL</b> ━━━")
+    # --- NEWS / EVENTS RISK ---
+    lines.append("<b>News &amp; events check</b>")
     if not sentinel:
-        lines.append("⚠️ No sentinel data (not yet run)")
+        lines.append("  ⚠️ Sentinel hasn't run yet — news risk unknown.")
     else:
         news_block = sentinel.get("news_block", False)
         truth_block = sentinel.get("truth_block", False)
 
-        nb_emoji = "🚫" if news_block else "✅"
-        tb_emoji = "🚫" if truth_block else "✅"
-        lines.append(f"NEWS_BLOCK: {nb_emoji} {'ACTIVE' if news_block else 'Clear'}")
-        lines.append(f"TRUTH_BLOCK: {tb_emoji} {'ACTIVE' if truth_block else 'Clear'}")
+        if not news_block and not truth_block:
+            lines.append("  ✅ Nothing flagged — bot is free to trade.")
+        else:
+            if news_block:
+                lines.append("  🚫 News block is active — major economic event nearby.")
+            if truth_block:
+                lines.append("  🚫 Block from a market-moving social-media post.")
+            if sentinel.get("block_reason"):
+                lines.append(f"    – Reason: {sentinel['block_reason']}")
 
-        if sentinel.get("block_reason"):
-            lines.append(f"Reason: {sentinel['block_reason']}")
+        events = sentinel.get("economic_events", []) or []
+        for ev in events[:2]:
+            lines.append(
+                f"  • Upcoming: {ev.get('time', '?')} — {ev.get('event', '?')} "
+                f"(impact: {ev.get('impact', '?')})"
+            )
 
-        events = sentinel.get("economic_events", [])
-        if events:
-            for ev in events[:2]:
-                lines.append(f"  📅 {ev.get('time', '?')} — {ev.get('event', '?')} ({ev.get('impact', '?')})")
-
-        truth_posts = sentinel.get("truth_posts", [])
+        truth_posts = sentinel.get("truth_posts", []) or []
         high_posts = [p for p in truth_posts if p.get("impact") == "HIGH_IMPACT"]
         if high_posts:
-            lines.append(f"  ⚡ {len(high_posts)} high-impact news item(s):")
+            lines.append(f"  ⚡ {len(high_posts)} high-impact news item(s) being watched:")
             for p in high_posts[:3]:
-                lines.append(f"    • {p['text'][:120]}")
+                lines.append(f"    – {p['text'][:120]}")
         elif truth_posts:
-            lines.append(f"  📰 {len(truth_posts)} news items (no high-impact triggers)")
+            lines.append(f"  📰 {len(truth_posts)} news items scanned, none flagged high-impact.")
 
-        truth_status = sentinel.get("truth_status", "")
-        if truth_status == "UNAVAILABLE":
-            lines.append("  ⚠️ News feed unavailable")
+        if sentinel.get("truth_status") == "UNAVAILABLE":
+            lines.append("  ⚠️ News feed temporarily unavailable.")
 
     lines.append("")
 
-    # --- GAME PLAN ---
-    lines.append("━━━ <b>GAME PLAN</b> ━━━")
-
+    # --- THE GAME PLAN ---
+    lines.append("<b>Game plan</b>")
     bias_dir = memory.get("morning_bias", "NEUTRAL")
     zone = structure.get("zone", "?")
-    price_loc = structure.get("price_location", "?")
     vix_regime = structure.get("vix_regime", "?")
 
-    # Determine preferred direction
     if "BULLISH" in bias_dir:
-        pref = "LONG preferred (memory bias bullish"
+        plan = "Looking to buy if NQ breaks above the opening range high"
         if zone == "DISCOUNT":
-            pref += " + discount zone"
-        pref += ")"
+            plan += " (price is already in a good zone for that)"
+        plan += "."
     elif "BEARISH" in bias_dir:
-        pref = "SHORT preferred (memory bias bearish"
+        plan = "Looking to sell short if NQ breaks below the opening range low"
         if zone == "PREMIUM":
-            pref += " + premium zone"
-        pref += ")"
+            plan += " (price is already in a good zone for that)"
+        plan += "."
     else:
-        pref = "No directional preference (neutral bias)"
+        plan = "No directional bias today — bot will take the first valid breakout in either direction."
+    lines.append(f"  • {plan}")
 
-    lines.append(f"Direction: {pref}")
-
-    # Key levels
-    pd = structure.get("prior_day", {})
-    if pd:
+    pd = structure.get("prior_day", {}) or {}
+    if pd.get("high") is not None and pd.get("low") is not None:
         lines.append(
-            f"Key levels: PDH {_fmt(pd.get('high'))} (resistance), PDL {_fmt(pd.get('low'))} (support)"
+            f"  • Key levels to watch: "
+            f"{_fmt(pd.get('high'))} (yesterday's high — likely resistance), "
+            f"{_fmt(pd.get('low'))} (yesterday's low — likely support)."
         )
 
-    # Expected scoring
     if "BULLISH" in bias_dir:
-        lines.append(f"If ORB breaks HIGH → LONG, score likely {SCORE_FULL_SIZE}+ (full size)")
-        lines.append(f"If ORB breaks LOW → counter-bias, score likely &lt;{SCORE_HALF_SIZE} (skip)")
+        lines.append(
+            f"  • A clean break above the opening range high would likely score "
+            f"{SCORE_FULL_SIZE}+ → bot takes it at full size."
+        )
+        lines.append(
+            f"  • A break the other way would fight the bias and probably "
+            f"score below {SCORE_HALF_SIZE} → bot will skip it."
+        )
     elif "BEARISH" in bias_dir:
-        lines.append(f"If ORB breaks LOW → SHORT, score likely {SCORE_FULL_SIZE}+ (full size)")
-        lines.append(f"If ORB breaks HIGH → counter-bias, score likely &lt;{SCORE_HALF_SIZE} (skip)")
+        lines.append(
+            f"  • A clean break below the opening range low would likely score "
+            f"{SCORE_FULL_SIZE}+ → bot takes it at full size."
+        )
+        lines.append(
+            f"  • A break the other way would fight the bias and probably "
+            f"score below {SCORE_HALF_SIZE} → bot will skip it."
+        )
 
-    # Hard blocks check
     blocks = []
     if vix_regime == "EXTREME":
-        blocks.append("VIX > 30")
+        blocks.append("VIX is above 30 — too wild")
     if sentinel.get("news_block"):
-        blocks.append("News block active")
+        blocks.append("news block active")
     if sentinel.get("truth_block"):
-        blocks.append("Truth Social block active")
-
+        blocks.append("market-moving news block active")
     if blocks:
-        lines.append(f"⚠️ Hard blocks: {', '.join(blocks)}")
+        lines.append(f"  ⚠️ Hard blocks today: {'; '.join(blocks)}.")
     else:
-        lines.append("Hard blocks: None active ✓")
+        lines.append("  ✅ No hard blocks — bot is cleared to trade if a setup appears.")
 
-    # --- LEARNING AGENT STATUS ---
-    if LEARNED_OVERRIDES or _pending_proposals():
+    # --- LEARNING AGENT FOOTER (only if there's something to say) ---
+    pending = _pending_proposals()
+    if LEARNED_OVERRIDES or pending:
         lines.append("")
-        lines.append("━━━ <b>LEARNING AGENT</b> ━━━")
+        lines.append("<b>Learning agent</b>")
         if LEARNED_OVERRIDES:
-            lines.append("Active overrides:")
+            lines.append("  Active rule changes from recent learning:")
             for k, v in sorted(LEARNED_OVERRIDES.items()):
-                lines.append(f"  • {k} = {v}")
-        pending = _pending_proposals()
+                pretty = _KNOB_PHRASE.get(k, k.replace("_", " ").lower())
+                lines.append(f"    • {pretty}: now <b>{v}</b>")
         if pending:
-            lines.append(f"Pending proposals: {len(pending)}")
+            lines.append(f"  Waiting on your call ({len(pending)} pending proposal(s)):")
             for p in pending[:3]:
+                pretty = _KNOB_PHRASE.get(p["knob"], p["knob"].replace("_", " ").lower())
                 lines.append(
-                    f"  ⏳ #{p['id']} {p['knob']}: "
-                    f"{p['current_value']} → {p['proposed_value']}"
+                    f"    ⏳ #{p['id']} — change {pretty} from "
+                    f"{p['current_value']} to {p['proposed_value']}"
                 )
 
-    # Send
     message = "\n".join(lines)
     success = await telegram.notify_briefing(message)
     if success:

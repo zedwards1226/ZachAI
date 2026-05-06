@@ -317,11 +317,19 @@ def job_tune_bands() -> None:
         )
         if summary["applied"]:
             try:
-                applied_list = ", ".join(summary["applied"])
+                from bots.strategy_labels import label_strategy
+                pretty = [label_strategy(s) for s in summary["applied"]]
+                if len(pretty) == 1:
+                    list_text = pretty[0]
+                elif len(pretty) == 2:
+                    list_text = f"{pretty[0]} and {pretty[1]}"
+                else:
+                    list_text = ", ".join(pretty[:-1]) + f", and {pretty[-1]}"
                 telegram_alerts.send(
-                    f"🔧 <b>OmniAlpha auto-tuned bands</b> for {len(summary['applied'])} "
-                    f"strategy(ies):\n<code>{applied_list}</code>\n"
-                    f"Restart bot to apply: <code>OmniAlpha.vbs</code>"
+                    f"🔧 <b>I adjusted some strategy settings</b>\n"
+                    f"Based on the last week of trades, I've retuned the "
+                    f"buy/sell bands for: {list_text}.\n"
+                    f"<i>The new settings kick in next time the bot restarts.</i>"
                 )
             except Exception as e:
                 log.warning("tune-bands telegram failed: %s", e)

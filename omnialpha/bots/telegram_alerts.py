@@ -26,7 +26,8 @@ from typing import Optional
 import httpx
 from dotenv import dotenv_values
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PAPER_MODE
+from bots.strategy_labels import label_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,7 @@ def notify_entry(
     )
     if hope:
         msg += f"\n{hope}\n"
-    msg += f"\n<i>{strategy} · edge {edge:+.1%}</i>"
+    msg += f"\n<i>{label_strategy(strategy)} · edge {edge:+.1%}</i>"
     send(msg)
 
 
@@ -223,30 +224,119 @@ def notify_exit(
         outcome = f"{side.upper()} bet resolved"
 
     msg = (
-        f"{icon} <b>{word} ${pnl_usd:+.2f}</b>\n"
+        f"{icon} <b>{word} ${abs(pnl_usd):.2f}</b>\n"
         f"{outcome}\n"
-        f"\n<i>{strategy}</i>"
+        f"\n<i>{label_strategy(strategy)}</i>"
     )
     send(msg)
 
 
 def notify_block(reason: str, detail: str) -> None:
     """Risk-engine refusal or other block — keeps Zach in the loop."""
-    send(f"⚠️ <b>Blocked</b>: {reason}\n{detail}")
+    send(
+        f"⚠️ <b>Skipped a trade</b>\n"
+        f"The risk engine blocked it: {reason}\n"
+        f"<i>{detail}</i>"
+    )
+
+
+def _today_breakdown_by_strategy() -> list[tuple[str, int, float]]:
+    """Per-strategy trade count + realized P&L for today (settled trades only).
+    Returns list of (strategy_name, n_trades, pnl_usd) sorted by abs(pnl) desc.
+    Failures return [] — caller handles missing-section gracefully.
+    """
+    from datetime import datetime
+    from data_layer.database import get_conn
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        with get_conn(readonly=True) as conn:
+            rows = conn.execute(
+                "SELECT strategy, COUNT(*) AS n, "
+                "       COALESCE(SUM(CASE WHEN status IN ('won','lost') THEN pnl_usd END), 0) AS pnl "
+                "FROM trades WHERE substr(timestamp, 1, 10) = ? "
+                "GROUP BY strategy ORDER BY ABS(pnl) DESC",
+                (today,),
+            ).fetchall()
+        return [(r["strategy"], int(r["n"]), float(r["pnl"] or 0)) for r in rows]
+    except Exception as e:
+        logger.warning("daily breakdown lookup failed: %s", e)
+        return []
+
+
+def _open_positions_now() -> tuple[int, float]:
+    """(open_count, unrealized_total). Unrealized = stake on open trades —
+    we don't mark-to-market here, just surface the at-risk amount."""
+    from data_layer.database import get_conn
+    try:
+        with get_conn(readonly=True) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(stake_usd), 0) AS at_risk "
+                "FROM trades WHERE status = 'open'"
+            ).fetchone()
+        return int(row["n"] or 0), float(row["at_risk"] or 0)
+    except Exception as e:
+        logger.warning("open positions lookup failed: %s", e)
+        return 0, 0.0
 
 
 def notify_daily_summary(
     *, capital_usd: float, day_pnl_usd: float,
     trades_today: int, wins: int, losses: int,
 ) -> None:
-    sign = "+" if day_pnl_usd >= 0 else ""
-    wr = wins / max(wins + losses, 1) * 100
-    send(
-        f"📊 <b>Daily Summary</b>\n"
-        f"Capital: ${capital_usd:,.2f}\n"
-        f"Today's P&L: {sign}${day_pnl_usd:.2f}\n"
-        f"Trades: {trades_today} ({wins}W/{losses}L, {wr:.0f}% WR)"
+    """End-of-day narrative digest, WeatherAlpha-style — full sentences,
+    per-strategy breakdown, current at-risk capital. No bare-numbers wall."""
+    mode_text = (
+        "paper trading (no real money on the line)"
+        if PAPER_MODE else "LIVE TRADING (real money)"
     )
+    pnl_word = "profit" if day_pnl_usd >= 0 else "loss"
+    pnl_amt = f"${abs(day_pnl_usd):.2f}"
+    wr = (wins / (wins + losses) * 100) if (wins + losses) else 0
+
+    if trades_today == 0:
+        trade_line = "No trades placed today — markets didn't line up with our bands."
+    else:
+        trade_line = (
+            f"Today's {pnl_word}: <b>{pnl_amt}</b> from {trades_today} trade"
+            f"{'s' if trades_today != 1 else ''} "
+            f"({wins} win{'s' if wins != 1 else ''}, "
+            f"{losses} loss{'es' if losses != 1 else ''}, {wr:.0f}% win rate)"
+        )
+
+    lines = [
+        "🌙 <b>End of day — OmniAlpha</b>",
+        "<i>Here's how today landed.</i>",
+        "",
+        f"<b>Trading mode:</b> {mode_text}",
+        f"<b>Account balance:</b> ${capital_usd:,.2f}",
+        "",
+        trade_line,
+    ]
+
+    breakdown = _today_breakdown_by_strategy()
+    if breakdown:
+        lines.append("")
+        lines.append("<b>By strategy today:</b>")
+        for name, n, pnl in breakdown:
+            sign = "+" if pnl >= 0 else "−"
+            lines.append(
+                f"  • {label_strategy(name)}: {n} trade{'s' if n != 1 else ''}, "
+                f"{sign}${abs(pnl):.2f}"
+            )
+
+    open_n, at_risk = _open_positions_now()
+    lines.append("")
+    if open_n == 0:
+        lines.append("<b>Right now:</b> no positions open.")
+    else:
+        lines.append(
+            f"<b>Right now:</b> holding {open_n} position"
+            f"{'s' if open_n != 1 else ''}, "
+            f"${at_risk:.2f} at risk "
+            f"<i>(P&L locks in once each market resolves)</i>"
+        )
+
+    send("\n".join(lines))
 
 
 def notify_error(where: str, exc: BaseException) -> None:
@@ -296,8 +386,19 @@ def notify_startup() -> None:
         _STARTUP_THROTTLE_FILE.write_text(str(now))
     except Exception as e:
         logger.warning("startup throttle file write failed: %s", e)
-    send("🟢 <b>OmniAlpha online</b> — multi-sector Kalshi bot started")
+    mode_text = "paper trading" if PAPER_MODE else "LIVE trading"
+    send(
+        f"🟢 <b>OmniAlpha is online</b>\n"
+        f"The multi-sector Kalshi bot just started up "
+        f"({mode_text}). I'll watch the markets and let you know when "
+        f"trades fire."
+    )
 
 
 def notify_halt(reason: str) -> None:
-    send(f"🛑 <b>HALTED</b>: {reason}\nNew entries blocked. Resolve before resume.")
+    send(
+        f"🛑 <b>OmniAlpha halted</b>\n"
+        f"I've stopped placing new trades. Reason: {reason}\n"
+        f"<i>Existing positions are still open and being tracked. "
+        f"Trading resumes once the issue is fixed.</i>"
+    )
