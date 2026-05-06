@@ -8,7 +8,13 @@ Gates:
   1. Paper-mode check       — refuse if PAPER_MODE flag is off without approval
   2. Per-trade $ cap        — clamp contracts so max_loss <= per_trade_cap_usd(capital)
   3. Liquidity              — refuse if market volume_fp < MIN_LIQUIDITY_FP
-  4. Concentration          — refuse if open positions in this sector >= MAX_CONCURRENT
+  4. Concentration          — refuse if open positions >= MAX_CONCURRENT (global)
+  4b. Same-series same-side — refuse if there's already an open trade with the same
+                              (strategy, series_ticker, side). Blocks the 2026-05-05
+                              BTCD pattern: two NO bets on T80999 + T80899 of the
+                              same KXBTCD-26MAY0521 series stacked into one $48
+                              correlated position. Different strikes ≠ different
+                              risk when they all settle from the same underlying.
   5. Drawdown / loss caps   — daily/weekly via daily_loss_cap_usd / weekly_loss_cap_usd
                               (compounding — % of live capital). Plus consecutive losses.
   6. Cross-bot risk state   — read shared risk_state.json. If aggregate loss across all
@@ -61,11 +67,54 @@ class RiskCheckResult:
     clamped_contracts: int  # what the strategy should ACTUALLY enter (0 if denied)
 
 
+def _series_key(ticker: str) -> str:
+    """Strip the strike suffix from a ticker so multiple strikes on the
+    same series + window collapse into a single bucket.
+
+    Examples:
+      KXBTCD-26MAY0521-T80999.99 → KXBTCD-26MAY0521  (strike-keyed daily)
+      KXETHD-26MAY0421-T2359.99  → KXETHD-26MAY0421  (strike-keyed daily)
+      KXBTC15M-26MAY052015-15    → KXBTC15M-26MAY052015-15  (binary up/down,
+                                                              one market per
+                                                              window — keep
+                                                              full ticker)
+    """
+    if "-T" in ticker:
+        return ticker.split("-T")[0]
+    return ticker
+
+
+def _count_open_in_bucket(strategy_name: str, series_key: str, side: str) -> int:
+    """How many currently-open trades are in the (strategy, series, side)
+    bucket? Used by Gate 4b to block stacking neighboring strikes of the
+    same series in the same direction — they all resolve from the same
+    underlying so they're effectively one correlated position."""
+    sql = (
+        "SELECT COUNT(*) FROM trades "
+        "WHERE strategy = ? AND side = ? AND status = 'open' "
+        "AND market_ticker LIKE ? "
+    )
+    # series_key is the ticker prefix; LIKE pattern matches itself OR
+    # itself + strike suffix. e.g. 'KXBTCD-26MAY0521' catches both
+    # 'KXBTCD-26MAY0521' (binary) AND 'KXBTCD-26MAY0521-T80999.99' (strike).
+    pattern = series_key + "%"
+    try:
+        with get_conn(readonly=True) as conn:
+            return conn.execute(sql, (strategy_name, side, pattern)).fetchone()[0]
+    except Exception as e:
+        logger.warning(
+            "could not count open bucket (%s/%s/%s): %s",
+            strategy_name, series_key, side, e,
+        )
+        return 0  # fail-open — don't block trades because the DB hiccupped
+
+
 def check_entry(
     decision: EntryDecision,
     market: MarketSnapshot,
     context: StrategyContext,
     *,
+    strategy_name: Optional[str] = None,
     skip_db_gates: bool = False,
 ) -> RiskCheckResult:
     """Run all gates. Return verdict for the runner.
@@ -125,6 +174,27 @@ def check_entry(
             detail=f"already {context.open_positions_count} open positions (cap {MAX_CONCURRENT_POSITIONS})",
             clamped_contracts=0,
         )
+
+    # Gate 4b: same-series same-side stacking. Different strikes of the
+    # same series + side resolve from the same underlying — they're not
+    # diversification, they're one correlated position. Block new entries
+    # in a bucket that already has an open trade.
+    #
+    # Skipped when strategy_name is unset (legacy callers / unit tests
+    # that don't have a strategy concept) and during backtest replay.
+    if strategy_name and not skip_db_gates:
+        skey = _series_key(market.ticker)
+        already_open = _count_open_in_bucket(strategy_name, skey, decision.side)
+        if already_open > 0:
+            return RiskCheckResult(
+                approved=False,
+                reason="same_series_same_side",
+                detail=(
+                    f"{strategy_name} already has {already_open} open "
+                    f"{decision.side.upper()} position(s) in series {skey}"
+                ),
+                clamped_contracts=0,
+            )
 
     # Gate 5: drawdown / loss caps (compounding — % of live capital).
     daily_cap = daily_loss_cap_usd(context.capital_usd)

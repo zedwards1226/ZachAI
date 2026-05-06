@@ -74,7 +74,7 @@ No paid data feeds. No PMXT relay. No third-party data brokers. Everything Zach 
 1. **Behavioral-bias scanner** — finds NO-side overpricing on long-shots, narrow-range mispricing (WA's thesis generalized)
 2. **Theta harvesting** — far-OTM long-dated NO positions on conditional events
 3. **News reaction** — sentinel-driven (uses `C:\ZachAI\trading\state\sentinel.json` shared with ORB)
-4. **5-gate pre-trade filter** — Kelly / Liquidity / Correlation / Concentration / Drawdown (stolen from OctagonAI/kalshi-trading-bot-cli)
+4. **6+1-gate pre-trade filter** — Kelly / Liquidity / Concentration (max parallel) / Same-series-same-side bucket (correlation) / Drawdown / Cross-bot halt (stolen from OctagonAI/kalshi-trading-bot-cli, plus the bucket gate added 2026-05-05 after BTCD stacked T80999+T80899 on the same KXBTCD-26MAY0521 series and lost $49)
 5. **CLV grading** — auto-pause underperforming sectors (mirrors WA's learning-agent city pause)
 6. **Hedge-to-lock** — buy opposite side at favorable price to lock partial profit, free capital faster
 
