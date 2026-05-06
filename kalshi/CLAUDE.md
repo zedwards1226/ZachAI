@@ -20,7 +20,8 @@ Kalshi weather prediction market trading bot. Trades between-markets on daily hi
 - Never commit private keys. `.gitignore` must protect this dir before any push.
 
 ## CITIES
-NYC, CHI, MIA, LAX, MEM, DEN
+20 active (added 2026-05-05): NYC, CHI, MIA, LAX, DEN, AUS, ATL, BOS, DAL, WDC, HOU, LAS, MIN, NOL, OKC, PHX, SAT, SEA, SFO, PHL.
+Each KXHIGH series ships 12 strike levels per day. Bot picks top edges system-wide; MAX_DAILY_TRADES (default 5) caps per-day exposure. Learning agent auto-pauses any city after 3/5 losses, so the lineup self-selects.
 
 ## API ENDPOINTS (`kalshi/bots/app.py`)
 - `/api/health` — status + paper_mode + kalshi_connected

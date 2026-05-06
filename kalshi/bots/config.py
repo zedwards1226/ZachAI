@@ -75,16 +75,35 @@ TIMEZONE = "America/Chicago"
 SCAN_INTERVAL_MINUTES = 15
 
 # Cities: code -> {name, lat, lon, kalshi_series}
-# Series tickers verified against live api.elections.kalshi.com
+# Series tickers verified live against api.elections.kalshi.com on 2026-05-05.
+# 20 active KXHIGH series with 12 strike levels each per day — bot picks the
+# top edges system-wide and is still capped by MAX_DAILY_TRADES (default 5).
+# Learning agent auto-pauses any city after 3/5 losses, so the lineup
+# self-selects to whichever cities the strategy actually edges on.
 CITIES = {
-    "NYC": {"name": "New York City", "lat": 40.7128, "lon": -74.0060, "kalshi_series": "KXHIGHNY"},
-    "CHI": {"name": "Chicago",       "lat": 41.8781, "lon": -87.6298, "kalshi_series": "KXHIGHCHI"},
-    "MIA": {"name": "Miami",         "lat": 25.7617, "lon": -80.1918, "kalshi_series": "KXHIGHMIA"},
-    "LAX": {"name": "Los Angeles",   "lat": 34.0522, "lon": -118.2437, "kalshi_series": "KXHIGHLAX"},
-    "DEN": {"name": "Denver",        "lat": 39.7392, "lon": -104.9903, "kalshi_series": "KXHIGHDEN"},
-    # MEM removed 2026-04-24: Kalshi doesn't publish KXHIGHMEM markets,
-    # 255+ rate-limit errors in monitor.log with zero trades placed.
-    # Re-add with backoff if Kalshi adds Memphis to weather markets.
+    # Original 5 (verified 2026-04)
+    "NYC": {"name": "New York City",    "lat": 40.7128, "lon": -74.0060,  "kalshi_series": "KXHIGHNY"},
+    "CHI": {"name": "Chicago",          "lat": 41.8781, "lon": -87.6298,  "kalshi_series": "KXHIGHCHI"},
+    "MIA": {"name": "Miami",            "lat": 25.7617, "lon": -80.1918,  "kalshi_series": "KXHIGHMIA"},
+    "LAX": {"name": "Los Angeles",      "lat": 34.0522, "lon": -118.2437, "kalshi_series": "KXHIGHLAX"},
+    "DEN": {"name": "Denver",           "lat": 39.7392, "lon": -104.9903, "kalshi_series": "KXHIGHDEN"},
+    # Added 2026-05-05 — verified live with 12 open strikes/day each
+    "AUS": {"name": "Austin",           "lat": 30.2672, "lon": -97.7431,  "kalshi_series": "KXHIGHAUS"},
+    "ATL": {"name": "Atlanta",          "lat": 33.7490, "lon": -84.3880,  "kalshi_series": "KXHIGHTATL"},
+    "BOS": {"name": "Boston",           "lat": 42.3601, "lon": -71.0589,  "kalshi_series": "KXHIGHTBOS"},
+    "DAL": {"name": "Dallas",           "lat": 32.7767, "lon": -96.7970,  "kalshi_series": "KXHIGHTDAL"},
+    "WDC": {"name": "Washington DC",    "lat": 38.9072, "lon": -77.0369,  "kalshi_series": "KXHIGHTDC"},
+    "HOU": {"name": "Houston",          "lat": 29.7604, "lon": -95.3698,  "kalshi_series": "KXHIGHTHOU"},
+    "LAS": {"name": "Las Vegas",        "lat": 36.1716, "lon": -115.1391, "kalshi_series": "KXHIGHTLV"},
+    "MIN": {"name": "Minneapolis",      "lat": 44.9778, "lon": -93.2650,  "kalshi_series": "KXHIGHTMIN"},
+    "NOL": {"name": "New Orleans",      "lat": 29.9511, "lon": -90.0715,  "kalshi_series": "KXHIGHTNOLA"},
+    "OKC": {"name": "Oklahoma City",    "lat": 35.4676, "lon": -97.5164,  "kalshi_series": "KXHIGHTOKC"},
+    "PHX": {"name": "Phoenix",          "lat": 33.4484, "lon": -112.0740, "kalshi_series": "KXHIGHTPHX"},
+    "SAT": {"name": "San Antonio",      "lat": 29.4241, "lon": -98.4936,  "kalshi_series": "KXHIGHTSATX"},
+    "SEA": {"name": "Seattle",          "lat": 47.6062, "lon": -122.3321, "kalshi_series": "KXHIGHTSEA"},
+    "SFO": {"name": "San Francisco",    "lat": 37.7749, "lon": -122.4194, "kalshi_series": "KXHIGHTSFO"},
+    "PHL": {"name": "Philadelphia",     "lat": 39.9526, "lon": -75.1652,  "kalshi_series": "KXHIGHPHIL"},
+    # MEM removed 2026-04-24: Kalshi doesn't publish KXHIGHMEM markets.
 }
 
 # Flask — bind to loopback only. Public dashboard is served by the

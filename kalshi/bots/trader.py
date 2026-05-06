@@ -12,13 +12,28 @@ from zoneinfo import ZoneInfo
 import requests
 
 # IANA timezones per city — used for same-day resolution gate and current-time checks.
+# Phoenix uses America/Phoenix (Arizona doesn't observe DST).
 CITY_TZ = {
     "NYC": "America/New_York",
     "CHI": "America/Chicago",
     "MIA": "America/New_York",
     "LAX": "America/Los_Angeles",
     "DEN": "America/Denver",
-    "MEM": "America/Chicago",
+    "AUS": "America/Chicago",
+    "ATL": "America/New_York",
+    "BOS": "America/New_York",
+    "DAL": "America/Chicago",
+    "WDC": "America/New_York",
+    "HOU": "America/Chicago",
+    "LAS": "America/Los_Angeles",
+    "MIN": "America/Chicago",
+    "NOL": "America/Chicago",
+    "OKC": "America/Chicago",
+    "PHX": "America/Phoenix",
+    "SAT": "America/Chicago",
+    "SEA": "America/Los_Angeles",
+    "SFO": "America/Los_Angeles",
+    "PHL": "America/New_York",
 }
 
 from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, SHIN_Z
@@ -505,7 +520,12 @@ def _parse_market_id(market_id: str):
     import re
     SERIES_MAP = {
         "KXHIGHNY": "NYC", "KXHIGHCHI": "CHI", "KXHIGHMIA": "MIA",
-        "KXHIGHLAX": "LAX", "KXHIGHDEN": "DEN", "KXHIGHMEM": "MEM",
+        "KXHIGHLAX": "LAX", "KXHIGHDEN": "DEN",
+        "KXHIGHAUS": "AUS", "KXHIGHTATL": "ATL", "KXHIGHTBOS": "BOS",
+        "KXHIGHTDAL": "DAL", "KXHIGHTDC": "WDC", "KXHIGHTHOU": "HOU",
+        "KXHIGHTLV": "LAS", "KXHIGHTMIN": "MIN", "KXHIGHTNOLA": "NOL",
+        "KXHIGHTOKC": "OKC", "KXHIGHTPHX": "PHX", "KXHIGHTSATX": "SAT",
+        "KXHIGHTSEA": "SEA", "KXHIGHTSFO": "SFO", "KXHIGHPHIL": "PHL",
     }
     try:
         parts = market_id.split("-")
