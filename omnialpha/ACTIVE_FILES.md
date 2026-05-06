@@ -21,7 +21,7 @@ Per master CLAUDE.md hygiene rule: every file in this directory MUST appear here
 - `trade_monitor.py` — settles open paper trades + writes pnl_snapshots. Falls back to live `/markets/{ticker}` when local DB row is stale. Computes Kalshi-correct entry fee on win + loss
 - `telegram_alerts.py` — Jarvis-bot send-only with [OmniAlpha] prefix. Plain-English entry/exit/daily-summary/halt/startup messages with strike + close time, narrative EOD digest with per-strategy breakdown + open positions. Anti-spam: `notify_error` throttled 30 min per (where, exc-type, msg); `notify_startup` rate-limited to 1/hr via sidecar file
 - `strategy_labels.py` — codename → plain-English lookup (`crypto_btc15m_midband` → "BTC 15-minute middle-band") used by every Telegram-bound message in the bot. Single source of truth — new strategies must add an entry here
-- `risk_engine.py` — 6-gate pre-trade filter (paper-mode, per-trade cap, liquidity, concentration, drawdown, cross-bot halt) + cross-bot risk_state.json coupling. All caps are % of LIVE capital so they compound
+- `risk_engine.py` — 7-gate pre-trade filter: paper-mode, per-trade $ cap, liquidity, concentration (max parallel), **same-series-same-side bucket** (blocks stacking neighboring strikes of the same series + side — added 2026-05-05 after BTCD T80999+T80899 stacked into one $48 correlated NO position and lost $49), drawdown/loss caps, cross-bot halt. All caps are % of LIVE capital so they compound
 
 ## `data_layer/`
 - `__init__.py`
@@ -54,7 +54,7 @@ Per master CLAUDE.md hygiene rule: every file in this directory MUST appear here
 - `test_kalshi_public.py` — 6 tests (sector classification, market row mapping, pagination)
 - `test_calibration.py` — 7 tests (Brier, log loss, bin computation)
 - `test_strategy_midband.py` — 13 tests (band classification, gates, Kelly scaling, dropped-bands, entry-window)
-- `test_risk_engine.py` — 11 tests (every gate, contract clamping, cross-bot state, compounding caps)
+- `test_risk_engine.py` — 17 tests (every gate, contract clamping, cross-bot state, compounding caps, same-series-same-side bucket: block + opposite-side allow + different-window allow + backwards-compat without strategy_name + backtest skip)
 - `test_order_placer.py` — 4 tests (paper writes correctly, live refused without explicit flag)
 - `test_live_scanner.py` — 9 tests (snapshot conversion, scan-and-trade, already-taken, HTTP failure)
 - `test_end_to_end.py` — 1 test, full lifecycle (strategy → risk → place → settle → P&L)

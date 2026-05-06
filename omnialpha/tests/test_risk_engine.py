@@ -115,6 +115,131 @@ def test_concentration_blocks():
     assert v.reason == "concentration"
 
 
+# ─── Gate 4b: same-series same-side stacking ──────────────────────────
+# Targets the 2026-05-05 BTCD pattern: two NO bets on T80999 + T80899
+# of the same KXBTCD-26MAY0521 series stacked into one $48 correlated
+# position. Different strikes ≠ different risk when the underlying
+# resolves them all at once.
+
+def _market_btcd(strike_suffix: str = "T80999.99",
+                 series: str = "KXBTCD-26MAY0521") -> MarketSnapshot:
+    """A BTCD strike-keyed market for testing the bucket gate."""
+    return MarketSnapshot(
+        ticker=f"{series}-{strike_suffix}", sector="crypto",
+        series_ticker="KXBTCD",
+        title="BTC daily range", open_time="2026-05-05T20:00:00Z",
+        close_time="2026-05-05T21:00:00Z",
+        yes_ask_cents=25, yes_bid_cents=24, no_ask_cents=75, no_bid_cents=74,
+        last_price_cents=25, volume_fp=5000.0, open_interest_fp=10.0,
+        seconds_to_close=120,
+    )
+
+
+def test_series_key_strips_strike_suffix():
+    """The bucket key for KXBTCD-26MAY0521-T80999.99 is the
+    series+window prefix KXBTCD-26MAY0521 — different strikes collapse
+    into one bucket."""
+    from bots.risk_engine import _series_key
+    assert _series_key("KXBTCD-26MAY0521-T80999.99") == "KXBTCD-26MAY0521"
+    assert _series_key("KXBTCD-26MAY0521-T80899.99") == "KXBTCD-26MAY0521"
+    # Different windows stay distinct.
+    assert _series_key("KXBTCD-26MAY0522-T80999.99") == "KXBTCD-26MAY0522"
+    # Binary up/down markets (no -T suffix) keep their full ticker.
+    assert _series_key("KXBTC15M-26MAY052015-15") == "KXBTC15M-26MAY052015-15"
+
+
+def test_same_series_same_side_blocks(monkeypatch):
+    """Open NO position in KXBTCD-26MAY0521 → new NO bet on a different
+    strike of the same series gets blocked."""
+    from bots import risk_engine
+    monkeypatch.setattr(risk_engine, "_count_open_in_bucket",
+                        lambda strategy, series_key, side: 1)
+    v = risk_engine.check_entry(
+        _decision(side="no"),
+        _market_btcd(strike_suffix="T80899.99"),
+        _ctx(),
+        strategy_name="crypto_btcd_midband",
+    )
+    assert not v.approved
+    assert v.reason == "same_series_same_side"
+    assert "KXBTCD-26MAY0521" in v.detail
+    assert "NO" in v.detail
+
+
+def test_same_series_opposite_side_allowed(monkeypatch):
+    """Open NO position in series A doesn't block a YES bet on the same
+    series — different sides aren't correlated risk, they're a hedge."""
+    from bots import risk_engine
+    # Bucket-counter returns 0 for (strategy, series, side='yes') because
+    # the existing position is on the NO side.
+    monkeypatch.setattr(risk_engine, "_count_open_in_bucket",
+                        lambda strategy, series_key, side:
+                        1 if side == "no" else 0)
+    v = risk_engine.check_entry(
+        _decision(side="yes"),
+        _market_btcd(strike_suffix="T80899.99"),
+        _ctx(),
+        strategy_name="crypto_btcd_midband",
+    )
+    assert v.approved, f"opposite-side bet should pass; got reason={v.reason}"
+
+
+def test_different_series_same_side_allowed(monkeypatch):
+    """NO bet on KXBTCD-26MAY0521 doesn't block NO bet on
+    KXBTCD-26MAY0522 — different hourly windows are independent."""
+    from bots import risk_engine
+    # Count returns 0 because the new bet's series_key is different.
+    monkeypatch.setattr(risk_engine, "_count_open_in_bucket",
+                        lambda strategy, series_key, side: 0)
+    v = risk_engine.check_entry(
+        _decision(side="no"),
+        _market_btcd(series="KXBTCD-26MAY0522", strike_suffix="T80999.99"),
+        _ctx(),
+        strategy_name="crypto_btcd_midband",
+    )
+    assert v.approved
+
+
+def test_gate_skipped_without_strategy_name(monkeypatch):
+    """Backwards-compat: callers that don't pass strategy_name (legacy
+    code, backtest replay) skip the gate."""
+    from bots import risk_engine
+    # Even with stacked open positions, no strategy_name means no gate.
+    counter_was_called = []
+    def _spy(*args):
+        counter_was_called.append(args)
+        return 99
+    monkeypatch.setattr(risk_engine, "_count_open_in_bucket", _spy)
+    v = risk_engine.check_entry(
+        _decision(side="no"),
+        _market_btcd(),
+        _ctx(),
+        # strategy_name=None (default)
+    )
+    assert v.approved
+    assert counter_was_called == [], "counter should not have been queried"
+
+
+def test_gate_skipped_in_backtest(monkeypatch):
+    """skip_db_gates=True (backtest replay) bypasses the bucket check —
+    same rationale as the existing sector_daily / cross_bot gates."""
+    from bots import risk_engine
+    counter_was_called = []
+    def _spy(*args):
+        counter_was_called.append(args)
+        return 99
+    monkeypatch.setattr(risk_engine, "_count_open_in_bucket", _spy)
+    v = risk_engine.check_entry(
+        _decision(side="no"),
+        _market_btcd(),
+        _ctx(),
+        strategy_name="crypto_btcd_midband",
+        skip_db_gates=True,
+    )
+    assert v.approved
+    assert counter_was_called == []
+
+
 def test_daily_loss_cap_blocks():
     from bots import risk_engine
     v = risk_engine.check_entry(_decision(), _market(),

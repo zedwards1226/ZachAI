@@ -272,7 +272,7 @@ def scan_and_trade(
             continue
         n_decisions += 1
 
-        verdict = check_entry(decision, snap, ctx)
+        verdict = check_entry(decision, snap, ctx, strategy_name=strategy.name)
         if not verdict.approved:
             n_blocked[verdict.reason] = n_blocked.get(verdict.reason, 0) + 1
             continue
