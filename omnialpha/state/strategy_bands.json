@@ -19,5 +19,19 @@
     "updated_at": "2026-05-04T17:00:00Z",
     "source": "rebalanced_2026-05-04",
     "note": "Widened YES upper from 0.75 to 0.80 — still skips the bad-R/R 0.80-0.90 zone."
+  },
+  "crypto_btcd_midband": {
+    "no_bands": [],
+    "yes_bands": [[0.70, 0.85, 0.85]],
+    "updated_at": "2026-05-07T00:50:00Z",
+    "source": "paused_no_after_loss_audit_2026-05-06",
+    "note": "NO side -$96.39 over 23 trades, 60.9% WR vs 76% implied. Calibration was 15m-market data; doesn't transfer to BTC daily markets. YES side keeps trading (88% WR, +$61.60 lifetime). Re-enable after fresh BTC-daily backtest confirms a real NO edge."
+  },
+  "crypto_btc15m_midband": {
+    "no_bands": [[0.20, 0.30, 0.15]],
+    "yes_bands": [[0.75, 0.80, 0.85]],
+    "updated_at": "2026-05-07T00:50:00Z",
+    "source": "trim_upper_yes_after_loss_audit_2026-05-06",
+    "note": "Upper YES (80-85c) lost -$25.62 over 6 trades, 66.7% WR vs 83% implied. Calibration is 2 months old; trim to 75-80c only until re-validated. NO band unchanged (4/4 wins lifetime)."
   }
 }
