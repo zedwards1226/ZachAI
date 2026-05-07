@@ -8,14 +8,45 @@
       ]
     ],
     "no_bands": [],
-    "updated_at": "2026-05-06T20:58:18.760415Z",
+    "updated_at": "2026-05-06T22:14:41.342733Z",
     "source": "historical_backtest_2026-05-06",
     "note": "Bands derived from /historical/trades reconstruction of decision-time prices (close-90s anchor) over last 30 days of finalized markets. Wilson 95% lower bound must beat implied probability by 3pts to qualify."
   },
   "crypto_btcd_midband": {
+    "yes_bands": [
+      [
+        0.2,
+        0.25,
+        0.35
+      ]
+    ],
+    "no_bands": [],
+    "updated_at": "2026-05-06T22:14:41.357748Z",
+    "source": "historical_backtest_2026-05-06",
+    "note": "Bands derived from /historical/trades reconstruction of decision-time prices (close-90s anchor) over last 30 days of finalized markets. Wilson 95% lower bound must beat implied probability by 3pts to qualify."
+  },
+  "crypto_eth15m_midband": {
+    "yes_bands": [
+      [
+        0.65,
+        0.7,
+        0.71
+      ],
+      [
+        0.8,
+        0.85,
+        0.86
+      ]
+    ],
+    "no_bands": [],
+    "updated_at": "2026-05-06T22:14:41.365454Z",
+    "source": "historical_backtest_2026-05-06",
+    "note": "Bands derived from /historical/trades reconstruction of decision-time prices (close-90s anchor) over last 30 days of finalized markets. Wilson 95% lower bound must beat implied probability by 3pts to qualify."
+  },
+  "crypto_sol15m_midband": {
     "yes_bands": [],
     "no_bands": [],
-    "updated_at": "2026-05-06T20:58:18.761526Z",
+    "updated_at": "2026-05-06T22:14:41.373902Z",
     "source": "historical_backtest_2026-05-06",
     "note": "Bands derived from /historical/trades reconstruction of decision-time prices (close-90s anchor) over last 30 days of finalized markets. Wilson 95% lower bound must beat implied probability by 3pts to qualify."
   }

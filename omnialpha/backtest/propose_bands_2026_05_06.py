@@ -42,6 +42,8 @@ WILSON_Z = 1.96
 SERIES_TO_STRATEGY = {
     "KXBTC15M": "crypto_btc15m_midband",
     "KXBTCD": "crypto_btcd_midband",
+    "KXETH15M": "crypto_eth15m_midband",
+    "KXSOL15M": "crypto_sol15m_midband",
 }
 
 

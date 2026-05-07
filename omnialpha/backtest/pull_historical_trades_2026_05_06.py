@@ -29,7 +29,7 @@ import requests
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
 DB_PATH = Path(r"C:\ZachAI\omnialpha\state\omnialpha.db")
-SERIES = ["KXBTC15M", "KXBTCD"]
+SERIES = ["KXETH15M", "KXSOL15M"]
 DAYS_BACK = 30
 TARGET_OFFSET_S = -90  # 90 seconds before close
 RATE_LIMIT_S = 0.15   # ~6 req/sec

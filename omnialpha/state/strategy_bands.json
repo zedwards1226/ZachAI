@@ -1,10 +1,10 @@
 {
   "crypto_eth15m_midband": {
-    "no_bands": [[0.15, 0.35, 0.10]],
-    "yes_bands": [[0.60, 0.80, 0.90]],
-    "updated_at": "2026-05-04T17:00:00Z",
-    "source": "rebalanced_2026-05-04",
-    "note": "Widened from PF-sweep bands ([0.25-0.35]/[0.65-0.70]) which produced 0 live trades in 3.5h. Skip <0.15 NO and >0.85 YES (bad R/R) but accept the 0.15-0.35 / 0.60-0.80 middle band where markets actually trade."
+    "no_bands": [],
+    "yes_bands": [[0.65, 0.70, 0.71], [0.80, 0.85, 0.86]],
+    "updated_at": "2026-05-07T03:15:00Z",
+    "source": "validated_by_historical_backtest_2026-05-06",
+    "note": "TIGHTENED from wide May-4 rebalance after backtest of 2832 finalized markets. Only TWO buckets cleared n>=30 + Wilson 95% lo > implied + 3pts: YES 65-70c (n=36, Wilson_lo 71.3%, +3.8 edge) and YES 80-85c (n=49, Wilson_lo 86.3%, +3.8 edge). NO side had no tradeable bucket -> paused. Tonight's biggest loss (YES @67c -$28) was inside the new 65-70c band (sample variance at 71% WR). The other tonight loss (NO @71c -$26) would not fire under new bands."
   },
   "crypto_eth_hourly_midband": {
     "no_bands": [[0.10, 0.30, 0.08]],
@@ -14,11 +14,11 @@
     "note": "Slightly widened NO band lower bound. KXETH calibration showed YES has no edge — keeping NO-only."
   },
   "crypto_sol15m_midband": {
-    "no_bands": [[0.15, 0.30, 0.12]],
-    "yes_bands": [[0.60, 0.80, 0.90]],
-    "updated_at": "2026-05-04T17:00:00Z",
-    "source": "rebalanced_2026-05-04",
-    "note": "Widened YES upper from 0.75 to 0.80 — still skips the bad-R/R 0.80-0.90 zone."
+    "no_bands": [],
+    "yes_bands": [],
+    "updated_at": "2026-05-07T03:15:00Z",
+    "source": "paused_after_no_edge_found_2026-05-06",
+    "note": "PAUSED ENTIRELY after backtest of 2831 finalized markets. ZERO buckets across both YES and NO sides cleared n>=30 + Wilson 95% lo > implied + 3pts. Sample sizes are adequate (most buckets n=30-50) so this isn't a sample-size problem; the strategy just doesn't have edge on SOL15M markets in the last 30 days. Tonight's losses (YES @80c -$21, NO @71c -$23) were both in NEAR_FAIR zones. Revisit if regime changes."
   },
   "crypto_btcd_midband": {
     "no_bands": [],
