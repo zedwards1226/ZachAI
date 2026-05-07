@@ -1,0 +1,22 @@
+{
+  "crypto_btc15m_midband": {
+    "yes_bands": [
+      [
+        0.75,
+        0.8,
+        0.81
+      ]
+    ],
+    "no_bands": [],
+    "updated_at": "2026-05-06T20:58:18.760415Z",
+    "source": "historical_backtest_2026-05-06",
+    "note": "Bands derived from /historical/trades reconstruction of decision-time prices (close-90s anchor) over last 30 days of finalized markets. Wilson 95% lower bound must beat implied probability by 3pts to qualify."
+  },
+  "crypto_btcd_midband": {
+    "yes_bands": [],
+    "no_bands": [],
+    "updated_at": "2026-05-06T20:58:18.761526Z",
+    "source": "historical_backtest_2026-05-06",
+    "note": "Bands derived from /historical/trades reconstruction of decision-time prices (close-90s anchor) over last 30 days of finalized markets. Wilson 95% lower bound must beat implied probability by 3pts to qualify."
+  }
+}

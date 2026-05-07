@@ -29,9 +29,9 @@
   },
   "crypto_btc15m_midband": {
     "no_bands": [[0.20, 0.30, 0.15]],
-    "yes_bands": [[0.75, 0.80, 0.85]],
-    "updated_at": "2026-05-07T00:50:00Z",
-    "source": "trim_upper_yes_after_loss_audit_2026-05-06",
-    "note": "Upper YES (80-85c) lost -$25.62 over 6 trades, 66.7% WR vs 83% implied. Calibration is 2 months old; trim to 75-80c only until re-validated. NO band unchanged (4/4 wins lifetime)."
+    "yes_bands": [[0.75, 0.80, 0.81]],
+    "updated_at": "2026-05-07T01:00:00Z",
+    "source": "validated_by_historical_backtest_2026-05-06",
+    "note": "YES 75-80c is the ONLY band with confirmed edge in 2832-market historical backtest: n=34, WR=94.1%, Wilson95 lo=80.9%, implied=77.5%, edge=+3.4%. Forecast trimmed from 0.85 (stale 2-month-old calibration) to 0.81 (Wilson 95% lower bound). YES 80-95c had n=256 across 4 buckets and showed NO edge — kept dropped. NO band 20-30c had n=35-78 across buckets, all NEAR_FAIR — kept as-is from prior live config."
   }
 }
