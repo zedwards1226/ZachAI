@@ -1,0 +1,63 @@
+{
+  "crypto_ethd_midband": {
+    "yes_bands": [
+      [
+        0.65,
+        0.95,
+        0.77
+      ]
+    ],
+    "no_bands": [
+      [
+        0.6,
+        0.95,
+        0.74
+      ]
+    ],
+    "updated_at": "2026-05-06T21:41:18.114135Z",
+    "source": "jbecker_dataset_backtest_2026-05-06",
+    "note": "Bands derived from jbecker prediction-market-analysis dataset (largest public Kalshi trade history). Wilson 95% lower bound must beat implied price by 3 points to qualify."
+  },
+  "crypto_btcd_midband": {
+    "yes_bands": [
+      [
+        0.7,
+        0.75,
+        0.81
+      ],
+      [
+        0.8,
+        0.95,
+        0.89
+      ]
+    ],
+    "no_bands": [
+      [
+        0.7,
+        0.95,
+        0.83
+      ]
+    ],
+    "updated_at": "2026-05-06T21:41:18.114309Z",
+    "source": "jbecker_dataset_backtest_2026-05-06",
+    "note": "Bands derived from jbecker prediction-market-analysis dataset (largest public Kalshi trade history). Wilson 95% lower bound must beat implied price by 3 points to qualify."
+  },
+  "crypto_eth_hourly_midband": {
+    "yes_bands": [],
+    "no_bands": [
+      [
+        0.4,
+        0.45,
+        0.47
+      ],
+      [
+        0.5,
+        0.95,
+        0.62
+      ]
+    ],
+    "updated_at": "2026-05-06T21:41:18.114326Z",
+    "source": "jbecker_dataset_backtest_2026-05-06",
+    "note": "Bands derived from jbecker prediction-market-analysis dataset (largest public Kalshi trade history). Wilson 95% lower bound must beat implied price by 3 points to qualify."
+  }
+}
