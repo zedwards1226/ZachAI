@@ -1367,35 +1367,65 @@ async def reconcile_with_tv() -> dict:
                     "tv_count": tv_count, "tv_signal": tv_signal,
                     "action_taken": f"adopted_trade_{trade_id}"}
 
-        # No recent attempt to adopt — this is a true unknown phantom (manual
-        # entry, leftover from a prior session, or bug). Halt and alert
-        # (throttled to once per 15 min).
-        logger.error(
-            "RECONCILE DRIFT — PHANTOM POSITION DETECTED. "
-            "Local active_orders empty but TV shows position(s) (count=%d, signal=%s, "
-            "avail=%s). NOT auto-closing. New entries blocked until reviewed.",
-            tv_count, tv_signal, tv_pos.get("available_funds"),
+        # No recent attempt to adopt — could be a true unknown phantom (manual
+        # entry, leftover from a prior session, or bug) OR a false positive
+        # from the low_avail_funds heuristic (TV's margin briefly didn't
+        # release after a bracket close).
+        #
+        # Only trip the circuit breaker on STRONG signals where TV is
+        # visibly showing a position row (signal == 'avg_fill_price_visible').
+        # The 'low_avail_funds' heuristic alone is too noisy — TV's avail
+        # display can lag 1-3s after a bracket close, producing a false
+        # phantom that blocks legitimate score-7 second-break entries
+        # (observed 2026-05-07: 3 score-7 LONG signals blocked, est cost
+        # several hundred dollars in missed trades).
+        STRONG_PHANTOM_SIGNALS = ("avg_fill_price_visible",)
+
+        if tv_signal in STRONG_PHANTOM_SIGNALS:
+            logger.error(
+                "RECONCILE DRIFT — PHANTOM POSITION DETECTED. "
+                "Local active_orders empty but TV shows position(s) (count=%d, signal=%s, "
+                "avail=%s). NOT auto-closing. New entries blocked until reviewed.",
+                tv_count, tv_signal, tv_pos.get("available_funds"),
+            )
+            # Trip circuit breaker so combiner.poll() refuses new orders.
+            # 3x record_broker_failure tips count over the 3-failure threshold.
+            record_broker_failure(f"phantom_position:tv_count={tv_count}")
+            record_broker_failure(f"phantom_position:tv_count={tv_count}")
+            record_broker_failure(f"phantom_position:tv_count={tv_count}")
+
+            if now_ts - _RECONCILE_LAST_DRIFT_ALERT_TS > _RECONCILE_DRIFT_ALERT_COOLDOWN:
+                try:
+                    await telegram.notify_hard_block(
+                        f"PHANTOM POSITION: TV shows {tv_count} open contract(s) but bot "
+                        f"thinks it's flat and has no recent submission attempt to claim. "
+                        f"Trading HALTED. Manually close on TradingView or investigate."
+                    )
+                    _RECONCILE_LAST_DRIFT_ALERT_TS = now_ts
+                except Exception:
+                    pass
+
+            return {"in_sync": False, "drift_type": "phantom_position", "local_count": 0,
+                    "tv_count": tv_count, "tv_signal": tv_signal,
+                    "action_taken": "circuit_breaker_tripped_alerted"}
+
+        # Weak signal (low_avail_funds heuristic) — log a warning and skip
+        # this cycle. Reconcile loop runs every 60s, so a real phantom will
+        # confirm itself on the next strong-signal read; a transient margin
+        # lag will clear by then.
+        logger.warning(
+            "RECONCILE soft drift — TV avail dropped below threshold but no "
+            "Avg Fill Price visible (signal=%s, avail=%s, tv_count=%d). "
+            "Treating as transient margin lag, NOT tripping circuit breaker. "
+            "Will re-check next cycle.",
+            tv_signal, tv_pos.get("available_funds"), tv_count,
         )
-        # Trip circuit breaker so combiner.poll() refuses new orders.
-        # 3x record_broker_failure tips count over the 3-failure threshold.
-        record_broker_failure(f"phantom_position:tv_count={tv_count}")
-        record_broker_failure(f"phantom_position:tv_count={tv_count}")
-        record_broker_failure(f"phantom_position:tv_count={tv_count}")
-
-        if now_ts - _RECONCILE_LAST_DRIFT_ALERT_TS > _RECONCILE_DRIFT_ALERT_COOLDOWN:
-            try:
-                await telegram.notify_hard_block(
-                    f"PHANTOM POSITION: TV shows {tv_count} open contract(s) but bot "
-                    f"thinks it's flat and has no recent submission attempt to claim. "
-                    f"Trading HALTED. Manually close on TradingView or investigate."
-                )
-                _RECONCILE_LAST_DRIFT_ALERT_TS = now_ts
-            except Exception:
-                pass
-
-        return {"in_sync": False, "drift_type": "phantom_position", "local_count": 0,
+        # Don't set _RECONCILE_DRIFT_ACTIVE here — we don't want a false
+        # 'Drift RESOLVED' ping on the next clean read.
+        _RECONCILE_DRIFT_ACTIVE = False
+        return {"in_sync": True, "drift_type": "soft_low_funds", "local_count": 0,
                 "tv_count": tv_count, "tv_signal": tv_signal,
-                "action_taken": "circuit_breaker_tripped_alerted"}
+                "action_taken": "warned_no_halt"}
 
     # Case 4: signal=unknown (TV UI in a state we can't read) — no action, no alert
     return {"in_sync": True, "drift_type": "tv_unknown_state", "local_count": local_count,
