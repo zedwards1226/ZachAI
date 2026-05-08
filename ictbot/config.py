@@ -28,9 +28,13 @@ ICT_TIMEFRAME: str = os.getenv("ICT_TIMEFRAME", "5")  # 5-minute primary
 HTF_TIMEFRAME: str = os.getenv("HTF_TIMEFRAME", "60")  # 1H bias
 MULTIPLIER: float = float(os.getenv("MES_MULTIPLIER", "1.25"))  # $/pt for MES
 
-# ─── CDP (dedicated Chromium) ─────────────────────────────────────────
+# ─── CDP (TradingView Desktop, shared with ORB) ───────────────────────
+# Updated 2026-05-07: ICTBot shares ORB's TV Desktop CDP session on :9222.
+# Phase-1 SCAN_ONLY → only READ via this CDP (chart_get_state, health-check);
+# data feeds come from Yahoo so chart-state contention is minimal.
+# Phase-2 order placement will require pane/tab focus serialization with ORB.
 CDP_HOST: str = os.getenv("CDP_HOST", "127.0.0.1")
-CDP_PORT: int = int(os.getenv("CDP_PORT", "9223"))
+CDP_PORT: int = int(os.getenv("CDP_PORT", "9222"))
 
 # ─── Telegram (separate from Jarvis bridge) ───────────────────────────
 TELEGRAM_BOT_TOKEN: str | None = os.getenv("TELEGRAM_BOT_TOKEN") or None

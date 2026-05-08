@@ -61,6 +61,9 @@ def api_status():
         "halt_reason": halt_reason,
         "can_trade": can,
         "can_trade_reason": reason,
+        "cdp_ok": cdp_ok,
+        "cdp_msg": cdp_msg,
+        # Backwards-compat aliases for older dashboard payload consumers
         "cdp_9223_ok": cdp_ok,
         "cdp_9223_msg": cdp_msg,
         "trades_today": trades_today(),

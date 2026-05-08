@@ -20,9 +20,11 @@ LOG_PATH = PROJECT_DIR / "logs" / "ictbot.log"
 WATCHDOG_LOG = PROJECT_DIR / "logs" / "watchdog.log"
 WATCHDOG_MUTEX = PROJECT_DIR / "state" / "watchdog.lock"
 START_VBS = PROJECT_DIR / "scripts" / "start_ictbot.vbs"
-START_BROWSER_VBS = PROJECT_DIR / "scripts" / "start_ictbot_browser.vbs"
 
-CDP_URL = "http://127.0.0.1:9223/json/version"
+# Shared TV Desktop CDP (owned by ORB; ICTBot reads only on Phase 1).
+# Watchdog does NOT restart the TV Desktop browser — that's ORB's domain.
+# We just check it's reachable so we know whether ICTBot's CDP probe will work.
+CDP_URL = "http://127.0.0.1:9222/json/version"
 STALE_LOG_MINUTES = 10  # if log not touched in this long, assume hang
 
 
@@ -86,20 +88,16 @@ def restart_bot() -> None:
     subprocess.Popen(["wscript.exe", str(START_VBS)], shell=False)
 
 
-def restart_browser() -> None:
-    _log("restarting browser via VBS")
-    subprocess.Popen(["wscript.exe", str(START_BROWSER_VBS)], shell=False)
-
-
 def main() -> int:
     if not acquire_mutex():
         return 0
 
     try:
         if not cdp_alive():
-            _log("CDP :9223 dead — relaunching browser")
-            restart_browser()
-            time.sleep(8)
+            # We DON'T restart TV Desktop — that belongs to ORB. Just log
+            # so a human / Jarvis can investigate. ICTBot's bot loop will
+            # keep running and Yahoo data still works.
+            _log("warn: shared TV Desktop CDP :9222 unreachable (ORB issue?)")
 
         if not pid_alive():
             _log("bot pid dead — restarting")

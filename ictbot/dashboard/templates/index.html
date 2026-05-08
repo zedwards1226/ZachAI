@@ -83,7 +83,7 @@ function renderHealth(s) {
   const can = s.can_trade;
   const cdp = s.cdp_9223_ok;
   $("health").innerHTML = `
-    <div class="row"><span class="k">CDP :9223</span><span class="v ${cdp?'ok':'bad'}">${cdp ? "ok" : "DOWN"}</span></div>
+    <div class="row"><span class="k">CDP :9222 (TV)</span><span class="v ${cdp?'ok':'bad'}">${cdp ? "ok" : "DOWN"}</span></div>
     <div class="row"><span class="k">paper mode</span><span class="v ${s.paper_mode?'ok':'bad'}">${s.paper_mode}</span></div>
     <div class="row"><span class="k">armed</span><span class="v ${armed?'ok':'warn'}">${armed}</span></div>
     <div class="row"><span class="k">can trade</span><span class="v ${can?'ok':'warn'}">${can}</span></div>

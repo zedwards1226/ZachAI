@@ -1,17 +1,11 @@
-"""CDP client for ICTBot's dedicated Chromium on :9223.
+"""CDP client for ICTBot — talks to the SAME TradingView Desktop CDP that
+ORB uses (port 9222), but as a separate codebase. ICTBot uses its own TV
+tab pinned to MES1! while ORB stays on its MNQ1! tab.
 
-Mirrors the pattern of `trading/services/tv_client.py` but as a separate
-implementation so we never import from ORB's codebase. The Chromium it talks
-to is a SEPARATE process from the TV Desktop ORB owns.
-
-Phase 1 capabilities:
-- health_check() — is :9223 alive?
-- get_active_tab() — find the TV chart tab
-- evaluate(js) — run JS in the page
-- send_dom_ready_check() — confirm TV chart loaded
-
-Phase 2+ adds order placement (handled in ict_tv_trader.py to keep
-DOM-mutation code isolated from data-read code).
+Phase-1 SCAN_ONLY = read-only via this CDP (health + chart_state). Order
+placement (Phase 2) requires pane/tab focus serialization with ORB —
+we'll add a cross-bot lock in `data/tv_cdp_lock` before flipping
+SCAN_ONLY=false.
 """
 from __future__ import annotations
 

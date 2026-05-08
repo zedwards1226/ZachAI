@@ -1,9 +1,15 @@
 # ICTBOT — Project Brain
 
 ## OVERVIEW
-Standalone TradingView paper-trading bot using ICT (Inner Circle Trader) concepts on a non-MNQ emini. Sister to ORB (`C:\ZachAI\trading\`) but **completely independent** — separate Chromium instance with own CDP port, separate process, separate SQLite DB, separate Telegram channel, separate capital filter.
+TradingView paper-trading bot using ICT (Inner Circle Trader) concepts on a non-MNQ emini. Sister to ORB (`C:\ZachAI\trading\`) — **shares the TradingView Desktop CDP session on `:9222` with ORB** but on its own tab pinned to **MES1!**. ORB stays on MNQ1!. Each bot's `tv_client` filters by symbol/tab so they never collide.
 
-ORB owns MNQ on TradingView Desktop CDP `:9222`. ICTBot drives a dedicated Chromium on CDP `:9223` pointed at TradingView Web, charting **MES1!** by default. Both browsers log into the same TV account → both place real fake trades on the same paper broker → each bot filters its position view by symbol so they never collide.
+Architecture (updated 2026-05-07): originally proposed dual-Chromium with a second CDP `:9223`; Zach asked to use TV Desktop directly. Order placement (Phase 2, when SCAN_ONLY=false) requires a cross-bot lock at `data/tv_cdp_lock` so ORB and ICTBot don't manipulate the chart at the same instant.
+
+Separate from ORB:
+- Separate process + PID lock + SQLite DB (`ictbot/state/trades.db`)
+- Separate Telegram bot + channel (prefix `[ICTBot]`)
+- Separate dashboard (`:3002`)
+- Separate capital filter on the same TV paper broker (each bot reads only its own symbol's positions)
 
 **Paper mode: ON** — `PAPER_MODE=true` in `ictbot/.env`. Going live requires Zach's explicit approval (one of the 3 hard stops in master CLAUDE.md).
 
@@ -35,9 +41,8 @@ What does NOT work yet:
 |---|---|---|
 | Flask dashboard | `:3002` | Phase 1 |
 | Live bot main loop | n/a (background process) | Phase 1 |
-| Dedicated Chromium for TV Web | CDP `:9223` | Phase 0 (manual setup) |
+| Shared TV Desktop CDP | `:9222` (owned by ORB) | inherited |
 | Auto-start bot VBS | `scripts/start_ictbot.vbs` | Phase 1 |
-| Auto-start browser VBS | `scripts/start_ictbot_browser.vbs` | Phase 1 |
 
 ## KEY FILE PATHS
 ```
@@ -51,8 +56,8 @@ ictbot/
 ├── main.py                         # APScheduler entry, PID lock
 ├── cli.py                          # status, health, last-trade
 ├── services/
-│   ├── ict_tv_client.py            # CDP client to :9223
-│   ├── ict_tv_trader.py            # place_bracket_order on MES via :9223
+│   ├── ict_tv_client.py            # CDP client to TV Desktop :9222 (shared w/ ORB)
+│   ├── ict_tv_trader.py            # place_bracket_order on MES via :9222
 │   ├── tv_data.py                  # read MES bars
 │   ├── ict_analyzer.py             # FVG / sweep / MSS detection
 │   ├── setup_scanner.py            # detected-setup combiner
@@ -76,7 +81,6 @@ ictbot/
 ├── state/                          # gitignored runtime state
 ├── scripts/
 │   ├── start_ictbot.vbs
-│   ├── start_ictbot_browser.vbs    # launches Chromium :9223
 │   └── ictbot_watchdog.py
 ├── docs/setups.md                  # ICT setup definitions
 ├── logs/                           # gitignored

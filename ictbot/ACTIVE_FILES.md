@@ -15,8 +15,8 @@ If a file isn't listed here, it shouldn't exist. After every create/delete/renam
 ## services/
 - `services/__init__.py`
 - `services/state_manager.py` — SQLite handle, arm/halt status, daily reset
-- `services/ict_tv_client.py` — CDP client targeting :9223
-- `services/ict_tv_trader.py` — `place_bracket_order(symbol, side, qty, sl, tp)` on MES via :9223
+- `services/ict_tv_client.py` — CDP client to TV Desktop :9222 (shared with ORB)
+- `services/ict_tv_trader.py` — `place_bracket_order(symbol, side, qty, sl, tp)` on MES via :9222
 - `services/tv_data.py` — read MES bars (multi-timeframe via TV MCP fallback to CDP)
 - `services/ict_analyzer.py` — FVG / sweep / MSS / displacement detection
 - `services/setup_scanner.py` — combines analyzer signals into named setups
@@ -47,7 +47,6 @@ If a file isn't listed here, it shouldn't exist. After every create/delete/renam
 
 ## scripts/
 - `scripts/start_ictbot.vbs` — auto-start Python bot
-- `scripts/start_ictbot_browser.vbs` — auto-launch Chromium :9223
 - `scripts/ictbot_watchdog.py` — supervisor (auto-restart + Telegram alert)
 
 ## docs/
