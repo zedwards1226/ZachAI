@@ -6,13 +6,6 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["C:/ZachAI/omnialpha/dashboard/backend/serve.py"],
       "port": 8503
-    },
-    {
-      "name": "ictbot-dashboard",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["C:/ZachAI/ictbot/dashboard/app.py"],
-      "port": 3002,
-      "autoPort": false
     }
   ]
 }

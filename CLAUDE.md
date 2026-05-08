@@ -105,7 +105,6 @@ Triggers: adding/updating skills, updating CLAUDE.md, finishing a feature/file, 
 
 **Exceptions (commit + push but notify Zach BEFORE merging):**
 - Changes to `trading/services/tv_trader.py` (live order execution)
-- Changes to `ictbot/services/ict_tv_trader.py` (live order execution on MES paper)
 - Changes to Kalshi credentials or keys
 - Any change affecting live trading
 - Changes to `telegram-bridge/bot.py` (show diff + wait for approval FIRST)
@@ -137,7 +136,6 @@ Each project owns a nested `CLAUDE.md` with its operational details. Claude Code
 - **`sweep-bot\`** — DEFERRED — scaffold only, NOT BUILT, NOT RUNNING. Code imports `tv_trader.place_bracket_order` but launcher (`scripts/start_sweep_bot.vbs`) was deleted 2026-04-28 to keep ORB as the sole TradingView CDP client. Do NOT auto-start. Revisit only after ORB shows consistent profitability. → see `sweep-bot/CLAUDE.md`
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
 - **`omnialpha\`** — Multi-sector 24/7 Kalshi bot (paper mode, scaffold phase). Sister to WeatherAlpha but completely independent — separate process, DB, capital. NEVER touch `kalshi\` for OmniAlpha work. → see `omnialpha/CLAUDE.md`
-- **`ictbot\`** — TradingView paper-trading bot using ICT concepts on **MES** (sister to ORB, **shares TV Desktop CDP `:9222`** but on its own MES1! tab; ORB stays on MNQ1!). Phase 1 = scaffold + observe-mode (`SCAN_ONLY=true`, data via Yahoo, CDP read-only). Phase 2 needs a cross-bot CDP lock at `data/tv_cdp_lock` before flipping live. Separate Telegram channel + dashboard `:3002`. → see `ictbot/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
 - **`companies\tradingagents\`** — FastAPI multi-agent gate (building, paper, not auto-started) → see `companies/tradingagents/CLAUDE.md`
 - **`companies\zacks-work-drawings\`** — Flutter Android app: Google Drive PDF viewer for machine wiring diagrams (built) → see `companies/zacks-work-drawings/CLAUDE.md`
@@ -164,7 +162,6 @@ C:\ZachAI\
 ├── sweep-bot\ (DEFERRED — scaffold only, no launcher, do not auto-start)
 ├── kalshi\ (WeatherAlpha — has its own CLAUDE.md)
 ├── omnialpha\ (multi-sector 24/7 Kalshi — has its own CLAUDE.md)
-├── ictbot\ (standalone TV paper bot using ICT concepts on MES — has its own CLAUDE.md)
 ├── telegram-bridge\ (Jarvis bot — has its own CLAUDE.md)
 ├── companies\ (each project has its own CLAUDE.md)
 ├── sandbox\ (experiments workspace — strict isolation, no auto-start)
