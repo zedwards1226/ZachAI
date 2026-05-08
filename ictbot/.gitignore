@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+state/*.db
+state/*.pid
+state/*.json
+logs/
+*.log
+.pytest_cache/
