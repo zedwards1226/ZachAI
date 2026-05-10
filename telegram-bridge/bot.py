@@ -9,6 +9,7 @@ are forwarded as inline-keyboard Telegram messages, and block until answered.
 """
 
 import os, json, logging, subprocess, sys, asyncio, threading, uuid, time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -75,7 +76,12 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=10_000_000,   # 10 MB
+            backupCount=3,         # keep bot.log + bot.log.1/2/3
+            encoding="utf-8",
+        ),
         logging.StreamHandler(sys.stdout),
     ],
 )
