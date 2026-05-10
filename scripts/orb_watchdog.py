@@ -30,6 +30,7 @@ LOG_FILE = LOG_DIR / "orb_watchdog.log"
 
 ORB_PID_FILE = TRADING_DIR / "state" / "orb.pid"
 ORB_VBS = SCRIPTS_DIR / "ORBAgents.vbs"
+JARVIS_VBS = SCRIPTS_DIR / "Jarvis_Bot.vbs"
 
 # ─── Endpoints ────────────────────────────────────────────────────────────
 CDP_URL = "http://localhost:9222/json/version"
@@ -239,14 +240,26 @@ def check_cdp() -> bool:
 
 
 def check_jarvis_bot() -> bool:
-    """Telegram Jarvis bot alive."""
+    """Telegram Jarvis bot alive. Auto-restart via VBS if dead."""
     if _find_processes("bot.py"):
         _clear_cooldown("jarvis_down")
         return True
+
+    log.warning("Jarvis bot not running — restarting via Jarvis_Bot.vbs")
     alert("jarvis_down",
           f"⚠️ <b>Jarvis Telegram bot dead</b>\n"
-          f"Run: wscript C:\\ZachAI\\scripts\\Jarvis_Bot.vbs\n"
+          f"🔧 Restarting via Jarvis_Bot.vbs\n"
           f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+    if _start_vbs(JARVIS_VBS):
+        time.sleep(5)
+        if _find_processes("bot.py"):
+            resolved("jarvis_down",
+                     f"✅ <b>Jarvis bot recovered</b>\n"
+                     f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+            return True
+    alert("jarvis_fail",
+          "🚨 <b>Jarvis bot RESTART FAILED</b> — manual: "
+          "wscript C:\\ZachAI\\scripts\\Jarvis_Bot.vbs")
     return False
 
 

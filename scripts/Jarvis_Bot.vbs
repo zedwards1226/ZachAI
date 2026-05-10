@@ -1,2 +1,2 @@
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "cmd /c cd /d C:\ZachAI\telegram-bridge && pythonw bot.py", 0, False
+WshShell.Run "cmd /c cd /d C:\ZachAI\telegram-bridge && C:\Python314\pythonw.exe bot.py", 0, False
