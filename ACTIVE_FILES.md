@@ -143,3 +143,14 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 | `.claude/worktrees/` (8 of 9) | 2026-04-21 | Worktrees violate CLAUDE.md rule — only current `thirsty-yonath-616d04` retained; `jolly-jang-3934ff` file-locked, pending reboot |
 | Duplicate serve.py (Store Python PID 15068) + 4 wpflow.exe duplicates | 2026-04-21 | Orphan processes from MCP restart loop — dashboard restarted clean via `WeatherAlpha_Dashboard.vbs` |
 | `logs/*.log` (6 root logs) | 2026-04-21 | Archived to `logs/archive/` |
+| `weatheralpha.log` | 2026-05-11 | Reappeared after 2026-04-20 deletion; 0-byte orphan, re-deleted |
+| `config.yml` | 2026-05-11 | Empty `{}` placeholder, zero references in tree |
+| `logs/archive/` (entire dir) | 2026-05-11 | 22 MB of April logs; live logs rotate via RotatingFileHandler |
+| `agents/` (empty dir) | 2026-05-11 | Aspirational "FUTURE" per CLAUDE.md; never populated |
+| `.pytest_cache/` (root) | 2026-05-11 | Pytest auto-regenerates; not load-bearing |
+| `docs/superpowers/plans/2026-04-04-weatheralpha-kalshi-bot.md` | 2026-05-11 | 72 KB plan for already-built/live WeatherAlpha bot |
+| `docs/superpowers/specs/` | 2026-05-11 | Empty dir under deleted superpowers tree |
+| `backtest/` (root) | 2026-05-11 | Orphan early-prototype; superseded by `trading/backtest/` package |
+| `reference/jbecker-data/data/` | 2026-05-11 | Extracted 51 GB copy; `.tar.zst` archive (34 GB) retained |
+| `companies/zacks-work-drawings/build/` + `.dart_tool/` | 2026-05-11 | Flutter build artifacts (2.46 GB); regenerable via `flutter clean` |
+| `.claude/worktrees/` (17 of 18) | 2026-05-11 | All branches showed 0 unmerged commits; only current `great-banzai-1b5e6e` retained per no-worktree rule |
