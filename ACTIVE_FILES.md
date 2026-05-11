@@ -154,3 +154,4 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 | `reference/jbecker-data/data/` | 2026-05-11 | Extracted 51 GB copy; `.tar.zst` archive (34 GB) retained |
 | `companies/zacks-work-drawings/build/` + `.dart_tool/` | 2026-05-11 | Flutter build artifacts (2.46 GB); regenerable via `flutter clean` |
 | `.claude/worktrees/` (17 of 18) | 2026-05-11 | All branches showed 0 unmerged commits; only current `great-banzai-1b5e6e` retained per no-worktree rule |
+| `sweep-bot/` (entire dir) | 2026-05-11 | Scaffold retired entirely (was DEFERRED since 2026-04-28). Zach: "delete sweep bot if we dont use it." Master CLAUDE.md project roster + folder structure updated. Recover via git history if ever rebuilt. |

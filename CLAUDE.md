@@ -133,7 +133,6 @@ When Zach says "bye", "done", "closing", or "end session":
 Each project owns a nested `CLAUDE.md` with its operational details. Claude Code auto-loads them when working in that folder.
 
 - **`trading\`** — ORB NQ/MNQ futures system (live, paper mode) → see `trading/CLAUDE.md`
-- **`sweep-bot\`** — DEFERRED — scaffold only, NOT BUILT, NOT RUNNING. Code imports `tv_trader.place_bracket_order` but launcher (`scripts/start_sweep_bot.vbs`) was deleted 2026-04-28 to keep ORB as the sole TradingView CDP client. Do NOT auto-start. Revisit only after ORB shows consistent profitability. → see `sweep-bot/CLAUDE.md`
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
 - **`omnialpha\`** — Multi-sector 24/7 Kalshi bot (paper mode, scaffold phase). Sister to WeatherAlpha but completely independent — separate process, DB, capital. NEVER touch `kalshi\` for OmniAlpha work. → see `omnialpha/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
@@ -159,7 +158,6 @@ C:\ZachAI\
 ├── CLAUDE.md (this file — master brain)
 ├── RULES.md / README.md / backup.bat
 ├── trading\ (ORB — has its own CLAUDE.md)
-├── sweep-bot\ (DEFERRED — scaffold only, no launcher, do not auto-start)
 ├── kalshi\ (WeatherAlpha — has its own CLAUDE.md)
 ├── omnialpha\ (multi-sector 24/7 Kalshi — has its own CLAUDE.md)
 ├── telegram-bridge\ (Jarvis bot — has its own CLAUDE.md)
