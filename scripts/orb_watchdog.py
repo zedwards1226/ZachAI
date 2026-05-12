@@ -31,9 +31,11 @@ LOG_FILE = LOG_DIR / "orb_watchdog.log"
 ORB_PID_FILE = TRADING_DIR / "state" / "orb.pid"
 ORB_VBS = SCRIPTS_DIR / "ORBAgents.vbs"
 JARVIS_VBS = SCRIPTS_DIR / "Jarvis_Bot.vbs"
+OMNIALPHA_DASHBOARD_VBS = SCRIPTS_DIR / "OmniAlpha_Dashboard.vbs"
 
 # ─── Endpoints ────────────────────────────────────────────────────────────
 CDP_URL = "http://localhost:9222/json/version"
+OMNIALPHA_DASHBOARD_URL = "http://localhost:8503/"
 CHECK_EVERY = 60  # seconds
 
 # ─── Load Telegram from trading/.env ──────────────────────────────────────
@@ -239,6 +241,49 @@ def check_cdp() -> bool:
     return False
 
 
+def check_omnialpha_dashboard() -> bool:
+    """OmniAlpha dashboard on :8503. Auto-restart via VBS if down.
+
+    Added 2026-05-11 after the dashboard silently died sometime overnight
+    and we only caught it during morning-readiness checks. The VBS launcher
+    has anti-double-launch logic so re-firing it when alive is a no-op.
+
+    Streamlit serves /healthz and / both 200 when alive — just check / with
+    a short timeout. 2 attempts (handles transient Streamlit slow-rerender).
+    """
+    for attempt in range(2):
+        try:
+            r = requests.get(OMNIALPHA_DASHBOARD_URL, timeout=5)
+            if r.status_code == 200:
+                _clear_cooldown("omnialpha_dashboard_down")
+                return True
+        except Exception:
+            pass
+        if attempt == 0:
+            time.sleep(2)
+
+    log.warning("OmniAlpha dashboard :8503 not responding — restarting")
+    alert("omnialpha_dashboard_down",
+          f"📊 <b>OmniAlpha dashboard down</b> (:8503)\n"
+          f"🔧 Restarting via OmniAlpha_Dashboard.vbs\n"
+          f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+    if _start_vbs(OMNIALPHA_DASHBOARD_VBS):
+        time.sleep(10)
+        try:
+            r = requests.get(OMNIALPHA_DASHBOARD_URL, timeout=5)
+            if r.status_code == 200:
+                resolved("omnialpha_dashboard_down",
+                         f"✅ <b>OmniAlpha dashboard recovered</b>\n"
+                         f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+                return True
+        except Exception:
+            pass
+    alert("omnialpha_dashboard_fail",
+          "🚨 <b>OmniAlpha dashboard RESTART FAILED</b> — manual: "
+          "wscript C:\\ZachAI\\scripts\\OmniAlpha_Dashboard.vbs")
+    return False
+
+
 def check_jarvis_bot() -> bool:
     """Telegram Jarvis bot alive. Auto-restart via VBS if dead."""
     if _find_processes("bot.py"):
@@ -267,9 +312,10 @@ def check_jarvis_bot() -> bool:
 def run_cycle() -> None:
     log.info("--- ORB watchdog cycle ---")
     results = {
-        "orb_main":   check_orb_main(),
-        "cdp":        check_cdp(),
-        "jarvis_bot": check_jarvis_bot(),
+        "orb_main":            check_orb_main(),
+        "cdp":                 check_cdp(),
+        "jarvis_bot":          check_jarvis_bot(),
+        "omnialpha_dashboard": check_omnialpha_dashboard(),
     }
     if not all(results.values()):
         failed = [k for k, v in results.items() if not v]
