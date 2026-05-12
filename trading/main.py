@@ -360,6 +360,18 @@ async def run_combiner_heartbeat():
         logger.exception("Combiner heartbeat failed")
 
 
+async def run_daily_summary():
+    """4:15 PM ET cross-bot P&L summary to Telegram (ORB + WeatherAlpha +
+    OmniAlpha). Added 2026-05-11 to eliminate manual 'how we do today' queries."""
+    try:
+        if not is_trading_day():
+            return
+        from agents.daily_summary import run
+        await run()
+    except Exception as e:
+        logger.error("Daily summary failed: %s", e, exc_info=True)
+
+
 async def main():
     """Main entry point — initialize and start the scheduler."""
     setup_logging()
@@ -450,6 +462,13 @@ async def main():
     # Heartbeat: 9:31 AM ET — confirms combiner is active at market open
     scheduler.add_job(run_combiner_heartbeat, "cron", hour=9, minute=31,
                       id="combiner_heartbeat", name="Combiner Heartbeat")
+
+    # Daily cross-bot P&L summary: 4:15 PM ET Mon-Thu (15 min after equity close)
+    # Posts one Telegram message with ORB + WeatherAlpha + OmniAlpha day totals
+    # + WTD running totals. Added 2026-05-11.
+    scheduler.add_job(run_daily_summary, "cron", hour=16, minute=15,
+                      day_of_week="mon-thu",
+                      id="daily_summary", name="Daily P&L Summary")
 
     # ─── Interval Polls (check clock internally) ───
     # max_instances=1 + coalesce=True prevents overlapping runs if a poll
