@@ -244,6 +244,67 @@ async def run_arm_check():
         logger.error("Arm check failed: %s", e, exc_info=True)
 
 
+async def run_broker_watch():
+    """Every 10 min during market hours: detect Paper Trading broker
+    disconnect and auto-reconnect by clicking the 'Paper Trading' tile in
+    the broker-picker modal.
+
+    Born from the 2026-05-11 morning incident — the broker silently
+    disconnected overnight, the 7AM preflight fired a Telegram alert, but
+    Zach had to manually reconnect at 8:50 AM 40 minutes before the bell.
+    This watchdog stops that from ever happening twice.
+
+    Logic:
+      - Skip if not a trading day OR outside 9:30-16:00 ET
+      - Call _check_paper_broker()
+      - If state is picker_visible / picker_appeared_after_click → call
+        _reconnect_paper_broker() and notify Telegram with the outcome
+      - If reconnect fails → escalate alert (manual intervention needed)
+      - If broker is fine → silent (no log spam every 10 min)
+    """
+    try:
+        if not is_trading_day():
+            return
+        now_et = datetime.now(ET)
+        # Only run during market hours (futures still open after-hours but
+        # equity-derived ORB only fires 9:30-16:00 ET)
+        if now_et.hour < 9 or (now_et.hour == 9 and now_et.minute < 30):
+            return
+        if now_et.hour >= 16:
+            return
+
+        from agents.preflight import _check_paper_broker, _reconnect_paper_broker
+        ok, msg = await _check_paper_broker()
+        if ok:
+            return  # silent — common path
+
+        # Broker check failed. Only auto-recover the picker-visible states;
+        # other failure modes (trade_button_not_found, etc.) need a human
+        # because they indicate a deeper TV layout / chart issue.
+        if "DISCONNECTED" not in msg:
+            logger.warning("Broker watch saw non-disconnect failure: %s", msg)
+            return
+
+        logger.warning("Broker watch detected disconnect, attempting auto-recovery: %s", msg)
+        recovered, recovery_msg = await _reconnect_paper_broker()
+        ts = now_et.strftime('%I:%M %p ET')
+        if recovered:
+            await telegram.send(
+                f"🔧 ORB auto-recovered broker disconnect at {ts}. "
+                f"{recovery_msg}. No action needed."
+            )
+            logger.info("Broker auto-recovery succeeded: %s", recovery_msg)
+        else:
+            await telegram.send(
+                f"🚨 ORB broker disconnect at {ts}, AUTO-RECONNECT FAILED.\n"
+                f"Reason: {recovery_msg}\n"
+                f"Manual intervention required — click Paper Trading tile in TV."
+            )
+            logger.error("Broker auto-recovery failed: %s", recovery_msg)
+    except Exception as e:
+        logger.error("Broker watch failed: %s", e, exc_info=True)
+
+
 async def run_journal_backup():
     """Daily backup of journal.db — keeps last 30 days.
 
@@ -378,6 +439,13 @@ async def main():
     # override (Jarvis writes arm_status.json with source="manual").
     scheduler.add_job(run_arm_check, "cron", hour=9, minute=25,
                       id="arm_check", name="9:25 Arm Check")
+
+    # Broker watch: every 10 min during market hours. Detects Paper Trading
+    # disconnect and auto-reconnects via CDP. Born from the 2026-05-11 morning
+    # incident — silent overnight disconnect almost killed the open.
+    scheduler.add_job(run_broker_watch, "interval", minutes=10,
+                      id="broker_watch", name="Broker Watch",
+                      max_instances=1, coalesce=True)
 
     # Heartbeat: 9:31 AM ET — confirms combiner is active at market open
     scheduler.add_job(run_combiner_heartbeat, "cron", hour=9, minute=31,

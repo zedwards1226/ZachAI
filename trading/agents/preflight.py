@@ -17,6 +17,7 @@ Jarvis writes `arm_status.json` with `source="manual"` when Zach asks
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 from datetime import datetime
@@ -158,6 +159,61 @@ async def _check_paper_broker() -> tuple[bool, str]:
         return False, f"Broker check failed: state={state}"
     except Exception as e:
         return False, f"Broker check error: {e}"
+
+
+async def _reconnect_paper_broker() -> tuple[bool, str]:
+    """Click the 'Paper Trading' tile in the broker-picker modal to restore
+    the Trading Panel session. Used by run_broker_watch in main.py to auto-recover
+    from overnight broker disconnects (the 2026-05-11 morning incident).
+
+    The CDP JS literal here is the same one Claude executed manually at
+    8:50 AM ET on 2026-05-11 — proven to work against TV Desktop 3.1.0.7818.
+
+    Strategy: walk up from the 'Paper Trading' text node to find the clickable
+    card container (width > 150, height > 150) and click it. Then sleep 1.5s
+    for TV to render the panel, and re-check broker state to confirm recovery.
+    """
+    try:
+        tv = await get_client()
+        click_js = """
+        (function() {
+          var target = null;
+          var all = document.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            if (target) break;
+            var el = all[i];
+            if (el.children.length > 0) continue;
+            var t = (el.textContent || '').trim();
+            if (t === 'Paper Trading') {
+              var cur = el;
+              for (var j = 0; j < 6; j++) {
+                if (!cur) break;
+                var r = cur.getBoundingClientRect();
+                if (r.width > 150 && r.height > 150) { target = cur; break; }
+                cur = cur.parentElement;
+              }
+            }
+          }
+          if (!target) return {clicked: false, reason: 'paper_trading_tile_not_found'};
+          target.click();
+          return {clicked: true};
+        })()
+        """
+        click_result = await tv.evaluate_async(click_js) or {}
+        if not click_result.get("clicked"):
+            reason = click_result.get("reason", "unknown")
+            return False, f"Could not click Paper Trading tile: {reason}"
+
+        # Wait for TV to re-render the trading panel
+        await asyncio.sleep(1.5)
+
+        # Re-check to confirm reconnect succeeded
+        ok, msg = await _check_paper_broker()
+        if ok:
+            return True, f"Reconnected ({msg})"
+        return False, f"Reconnect clicked but check still fails: {msg}"
+    except Exception as e:
+        return False, f"Reconnect error: {e}"
 
 
 def _check_calendar() -> tuple[bool, str]:
