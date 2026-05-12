@@ -42,6 +42,14 @@ _signals: list[dict] = []
 # Prevents re-scoring / re-executing the same breakout every 15s poll while
 # price stays outside the ORB range. Reset whenever price returns inside.
 _breakout_processed: bool = False
+# Last attempted signal (direction, entry, timestamp). Defends against the
+# 2026-05-07 cluster — 3 journal rows fired at 09:55:18/33/48 with identical
+# entry=28787.00 because the in-memory _breakout_processed flag was reset
+# (likely process restart or edge-oscillation). 5-min dedup adds a journal-
+# data-backed guard independent of in-memory state.
+_last_signal_attempt: dict | None = None  # {"direction": "LONG", "entry": 28787.0, "ts": datetime}
+DEDUP_WINDOW_SECONDS = 300  # 5 minutes
+DEDUP_PRICE_TOLERANCE_PCT = 0.001  # 0.1% — flag near-identical entries
 # Risk-cap notification flags — set on first hit so we don't spam Telegram every 15s
 _logged_daily_cap: bool = False
 _logged_weekly_cap: bool = False
@@ -418,6 +426,28 @@ async def poll() -> Optional[dict]:
         rvol_at_entry=rvol,
     )
 
+    # ── Signal dedup guard ────────────────────────────────────────────────
+    # If the same direction + near-identical entry fired within the last
+    # DEDUP_WINDOW_SECONDS, refuse to journal+place again. Defends against
+    # the 2026-05-07 cluster (3 journal rows, same entry 28787.00) when the
+    # in-memory _breakout_processed flag is reset between polls (process
+    # restart, state file race, edge oscillation).
+    global _last_signal_attempt
+    if _last_signal_attempt is not None:
+        last = _last_signal_attempt
+        seconds_since = (now - last["ts"]).total_seconds()
+        price_delta_pct = abs(price - last["entry"]) / last["entry"] if last["entry"] else 1.0
+        if (last["direction"] == breakout_direction.value
+                and seconds_since < DEDUP_WINDOW_SECONDS
+                and price_delta_pct < DEDUP_PRICE_TOLERANCE_PCT):
+            logger.info(
+                "DEDUP: skipping %s @%.2f — same setup fired %.0fs ago at %.2f",
+                breakout_direction.value, price, seconds_since, last["entry"],
+            )
+            _breakout_processed = True
+            _persist_session()
+            return None
+
     # Log to journal
     trade_id = journal.log_trade_open(
         direction=breakout_direction.value,
@@ -429,6 +459,15 @@ async def poll() -> Optional[dict]:
         was_second_break=is_second_break,
         vix=vix, rvol=rvol,
     )
+
+    # Record this attempt for dedup BEFORE attempting placement. If placement
+    # fails the dedup still applies — we don't want 3 rapid retries on same
+    # signal even after a circuit-breaker reopens.
+    _last_signal_attempt = {
+        "direction": breakout_direction.value,
+        "entry": price,
+        "ts": now,
+    }
 
     # Send Telegram alert
     await telegram.notify_trade_entry(
