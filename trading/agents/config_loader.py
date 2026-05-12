@@ -29,12 +29,22 @@ _STATE_DIR = _BASE_DIR / "state"
 _CONFIG_PATH = _STATE_DIR / "learned_config.json"
 _META_PATH = _STATE_DIR / "learned_config.meta.json"
 
-# The 3 knobs the learning agent is allowed to touch. Any proposal or
-# manual edit outside these bounds is rejected / ignored.
+# Knobs the learning agent is allowed to touch, plus knobs marked as
+# human-tunable (manual-only edits to state/learned_config.json). Any proposal
+# or edit outside these bounds is rejected / ignored.
+#
+# Factor-weight knobs added 2026-05-11 per 22-trade audit:
+#   - second_break setup carries +$475 of total profit but only weighted +2.
+#   - orb_candle_direction is a NEGATIVE predictor: scored positive in 10
+#     trades, 70% WR but net -$198. Setting weight to 0 effectively drops it.
+# Both knobs default-match the previously hard-coded values, so a fresh deploy
+# with no learned_config.json behaves identically to before.
 LEARNABLE_KNOBS: dict[str, dict] = {
-    "SCORE_FULL_SIZE": {"min": 6, "max": 12, "step": 1, "type": "int"},
-    "SCORE_HALF_SIZE": {"min": 3, "max": 9,  "step": 1, "type": "int"},
-    "RVOL_THRESHOLD":  {"min": 1.2, "max": 2.0, "step": 0.1, "type": "float"},
+    "SCORE_FULL_SIZE":             {"min": 6,   "max": 12,  "step": 1,   "type": "int"},
+    "SCORE_HALF_SIZE":             {"min": 3,   "max": 9,   "step": 1,   "type": "int"},
+    "RVOL_THRESHOLD":              {"min": 1.2, "max": 2.0, "step": 0.1, "type": "float"},
+    "WEIGHT_SECOND_BREAK":         {"min": 0,   "max": 5,   "step": 1,   "type": "int"},
+    "WEIGHT_ORB_CANDLE_DIRECTION": {"min": 0,   "max": 5,   "step": 1,   "type": "int"},
 }
 
 

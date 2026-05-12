@@ -45,6 +45,17 @@ SCORE_FULL_SIZE = 8
 SCORE_HALF_SIZE = 5
 MAX_TRADES_PER_SESSION = 2  # Strict ORB: first break + optional second-break (Zarattini)
 
+# Factor weight defaults — these can be overridden by state/learned_config.json
+# (see LEARNABLE_KNOBS in agents/config_loader.py). Added 2026-05-11 after the
+# 22-trade audit revealed:
+#   - second_break setup accounts for +$475 of total profit but is hard-coded
+#     at +2; raising to +3 or +4 would proportionally boost its score weighting.
+#   - orb_candle_direction is a negative predictor at +3: scored positive in 10
+#     trades, 70% WR but net -$198. Setting to 0 effectively drops the factor.
+# Defaults preserve historical behavior; tune via JSON edit or learning agent.
+WEIGHT_SECOND_BREAK = 2
+WEIGHT_ORB_CANDLE_DIRECTION = 3
+
 # Stop/Target (Finding 2: extension-based, 7x Sharpe improvement)
 STOP_EXTENSION_MULT = 1.25  # Stop at 1.25x ORB range beyond opposite boundary
 TARGET_1_MULT = 0.50  # Close 50% at 0.5x ORB range

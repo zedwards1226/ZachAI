@@ -19,6 +19,7 @@ from config import (
     VIX_HARD_BLOCK, MULTIPLIER, STARTING_CAPITAL,
     MAX_RISK_PER_TRADE_DOLLARS, DAILY_LOSS_LIMIT_DOLLARS, WEEKLY_LOSS_LIMIT_PCT,
     RVOL_THRESHOLD, VIX_SWEET_SPOT_LOW, VIX_SWEET_SPOT_HIGH,
+    WEIGHT_SECOND_BREAK, WEIGHT_ORB_CANDLE_DIRECTION,
 )
 from models import (
     Direction, TradeSize, CandleDirection, ScoreBreakdown, ORBRange, Signal,
@@ -525,13 +526,18 @@ def _score_trade(direction: Direction, is_second_break: bool,
     memory = states.get("memory", {})
     sentinel = states.get("sentinel", {})
 
-    # +3: ORB candle direction aligns (Finding 3: 77-80% accuracy)
-    if orb.candle_direction == CandleDirection.BULLISH and direction == Direction.LONG:
-        b.orb_candle_direction = 3
-        b.details["orb_candle"] = "Bullish ORB candle confirms LONG"
-    elif orb.candle_direction == CandleDirection.BEARISH and direction == Direction.SHORT:
-        b.orb_candle_direction = 3
-        b.details["orb_candle"] = "Bearish ORB candle confirms SHORT"
+    # ORB candle direction aligns (Finding 3: 77-80% accuracy on backtest).
+    # Weight is now tunable via WEIGHT_ORB_CANDLE_DIRECTION (default 3).
+    # 2026-05-11 audit found this factor is a NEGATIVE predictor in live data
+    # (10 trades scored positive, 70% WR but net -$198) — knob exists so a
+    # human or the learning agent can drop it to 0 if confirmed at larger n.
+    if WEIGHT_ORB_CANDLE_DIRECTION > 0:
+        if orb.candle_direction == CandleDirection.BULLISH and direction == Direction.LONG:
+            b.orb_candle_direction = WEIGHT_ORB_CANDLE_DIRECTION
+            b.details["orb_candle"] = f"Bullish ORB candle confirms LONG (+{WEIGHT_ORB_CANDLE_DIRECTION})"
+        elif orb.candle_direction == CandleDirection.BEARISH and direction == Direction.SHORT:
+            b.orb_candle_direction = WEIGHT_ORB_CANDLE_DIRECTION
+            b.details["orb_candle"] = f"Bearish ORB candle confirms SHORT (+{WEIGHT_ORB_CANDLE_DIRECTION})"
 
     # +2: HTF bias aligns
     bias = memory.get("morning_bias", "NEUTRAL")
@@ -545,10 +551,13 @@ def _score_trade(direction: Direction, is_second_break: bool,
         b.bias_conflict = -2
         b.details["bias_conflict"] = f"{bias} conflicts with {direction.value}"
 
-    # +2: Second break after double break (Finding 1: 72.2% win rate)
-    if is_second_break:
-        b.second_break = 2
-        b.details["second_break"] = "Second break after failed first (72% edge)"
+    # Second break after double break (Finding 1: 72.2% win rate on backtest).
+    # Weight is now tunable via WEIGHT_SECOND_BREAK (default 2). The 2026-05-11
+    # audit showed second_break setups carry +$475 of profit (vs first_break
+    # net -$198), so a future bump to +3 or +4 may be warranted at larger n.
+    if is_second_break and WEIGHT_SECOND_BREAK > 0:
+        b.second_break = WEIGHT_SECOND_BREAK
+        b.details["second_break"] = f"Second break after failed first (72% edge, +{WEIGHT_SECOND_BREAK})"
 
     # +1: Structure OPEN_AIR — recomputed against breakout price AND trade direction.
     # Only levels in front of the trade count as obstacles; levels already broken
