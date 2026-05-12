@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 # Live polling: 1 req per series per cycle. Kalshi free tier is 100 req/min.
 HTTP_TIMEOUT_S = 15.0
 
+# Per-series 429 cooldown. When Kalshi returns 429 for a series, skip that
+# series for RATE_LIMIT_COOLDOWN_S seconds instead of spamming retries every
+# scheduler tick. Empirically fixes the May-11 log flood on KXETHD where the
+# scanner was hammering the same throttled endpoint 30-60x per hour.
+RATE_LIMIT_COOLDOWN_S = 300  # 5 minutes
+_rate_limited_until: dict[str, datetime] = {}
+
 
 def _client() -> httpx.Client:
     return httpx.Client(
@@ -51,7 +58,17 @@ def fetch_active_markets(
 ) -> list[dict]:
     """Pull active markets in a series. status=open returns markets still
     accepting trades; status=active also returns markets that have opened
-    but may not be tradeable yet."""
+    but may not be tradeable yet.
+
+    Raises httpx.HTTPStatusError on non-2xx. Caller in scan_sector handles
+    429 specifically by parking the series in a cooldown.
+    """
+    # Cooldown short-circuit: if this series was 429'd recently, don't hit
+    # the wire — return empty so the scanner skips it for this cycle.
+    cooldown_until = _rate_limited_until.get(series_ticker)
+    if cooldown_until and datetime.now(timezone.utc) < cooldown_until:
+        return []
+
     with _client() as client:
         r = client.get(
             "/markets",
@@ -224,6 +241,22 @@ def scan_and_trade(
     """
     try:
         markets = fetch_active_markets(series_ticker=series_ticker)
+    except httpx.HTTPStatusError as e:
+        # 429 = Kalshi throttled this series. Park it in cooldown so the next
+        # RATE_LIMIT_COOLDOWN_S of scheduler ticks skip the wire entirely
+        # instead of hammering the throttled endpoint and spamming the log.
+        if e.response.status_code == 429:
+            cooldown_until = datetime.now(timezone.utc).replace(microsecond=0)
+            from datetime import timedelta
+            cooldown_until = cooldown_until + timedelta(seconds=RATE_LIMIT_COOLDOWN_S)
+            _rate_limited_until[series_ticker] = cooldown_until
+            logger.info(
+                "Kalshi 429 for %s — series cooldown until %s (%ds)",
+                series_ticker, cooldown_until.isoformat(), RATE_LIMIT_COOLDOWN_S,
+            )
+        else:
+            logger.warning("fetch_active_markets HTTP error for %s: %s", series_ticker, e)
+        return {"scanned": 0, "snapshots": 0, "decisions": 0, "approved": 0, "placed": 0}
     except Exception as e:
         logger.warning("fetch_active_markets failed for %s: %s", series_ticker, e)
         return {"scanned": 0, "snapshots": 0, "decisions": 0, "approved": 0, "placed": 0}

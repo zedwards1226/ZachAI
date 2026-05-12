@@ -22,10 +22,10 @@
   },
   "crypto_btcd_midband": {
     "no_bands": [],
-    "yes_bands": [[0.70, 0.85, 0.85]],
-    "updated_at": "2026-05-07T00:50:00Z",
-    "source": "paused_no_after_loss_audit_2026-05-06",
-    "note": "NO side -$96.39 over 23 trades, 60.9% WR vs 76% implied. Calibration was 15m-market data; doesn't transfer to BTC daily markets. YES side keeps trading (88% WR, +$61.60 lifetime). Re-enable after fresh BTC-daily backtest confirms a real NO edge."
+    "yes_bands": [[0.65, 0.88, 0.82]],
+    "updated_at": "2026-05-12T02:00:00Z",
+    "source": "tactical_widen_2026-05-11",
+    "note": "TACTICAL WIDENING from prior [0.70, 0.85, 0.85] to [0.65, 0.88, 0.82] to restore trade volume. After 5/6 audit tightened bands, OmniAlpha went 3 days (5/9-5/11) with zero trades — paper bot generating zero signal teaches nothing. This is the only strategy with demonstrated lifetime YES edge (88% WR, +$61.60). Forecast trimmed from 0.85 to 0.82 (closer to Wilson 95% lower bound) to stay conservative on edge calculation while accepting more variance in entry probability. Other 4 strategies left tight per 5/6 audit. REVIEW 2026-05-17: if fires >=5 trades and PnL > -$30, keep these bands; if <3 trades or loss > $30, revert to [0.70, 0.85, 0.85] and run jbecker recalibration on fresh data."
   },
   "crypto_btc15m_midband": {
     "no_bands": [[0.20, 0.30, 0.15]],

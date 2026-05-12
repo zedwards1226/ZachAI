@@ -13,6 +13,12 @@ WA proves the edge thesis: structural mispricing on narrow / long-shot YES contr
 - Cross-bot risk coupling lives in `C:\ZachAI\data\risk_state.json` (read by both, written by neither yet — design TBD).
 - Telegram alerts use the same Jarvis bot but prefix messages `[OmniAlpha]` so WA notifications stay clean.
 
+## OPEN REVIEW CHECKPOINTS
+- **2026-05-17 (Sunday): `crypto_btcd_midband` widened-band review.** On 2026-05-11 the YES band was tactically widened from `[0.70, 0.85, 0.85]` to `[0.65, 0.88, 0.82]` to restore trade volume after a 3-day no-trade stretch (5/9-5/11) following the 5/6 audit. Decision criteria:
+  - **Keep widened bands** if: >=5 trades fired AND net PnL > -$30 since 5/11
+  - **Revert to tight `[0.70, 0.85, 0.85]`** if: <3 trades OR net loss > $30
+  - Either way: run `omnialpha/backtest/jbecker_recalibrate_2026_05_06.py` against fresh data (re-extract from `reference/jbecker-data/data.tar.zst`) to refresh the entire band set for all 5 strategies.
+
 ## CURRENT STATUS
 **Phase 1 — Scaffold (in progress).** Foundation only. NO live strategies, NO order placement, NO authenticated API calls beyond `health` check.
 
