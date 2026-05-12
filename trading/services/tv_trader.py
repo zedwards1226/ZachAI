@@ -20,6 +20,8 @@ from config import (
     TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time,
     VIX_INTERVENTION_PCT,
     TRAIL_DISTANCE_RATIO, POSITION_OPEN_FUNDS_THRESHOLD, STARTING_CAPITAL,
+    PRE_T1_BE_PROGRESS, PRE_T1_BE_PULLBACK,
+    STALL_MIN_MFE_POINTS, STALL_NO_PROGRESS_MIN, STALL_LOCK_PCT,
 )
 from services.tv_client import get_client
 from services.state_manager import read_state, write_state
@@ -1091,12 +1093,26 @@ async def monitor_trades() -> None:
             await close_position(trade_id, price, f"{close_h}:{close_m:02d} session close")
             continue
 
-        # 2-hour time exit
-        minutes_held = (now - opened_at).total_seconds() / 60
-        if minutes_held >= MAX_HOLD_MINUTES:
-            logger.info("2-hour time exit for trade %d (held %.0f min)", trade_id, minutes_held)
-            await close_position(trade_id, price, "2-hour time exit")
-            continue
+        # ── MFE (Max Favorable Excursion) tracking ─────────────────────────
+        # Added 2026-05-11 per audit Finding D. Used by pre-T1 BE and stall
+        # detection below. mfe_price is the most-favorable price seen since
+        # entry; mfe_at is when we last hit a new MFE. Initialized lazily.
+        if direction == "LONG":
+            current_mfe = order.get("mfe_price", entry)
+            if price > current_mfe:
+                order["mfe_price"] = price
+                order["mfe_at"] = now.isoformat()
+                _persist_active_orders()
+        else:  # SHORT
+            current_mfe = order.get("mfe_price", entry)
+            if price < current_mfe:
+                order["mfe_price"] = price
+                order["mfe_at"] = now.isoformat()
+                _persist_active_orders()
+
+        # NOTE: 2-hour time exit moved to AFTER trail/vstop checks below
+        # (audit Finding D — today's trade #23 was time-exited at +\$32 when
+        # the trail would have caught +\$60. Trail wins ties now.)
 
         # VIX intervention — VIX spike since trade open
         vix_now = structure.get("vix")
@@ -1126,6 +1142,61 @@ async def monitor_trades() -> None:
                 except Exception as e:
                     logger.warning("Telegram notify_be_move failed: %s", e)
 
+        # ── Pre-T1 BE protection (added 2026-05-11) ────────────────────────
+        # If MFE reaches >=PRE_T1_BE_PROGRESS of T1 distance AND price pulls
+        # back >=PRE_T1_BE_PULLBACK from MFE before T1 is hit, snap virtual
+        # stop to entry. Catches the 'almost hit target, rolled over' case
+        # where the bot used to ride all the way back to original stop.
+        if not order.get("t1_hit") and order.get("mfe_price"):
+            mfe = order["mfe_price"]
+            t1_distance = abs(t1 - entry)
+            mfe_progress = abs(mfe - entry) / t1_distance if t1_distance > 0 else 0
+            if mfe_progress >= PRE_T1_BE_PROGRESS:
+                mfe_excursion = abs(mfe - entry)
+                if direction == "LONG":
+                    pullback = (mfe - price) / mfe_excursion if mfe_excursion > 0 else 0
+                else:
+                    pullback = (price - mfe) / mfe_excursion if mfe_excursion > 0 else 0
+                if pullback >= PRE_T1_BE_PULLBACK and not order.get("pre_t1_be_armed"):
+                    order["pre_t1_be_armed"] = True
+                    order["virtual_stop"] = entry
+                    _persist_active_orders()
+                    logger.info(
+                        "Pre-T1 BE armed for trade %d: MFE=%.2f (%.0f%% of T1), "
+                        "pullback %.0f%% → virtual stop snapped to entry %.2f",
+                        trade_id, mfe, mfe_progress * 100, pullback * 100, entry,
+                    )
+
+        # ── Stall detection (added 2026-05-11) ─────────────────────────────
+        # If MFE has gone up >=STALL_MIN_MFE_POINTS but hasn't advanced in
+        # >=STALL_NO_PROGRESS_MIN minutes, lock STALL_LOCK_PCT of MFE-from-entry.
+        if order.get("mfe_price") and order.get("mfe_at"):
+            mfe = order["mfe_price"]
+            mfe_from_entry = abs(mfe - entry)
+            if mfe_from_entry >= STALL_MIN_MFE_POINTS:
+                try:
+                    mfe_at = datetime.fromisoformat(order["mfe_at"])
+                except (TypeError, ValueError):
+                    mfe_at = now
+                stall_minutes = (now - mfe_at).total_seconds() / 60
+                if stall_minutes >= STALL_NO_PROGRESS_MIN and not order.get("stall_locked"):
+                    lock_amount = mfe_from_entry * STALL_LOCK_PCT
+                    new_vstop = (entry + lock_amount) if direction == "LONG" else (entry - lock_amount)
+                    current_vstop = order.get("virtual_stop", entry)
+                    # Only tighten — never loosen
+                    is_tighter = ((direction == "LONG" and new_vstop > current_vstop)
+                                  or (direction == "SHORT" and new_vstop < current_vstop))
+                    if is_tighter:
+                        order["virtual_stop"] = new_vstop
+                        order["stall_locked"] = True
+                        _persist_active_orders()
+                        logger.info(
+                            "Stall detected for trade %d: MFE %.2f stagnant %.0fmin "
+                            "→ tightened vstop to %.2f (locked %.1f pts of %.1f MFE)",
+                            trade_id, mfe, stall_minutes, new_vstop,
+                            lock_amount, mfe_from_entry,
+                        )
+
         # Continuous trail after T1 hit — lock in profit as price runs further.
         # trail_distance = TRAIL_DISTANCE_RATIO × ORB range (ORB range = |T2 - T1|).
         if order.get("t1_hit"):
@@ -1147,8 +1218,10 @@ async def monitor_trades() -> None:
                     logger.info("Trailed stop DOWN for trade %d: %.2f -> %.2f (price %.2f, locked +%.1f pts)",
                                 trade_id, current_vstop, new_vstop, price, entry - new_vstop)
 
-        # Virtual stop — fires when price drifts back through the (possibly trailed) virtual stop
-        if order.get("t1_hit"):
+        # Virtual stop — fires when price drifts back through the (possibly trailed)
+        # virtual stop. Now also runs when the virtual_stop was set by pre-T1 BE
+        # protection or stall detection (added 2026-05-11), not only by t1_hit.
+        if order.get("virtual_stop") is not None:
             vstop = order["virtual_stop"]
             be_hit = (direction == "LONG" and price <= vstop) or \
                      (direction == "SHORT" and price >= vstop)
@@ -1157,9 +1230,16 @@ async def monitor_trades() -> None:
                 # plain BE stop is scratch (logged as WIN per existing convention).
                 locked_pts = (vstop - entry) if direction == "LONG" else (entry - vstop)
                 outcome = "WIN"
-                reason = "Trail stop after T1" if locked_pts > 0.5 else "BE stop after T1"
-                logger.info("Virtual stop for trade %d at %.2f (vstop %.2f, entry %.2f, locked %+.1f pts)",
-                            trade_id, price, vstop, entry, locked_pts)
+                if order.get("stall_locked"):
+                    reason = "Stall lock fired"
+                elif order.get("pre_t1_be_armed") and not order.get("t1_hit"):
+                    reason = "Pre-T1 BE protect"
+                elif locked_pts > 0.5:
+                    reason = "Trail stop after T1"
+                else:
+                    reason = "BE stop after T1"
+                logger.info("Virtual stop for trade %d at %.2f (vstop %.2f, entry %.2f, locked %+.1f pts) — %s",
+                            trade_id, price, vstop, entry, locked_pts, reason)
                 await close_position(trade_id, vstop, reason, outcome=outcome)
                 continue
 
@@ -1184,6 +1264,16 @@ async def monitor_trades() -> None:
             logger.info("T2 hit for trade %d at %.2f (TV auto-closed)", trade_id, t2)
             await close_position(trade_id, t2, "T2 target hit",
                                  outcome="WIN", skip_chart_close=True)
+            continue
+
+        # 2-hour time exit — LAST in priority order (audit Finding D, 2026-05-11).
+        # Previously fired before the trail/vstop checks, which caused today's
+        # trade #23 to time-exit at +$32 instead of letting the trail catch +$60.
+        # Now trail/vstop/pre-T1-BE/stall checks all get first crack.
+        minutes_held = (now - opened_at).total_seconds() / 60
+        if minutes_held >= MAX_HOLD_MINUTES:
+            logger.info("2-hour time exit for trade %d (held %.0f min)", trade_id, minutes_held)
+            await close_position(trade_id, price, "2-hour time exit")
             continue
 
 

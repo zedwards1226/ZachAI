@@ -89,6 +89,16 @@ VIX_INTERVENTION_PCT = 0.20        # Close trade if VIX rises 20%+ from trade-op
 # 0.5 × ORB matches the T1 distance — gives trade room equal to the breakeven trigger band
 TRAIL_DISTANCE_RATIO = 0.5
 
+# Pre-T1 management (added 2026-05-11 per audit Finding D):
+#   Today's trade #23 reached 80% of T1 path then rolled over and time-exited
+#   at +$32 instead of capturing the high. These knobs let the bot react
+#   before T1 is hit.
+PRE_T1_BE_PROGRESS = 0.80    # If MFE reaches 80% of T1 distance from entry
+PRE_T1_BE_PULLBACK = 0.30    # And price pulls back 30% from MFE → snap stop to BE
+STALL_MIN_MFE_POINTS = 20    # Stall detection only fires if MFE >= 20pts profit
+STALL_NO_PROGRESS_MIN = 30   # If MFE hasn't advanced in 30 min, tighten stop
+STALL_LOCK_PCT = 0.50        # Lock 50% of MFE-from-entry when stall fires
+
 # Position-state heuristic: if available funds drop below this fraction of STARTING_CAPITAL,
 # we know a position is open (margin used). Otherwise we assume flat.
 POSITION_OPEN_FUNDS_THRESHOLD = 0.90  # Below 90% of starting capital = position open
