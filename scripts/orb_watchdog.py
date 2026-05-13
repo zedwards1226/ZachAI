@@ -361,12 +361,25 @@ def check_omnialpha_dashboard() -> bool:
 
 
 def check_jarvis_bot() -> bool:
-    """Telegram Jarvis bot alive. Auto-restart via VBS if dead."""
+    """Telegram Jarvis bot alive. Auto-restart via VBS if dead.
+
+    Added 2026-05-12 retry-once: PowerShell process scan can time out under
+    load (the 15s subprocess timeout fires, _find_processes returns empty,
+    watchdog mistakenly thinks bot is dead). Tonight that cascaded into 4
+    duplicate bot.py instances all conflicting on Telegram getUpdates,
+    causing message storm. Retry once with 2s gap before declaring dead.
+    """
+    if _find_processes("bot.py"):
+        _clear_cooldown("jarvis_down")
+        return True
+    # First scan returned empty — could be a real death OR a PowerShell timeout
+    # under system load. Wait 2s and retry once before triggering a restart.
+    time.sleep(2)
     if _find_processes("bot.py"):
         _clear_cooldown("jarvis_down")
         return True
 
-    log.warning("Jarvis bot not running — restarting via Jarvis_Bot.vbs")
+    log.warning("Jarvis bot not running (confirmed by retry) — restarting via Jarvis_Bot.vbs")
     alert("jarvis_down",
           f"⚠️ <b>Jarvis Telegram bot dead</b>\n"
           f"🔧 Restarting via Jarvis_Bot.vbs\n"
