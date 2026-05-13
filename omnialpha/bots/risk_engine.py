@@ -203,7 +203,9 @@ def check_entry(
     # money with a kill-switch defeats the learning purpose (Zach 2026-05-12:
     # "its fake money we trying to learn how can we learn if we dont trade").
     # When PAPER_MODE flips off (live trading), the caps re-engage.
-    from config import PAPER_MODE
+    # PAPER_MODE is already imported at module level (line 41) — re-importing
+    # in-function would make Python treat it as a local variable and break
+    # the existing reference at line 128 with UnboundLocalError.
     if not PAPER_MODE:
         daily_cap = daily_loss_cap_usd(context.capital_usd)
         weekly_cap = weekly_loss_cap_usd(context.capital_usd)
