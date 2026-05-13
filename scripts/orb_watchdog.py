@@ -32,6 +32,8 @@ ORB_PID_FILE = TRADING_DIR / "state" / "orb.pid"
 ORB_VBS = SCRIPTS_DIR / "ORBAgents.vbs"
 JARVIS_VBS = SCRIPTS_DIR / "Jarvis_Bot.vbs"
 OMNIALPHA_DASHBOARD_VBS = SCRIPTS_DIR / "OmniAlpha_Dashboard.vbs"
+OMNIALPHA_VBS = SCRIPTS_DIR / "OmniAlpha.vbs"
+OMNIALPHA_PID_FILE = Path(r"C:\ZachAI\omnialpha\state\omnialpha.pid")
 
 # ─── Endpoints ────────────────────────────────────────────────────────────
 CDP_URL = "http://localhost:9222/json/version"
@@ -241,6 +243,80 @@ def check_cdp() -> bool:
     return False
 
 
+def check_omnialpha_main() -> bool:
+    """OmniAlpha main.py alive via PID file. Restart via OmniAlpha.vbs if dead.
+
+    Added 2026-05-12 after discovering PID 2832 (last night's restart) died
+    silently after ~110 minutes. omnialpha.db-wal sat untouched for 22 hours
+    before we noticed. Mirrors check_orb_main() pattern: trust PID file first,
+    fall back to process-name scan, restart via VBS on death.
+    """
+    if not OMNIALPHA_PID_FILE.exists():
+        # PID file missing — try to find a running omnialpha main.py before restarting
+        live_pids = _find_processes("omnialpha")
+        # Filter to actual main.py (exclude dashboard's serve.py)
+        live_main = []
+        for pid in live_pids:
+            try:
+                cmd_check = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine"],
+                    capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
+                )
+                if "main.py" in cmd_check.stdout and "serve.py" not in cmd_check.stdout:
+                    live_main.append(pid)
+            except Exception:
+                pass
+        if live_main:
+            pid = live_main[0]
+            try:
+                OMNIALPHA_PID_FILE.write_text(str(pid))
+                log.info("OmniAlpha running as PID %d but PID file missing — restored", pid)
+                resolved("omnialpha_dead", f"✅ <b>OmniAlpha running (PID {pid})</b> — PID file restored")
+            except OSError as e:
+                log.error("Failed to restore OmniAlpha PID file: %s", e)
+            return True
+
+        log.warning("OmniAlpha PID file missing and no main.py process found — starting")
+        alert("omnialpha_dead",
+              f"⚠️ <b>OmniAlpha main.py not running</b>\n🔧 Starting via OmniAlpha.vbs\n"
+              f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+        if _start_vbs(OMNIALPHA_VBS):
+            time.sleep(15)
+            if OMNIALPHA_PID_FILE.exists():
+                resolved("omnialpha_dead", "✅ <b>OmniAlpha main.py started</b>")
+                return True
+        return False
+
+    try:
+        pid = int(OMNIALPHA_PID_FILE.read_text().strip())
+    except (ValueError, OSError):
+        alert("omnialpha_pid_bad", "⚠️ <b>OmniAlpha PID file corrupt</b>")
+        return False
+
+    if _pid_alive(pid):
+        _clear_cooldown("omnialpha_dead")
+        return True
+
+    log.warning("OmniAlpha PID %d is dead — restarting", pid)
+    alert("omnialpha_dead",
+          f"🚨 <b>OmniAlpha main.py crashed (PID {pid})</b>\n"
+          f"🔧 Restarting via OmniAlpha.vbs\n⏰ {datetime.now().strftime('%H:%M:%S')}")
+    try:
+        OMNIALPHA_PID_FILE.unlink()
+    except OSError:
+        pass
+    if _start_vbs(OMNIALPHA_VBS):
+        time.sleep(15)
+        if OMNIALPHA_PID_FILE.exists():
+            resolved("omnialpha_dead", "✅ <b>OmniAlpha main.py recovered</b>")
+            return True
+    alert("omnialpha_fail",
+          "🚨 <b>OmniAlpha RESTART FAILED</b> — manual: "
+          "wscript C:\\ZachAI\\scripts\\OmniAlpha.vbs")
+    return False
+
+
 def check_omnialpha_dashboard() -> bool:
     """OmniAlpha dashboard on :8503. Auto-restart via VBS if down.
 
@@ -315,6 +391,7 @@ def run_cycle() -> None:
         "orb_main":            check_orb_main(),
         "cdp":                 check_cdp(),
         "jarvis_bot":          check_jarvis_bot(),
+        "omnialpha_main":      check_omnialpha_main(),
         "omnialpha_dashboard": check_omnialpha_dashboard(),
     }
     if not all(results.values()):
