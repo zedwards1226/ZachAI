@@ -68,3 +68,7 @@ tradingview-mcp/
 tradingview-mcp-jackson/
 plugins/
 telegram-bridge/uploads/
+
+# ORB dashboard build artifacts
+trading/dashboard/frontend/node_modules/
+trading/dashboard/backend/static/
