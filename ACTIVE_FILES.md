@@ -55,6 +55,18 @@ trading/main.py (APScheduler)
 
 ---
 
+## ORB DASHBOARD (added 2026-05-13)
+| File | Purpose | Port |
+|------|---------|------|
+| `trading/dashboard/backend/serve.py` | Flask API server (7 read-only endpoints against `trading/journal.db`) | :8502 |
+| `trading/dashboard/backend/static/` | React build output (gitignored, regenerates via `npm run build`) | — |
+| `trading/dashboard/frontend/` | Vite + React 18 + Tailwind + Recharts source | dev :5173 |
+| `scripts/ORB_Dashboard.vbs` | Auto-launcher (anti-double-launch guard) | — |
+| Startup shortcut: `ORB_Dashboard.lnk` | Windows Startup folder → wscript ORB_Dashboard.vbs | — |
+| Watchdog hook | `scripts/orb_watchdog.py::check_orb_dashboard()` HTTP GET /api/health every 60s, auto-restart on failure | — |
+
+---
+
 ## JARVIS FIELD TECH (v1 scaffold — 2026-04-17)
 Mobile PWA for pulling electrical drawings + manuals from Google Drive and troubleshooting toilet paper converting machines with a Jarvis-style HUD and voice. See `jarvis-field-tech/ACTIVE_FILES.md` for the full manifest.
 

@@ -181,3 +181,28 @@ TradingView captures keys globally even when dialogs are open:
 
 ### Legacy Pipeline (retired 2026-04-17)
 `paper_trader.py` + cloudflared tunnel + TV alert webhook ID were removed. Do not recreate. All order flow is direct CDP now.
+
+## DASHBOARD (added 2026-05-13)
+React + Flask, port **:8502**, mirrors OmniAlpha's dashboard pattern.
+
+| Layer | Path |
+|---|---|
+| Backend (Flask, 7 API endpoints) | `trading/dashboard/backend/serve.py` |
+| Frontend source (Vite + React 18 + Tailwind + Recharts) | `trading/dashboard/frontend/` |
+| Built React static | `trading/dashboard/backend/static/` (gitignored, run `npm run build` in frontend/) |
+| Auto-start | `scripts/ORB_Dashboard.vbs` (Startup folder shortcut) |
+| Health monitoring | `scripts/orb_watchdog.py::check_orb_dashboard()` (HTTP GET /api/health, auto-restart on failure) |
+
+**Tabs:** Live (arm status + open positions w/ MFE/vstop/trail badges) · Trades
+(expandable rows with full score breakdown) · Equity (Recharts daily P&L bars
++ cumulative line) · Learning (agent_journal feed).
+
+**Data source:** read-only against `trading/journal.db` via `file:...?mode=ro`
+URI — dashboard bugs can never write to or lock the journal the live bot uses.
+
+**Rebuild after frontend changes:**
+```powershell
+cd C:\ZachAI\trading\dashboard\frontend
+npm run build       # writes to ../backend/static/
+```
+No backend restart needed — Flask serves whatever is in `static/`.

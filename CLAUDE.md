@@ -132,7 +132,7 @@ When Zach says "bye", "done", "closing", or "end session":
 ## PROJECT ROSTER
 Each project owns a nested `CLAUDE.md` with its operational details. Claude Code auto-loads them when working in that folder.
 
-- **`trading\`** — ORB NQ/MNQ futures system (live, paper mode) → see `trading/CLAUDE.md`
+- **`trading\`** — ORB NQ/MNQ futures system (live, paper mode); dashboard at http://localhost:8502 → see `trading/CLAUDE.md`
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
 - **`omnialpha\`** — Multi-sector 24/7 Kalshi bot (paper mode, scaffold phase). Sister to WeatherAlpha but completely independent — separate process, DB, capital. NEVER touch `kalshi\` for OmniAlpha work. → see `omnialpha/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`

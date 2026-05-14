@@ -34,10 +34,12 @@ JARVIS_VBS = SCRIPTS_DIR / "Jarvis_Bot.vbs"
 OMNIALPHA_DASHBOARD_VBS = SCRIPTS_DIR / "OmniAlpha_Dashboard.vbs"
 OMNIALPHA_VBS = SCRIPTS_DIR / "OmniAlpha.vbs"
 OMNIALPHA_PID_FILE = Path(r"C:\ZachAI\omnialpha\state\omnialpha.pid")
+ORB_DASHBOARD_VBS = SCRIPTS_DIR / "ORB_Dashboard.vbs"
 
 # ─── Endpoints ────────────────────────────────────────────────────────────
 CDP_URL = "http://localhost:9222/json/version"
 OMNIALPHA_DASHBOARD_URL = "http://localhost:8503/"
+ORB_DASHBOARD_URL = "http://localhost:8502/api/health"
 CHECK_EVERY = 60  # seconds
 
 # ─── Load Telegram from trading/.env ──────────────────────────────────────
@@ -360,6 +362,47 @@ def check_omnialpha_dashboard() -> bool:
     return False
 
 
+def check_orb_dashboard() -> bool:
+    """ORB dashboard on :8502. Auto-restart via VBS if down.
+
+    Added 2026-05-13 when the ORB React+Flask dashboard shipped. Mirrors
+    check_omnialpha_dashboard exactly — HTTP GET against /api/health with
+    2 attempts (handles transient Flask slow-startup), VBS relaunch on
+    persistent failure, Telegram alert + auto-recovery message.
+    """
+    for attempt in range(2):
+        try:
+            r = requests.get(ORB_DASHBOARD_URL, timeout=5)
+            if r.status_code == 200:
+                _clear_cooldown("orb_dashboard_down")
+                return True
+        except Exception:
+            pass
+        if attempt == 0:
+            time.sleep(2)
+
+    log.warning("ORB dashboard :8502 not responding — restarting")
+    alert("orb_dashboard_down",
+          f"📊 <b>ORB dashboard down</b> (:8502)\n"
+          f"🔧 Restarting via ORB_Dashboard.vbs\n"
+          f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+    if _start_vbs(ORB_DASHBOARD_VBS):
+        time.sleep(10)
+        try:
+            r = requests.get(ORB_DASHBOARD_URL, timeout=5)
+            if r.status_code == 200:
+                resolved("orb_dashboard_down",
+                         f"✅ <b>ORB dashboard recovered</b>\n"
+                         f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+                return True
+        except Exception:
+            pass
+    alert("orb_dashboard_fail",
+          "🚨 <b>ORB dashboard RESTART FAILED</b> — manual: "
+          "wscript C:\\ZachAI\\scripts\\ORB_Dashboard.vbs")
+    return False
+
+
 def check_jarvis_bot() -> bool:
     """Telegram Jarvis bot alive. Auto-restart via VBS if dead.
 
@@ -402,6 +445,7 @@ def run_cycle() -> None:
     log.info("--- ORB watchdog cycle ---")
     results = {
         "orb_main":            check_orb_main(),
+        "orb_dashboard":       check_orb_dashboard(),
         "cdp":                 check_cdp(),
         "jarvis_bot":          check_jarvis_bot(),
         "omnialpha_main":      check_omnialpha_main(),
