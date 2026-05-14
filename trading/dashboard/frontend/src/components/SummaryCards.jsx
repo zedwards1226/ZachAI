@@ -37,9 +37,24 @@ export default function SummaryCards() {
   const dayTone = data.today_pnl_usd > 0 ? 'profit' : data.today_pnl_usd < 0 ? 'loss' : 'neutral'
   const wtdTone = data.wtd_pnl_usd > 0 ? 'profit' : data.wtd_pnl_usd < 0 ? 'loss' : 'neutral'
   const armTone = data.armed ? 'profit' : 'loss'
+  const capTone = data.lifetime_pnl_usd >= 0 ? 'profit' : 'loss'
+
+  // Format current capital as a clean dollar value with no sign
+  const capValue = data.current_capital_usd != null
+    ? `$${data.current_capital_usd.toFixed(2)}`
+    : '—'
+  const returnLabel = data.return_pct != null
+    ? `${data.return_pct >= 0 ? '+' : ''}${data.return_pct.toFixed(1)}% from $${data.starting_capital_usd?.toFixed(0)}`
+    : 'starting capital n/a'
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-3 grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div className="max-w-6xl mx-auto px-4 py-3 grid grid-cols-2 md:grid-cols-6 gap-3">
+      <Card
+        label="Capital"
+        value={capValue}
+        sub={returnLabel}
+        tone={capTone}
+      />
       <Card
         label="Today"
         value={fmt.usd(data.today_pnl_usd)}
@@ -53,7 +68,7 @@ export default function SummaryCards() {
         tone={wtdTone}
       />
       <Card
-        label="Lifetime"
+        label="Lifetime P&L"
         value={fmt.usd(data.lifetime_pnl_usd)}
         sub={`${data.lifetime_wins}W / ${data.lifetime_losses}L · ${fmt.pct(data.lifetime_wr)}`}
         tone={data.lifetime_pnl_usd >= 0 ? 'profit' : 'loss'}

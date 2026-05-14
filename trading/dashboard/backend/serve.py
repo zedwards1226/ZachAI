@@ -43,6 +43,15 @@ STATE_DIR = BASE_DIR / "state"
 STATIC_DIR = Path(__file__).parent / "static"
 SERVE_PORT = 8502
 
+# Starting capital — pulled lazily from trading/config.py so the dashboard
+# stays in sync if Zach ever changes it. Falls back to 5000 if import fails.
+def _starting_capital() -> float:
+    try:
+        from config import STARTING_CAPITAL
+        return float(STARTING_CAPITAL)
+    except Exception:
+        return 5000.0
+
 app = Flask(__name__, static_folder=None)
 CORS(app, origins=[
     f"http://localhost:{SERVE_PORT}",
@@ -107,6 +116,7 @@ def api_summary():
       - paper_mode, armed (from arm_status.json)
       - open_positions (count from active_orders.json)
     """
+    starting_capital = _starting_capital()
     if not JOURNAL_DB.exists():
         return jsonify({
             "paper_mode": _paper_mode(),
@@ -116,6 +126,9 @@ def api_summary():
             "lifetime_trades": 0, "lifetime_wins": 0, "lifetime_losses": 0,
             "lifetime_pnl_usd": 0.0, "lifetime_wr": None,
             "open_positions": 0,
+            "starting_capital_usd": starting_capital,
+            "current_capital_usd": starting_capital,
+            "return_pct": 0.0,
         })
 
     today = datetime.now().strftime("%Y-%m-%d")
@@ -154,6 +167,10 @@ def api_summary():
     if life_row["n"]:
         lifetime_wr = round(life_row["w"] / life_row["n"] * 100, 1)
 
+    lifetime_pnl = float(life_row["pnl"] or 0)
+    current_capital = starting_capital + lifetime_pnl
+    return_pct = (lifetime_pnl / starting_capital * 100) if starting_capital else 0.0
+
     return jsonify({
         "paper_mode": _paper_mode(),
         "armed": armed,
@@ -166,9 +183,12 @@ def api_summary():
         "lifetime_trades": life_row["n"] or 0,
         "lifetime_wins": life_row["w"] or 0,
         "lifetime_losses": life_row["l"] or 0,
-        "lifetime_pnl_usd": round(life_row["pnl"] or 0, 2),
+        "lifetime_pnl_usd": round(lifetime_pnl, 2),
         "lifetime_wr": lifetime_wr,
         "open_positions": open_count,
+        "starting_capital_usd": round(starting_capital, 2),
+        "current_capital_usd": round(current_capital, 2),
+        "return_pct": round(return_pct, 2),
     })
 
 
