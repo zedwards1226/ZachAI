@@ -462,7 +462,12 @@ export default function App() {
         className="hidden md:flex items-center justify-between px-4 py-1.5 border-t shrink-0 text-[10px]"
         style={{ borderColor: '#2a2a3a', background: '#0a0a10', color: '#64748b' }}
       >
-        <span>Zack's Weather Bot War Room · Kalshi Weather Markets · Paper Mode</span>
+        <span>
+          Zack's Weather Bot War Room · Kalshi Weather Markets ·
+          <span style={{ color: paperMode === false ? '#ff5e7d' : '#fbbf24', fontWeight: 700 }}>
+            {' '}{paperMode === false ? 'LIVE Mode' : paperMode === true ? 'Paper Mode' : 'Mode loading...'}
+          </span>
+        </span>
         <span className="stat-value">{new Date().toLocaleString()}</span>
         <div className="flex items-center gap-1.5">
           <div

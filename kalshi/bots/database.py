@@ -214,10 +214,12 @@ def resolve_trade(trade_id: int, won: bool, pnl_usd: float) -> None:
         )
 
 
-def get_open_trades() -> list[dict]:
+def get_open_trades(paper: int | None = None) -> list[dict]:
+    """Open positions. paper=0/1 filters by mode; None=all (legacy/internal)."""
+    extra = "" if paper is None else f" AND paper={int(paper)}"
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status='open' ORDER BY timestamp DESC"
+            f"SELECT * FROM trades WHERE status='open'{extra} ORDER BY timestamp DESC"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -254,10 +256,12 @@ def has_open_trade_for_city(city: str) -> bool:
     return row is not None
 
 
-def get_trades(limit=100) -> list[dict]:
+def get_trades(limit=100, paper: int | None = None) -> list[dict]:
+    """Recent trades. paper=0/1 filters by mode; None=all (legacy)."""
+    only = "" if paper is None else f" WHERE paper={int(paper)}"
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?", (limit,)
+            f"SELECT * FROM trades{only} ORDER BY timestamp DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -391,14 +395,20 @@ def get_decision_log(limit: int = 100, since: str | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_summary() -> dict:
+def get_summary(paper: int | None = None) -> dict:
+    """Lifetime summary. If paper is 0 or 1, filter to that mode only.
+    None = legacy behavior (all trades, paper + live mixed).
+    Added 2026-05-15 — dashboard wants live-only data in live mode."""
+    # SQL fragments — int() coercion is SQL-injection-safe.
+    only = "" if paper is None else f" WHERE paper={int(paper)}"
+    extra = "" if paper is None else f" AND paper={int(paper)}"
     with get_conn() as conn:
-        total  = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
-        wins   = conn.execute("SELECT COUNT(*) FROM trades WHERE status='won'").fetchone()[0]
-        losses = conn.execute("SELECT COUNT(*) FROM trades WHERE status='lost'").fetchone()[0]
-        pnl    = conn.execute("SELECT COALESCE(SUM(pnl_usd),0) FROM trades WHERE pnl_usd IS NOT NULL").fetchone()[0]
-        open_c = conn.execute("SELECT COUNT(*) FROM trades WHERE status='open'").fetchone()[0]
-        open_r = conn.execute("SELECT COALESCE(SUM(stake_usd),0) FROM trades WHERE status='open'").fetchone()[0]
+        total  = conn.execute(f"SELECT COUNT(*) FROM trades{only}").fetchone()[0]
+        wins   = conn.execute(f"SELECT COUNT(*) FROM trades WHERE status='won'{extra}").fetchone()[0]
+        losses = conn.execute(f"SELECT COUNT(*) FROM trades WHERE status='lost'{extra}").fetchone()[0]
+        pnl    = conn.execute(f"SELECT COALESCE(SUM(pnl_usd),0) FROM trades WHERE pnl_usd IS NOT NULL{extra}").fetchone()[0]
+        open_c = conn.execute(f"SELECT COUNT(*) FROM trades WHERE status='open'{extra}").fetchone()[0]
+        open_r = conn.execute(f"SELECT COALESCE(SUM(stake_usd),0) FROM trades WHERE status='open'{extra}").fetchone()[0]
     return {
         "total_trades": total,
         "wins": wins,
@@ -411,16 +421,18 @@ def get_summary() -> dict:
     }
 
 
-def get_today_stats() -> dict:
-    """Today's activity: realized PnL, new trades, resolved wins/losses."""
+def get_today_stats(paper: int | None = None) -> dict:
+    """Today's activity: realized PnL, new trades, resolved wins/losses.
+    paper=0/1 filters to live/paper only; None = all (legacy)."""
+    extra = "" if paper is None else f" AND paper={int(paper)}"
     with get_conn() as conn:
         row = conn.execute(
-            """SELECT
+            f"""SELECT
                 COUNT(*),
                 COALESCE(SUM(CASE WHEN status='won'  THEN 1 ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END),0),
                 COALESCE(SUM(pnl_usd),0)
-               FROM trades WHERE date(timestamp)=date('now','localtime')"""
+               FROM trades WHERE date(timestamp)=date('now','localtime'){extra}"""
         ).fetchone()
     return {
         "trades_today": row[0],
@@ -460,17 +472,19 @@ def get_today_signal_stats() -> dict:
     }
 
 
-def get_city_performance() -> list:
-    """Lifetime performance per city — drives the city scoreboard."""
+def get_city_performance(paper: int | None = None) -> list:
+    """Lifetime performance per city — drives the city scoreboard.
+    paper=0/1 filters to live/paper only; None = all (legacy)."""
+    only = "" if paper is None else f" WHERE paper={int(paper)}"
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT city,
+            f"""SELECT city,
                       COUNT(*),
                       SUM(CASE WHEN status='won'  THEN 1 ELSE 0 END),
                       SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END),
                       SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),
                       COALESCE(SUM(pnl_usd),0)
-                 FROM trades GROUP BY city ORDER BY 6 DESC"""
+                 FROM trades{only} GROUP BY city ORDER BY 6 DESC"""
         ).fetchall()
     out = []
     for r in rows:
@@ -540,13 +554,14 @@ def get_unsettled_signals() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_equity_curve() -> list[dict]:
-    """Build cumulative P&L curve from settled trades in chronological order."""
+def get_equity_curve(paper: int | None = None) -> list[dict]:
+    """Cumulative P&L curve. paper=0/1 filters by mode; None=all (legacy)."""
+    extra = "" if paper is None else f" AND paper={int(paper)}"
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT id, timestamp, resolved_at, city, market_id, side,
+            f"""SELECT id, timestamp, resolved_at, city, market_id, side,
                       price_cents, stake_usd, pnl_usd, status
-               FROM trades WHERE status IN ('won', 'lost')
+               FROM trades WHERE status IN ('won', 'lost'){extra}
                ORDER BY COALESCE(resolved_at, timestamp) ASC"""
         ).fetchall()
     from config import STARTING_CAPITAL
@@ -601,11 +616,13 @@ def get_calibration() -> dict:
     }
 
 
-def get_trades_with_verification(limit=100) -> list[dict]:
-    """Trades joined with forecast data for verification."""
+def get_trades_with_verification(limit=100, paper: int | None = None) -> list[dict]:
+    """Trades joined with forecast data for verification.
+    paper=0/1 filters by mode; None=all (legacy)."""
+    where = "" if paper is None else f" WHERE t.paper={int(paper)}"
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT t.*,
+            f"""SELECT t.*,
                       f.forecast_hi_f, f.forecast_lo_f,
                       f.kalshi_strike_f, f.our_prob_yes, f.implied_prob_yes
                FROM trades t
@@ -614,7 +631,7 @@ def get_trades_with_verification(limit=100) -> list[dict]:
                        SELECT MAX(f2.id) FROM forecasts f2
                        WHERE f2.kalshi_market_id = t.market_id
                          AND f2.timestamp <= t.timestamp
-                   )
+                   ){where}
                ORDER BY t.timestamp DESC LIMIT ?""",
             (limit,)
         ).fetchall()

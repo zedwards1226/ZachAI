@@ -79,7 +79,12 @@ def health():
 
 @app.route("/api/status")
 def status():
-    summary  = get_summary()
+    # Mode filter: in live mode the dashboard wants ONLY live data, in paper
+    # mode ONLY paper data. Hands across the whole UI clean separation
+    # between the two worlds (Zach 2026-05-15: 'i dont want to see paper
+    # data when im live i want see live data').
+    _mode = 1 if PAPER_MODE else 0
+    summary  = get_summary(paper=_mode)
     gs       = guardrail_status()
     from config import STARTING_CAPITAL
 
@@ -121,7 +126,7 @@ def forecasts():
 @app.route("/api/trades")
 def trades():
     limit = int(request.args.get("limit", 100))
-    return jsonify(get_trades(limit))
+    return jsonify(get_trades(limit, paper=1 if PAPER_MODE else 0))
 
 
 @app.route("/api/pnl")
@@ -139,17 +144,17 @@ def guardrails_endpoint():
 
 @app.route("/api/summary")
 def summary():
-    return jsonify(get_summary())
+    return jsonify(get_summary(paper=1 if PAPER_MODE else 0))
 
 
 @app.route("/api/today")
 def today_stats():
-    return jsonify(get_today_stats())
+    return jsonify(get_today_stats(paper=1 if PAPER_MODE else 0))
 
 
 @app.route("/api/by-city")
 def by_city():
-    return jsonify(get_city_performance())
+    return jsonify(get_city_performance(paper=1 if PAPER_MODE else 0))
 
 
 @app.route("/api/scan", methods=["POST"])
@@ -355,7 +360,7 @@ def signals():
 
 @app.route("/api/equity-curve")
 def equity_curve():
-    return jsonify(get_equity_curve())
+    return jsonify(get_equity_curve(paper=1 if PAPER_MODE else 0))
 
 
 @app.route("/api/calibration")
@@ -396,16 +401,17 @@ def agent_review():
 @app.route("/api/trades/verified")
 def trades_verified():
     limit = int(request.args.get("limit", 100))
-    return jsonify(get_trades_with_verification(limit))
+    return jsonify(get_trades_with_verification(limit, paper=1 if PAPER_MODE else 0))
 
 
 @app.route("/api/positions")
 def positions():
-    """Open trades enriched with live Kalshi prices and unrealized P&L."""
+    """Open trades enriched with live Kalshi prices and unrealized P&L.
+    Filters by current mode — live mode hides paper opens and vice versa."""
     from kalshi_client import get_client
     from database import get_open_trades
     client = get_client()
-    open_trades = get_open_trades()
+    open_trades = get_open_trades(paper=1 if PAPER_MODE else 0)
     positions = []
     # Deduplicate market tickers for batch price fetch
     price_cache = {}
