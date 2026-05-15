@@ -4,13 +4,17 @@ Monitors ORB stack every 60s and auto-recovers:
   - main.py (via state/orb.pid + process liveness)
   - TradingView CDP (http://localhost:9222/json)
   - Jarvis Telegram bot (process scan)
+  - OmniAlpha main + dashboard, ORB dashboard
 
 Actions:
-  - Restart ORB main.py via scripts/ORBAgents.vbs when dead
+  - Restart dead processes via their VBS launchers
   - Telegram alerts on state change (with 1-hour cooldown per key)
+  - Holds a Windows wake-lock so the machine never idle-sleeps while the
+    trading stack is up (see _hold_wake_lock below)
 """
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
 import subprocess
@@ -20,6 +24,31 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
+
+
+# ─── Wake-lock ────────────────────────────────────────────────────────────
+# 2026-05-14: the laptop kept entering Modern Standby (S0) on idle even with
+# powercfg standby-timeout set to 0 — because standby-timeout does NOT govern
+# Modern Standby's user-presence "Idle Timeout". The reliable cross-platform
+# fix is SetThreadExecutionState: while this watchdog process is alive it
+# tells Windows "system required, do not idle-sleep". Same mechanism VLC /
+# PowerPoint / video players use. ES_CONTINUOUS makes it persist until reset.
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+ES_AWAYMODE_REQUIRED = 0x00000040
+
+
+def _hold_wake_lock() -> bool:
+    """Tell Windows to stay awake while this process runs. Returns True on success."""
+    if sys.platform != "win32":
+        return False
+    try:
+        ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+        )
+        return True
+    except Exception:
+        return False
 
 # ─── Paths ────────────────────────────────────────────────────────────────
 TRADING_DIR = Path(r"C:\ZachAI\trading")
@@ -463,16 +492,28 @@ def main() -> None:
     log.info("Telegram: %s", "configured" if BOT_TOKEN else "NOT CONFIGURED")
     log.info("PID file: %s", ORB_PID_FILE)
     log.info("Check interval: %ds", CHECK_EVERY)
+    wake = _hold_wake_lock()
+    log.info("Wake-lock: %s", "HELD (machine will not idle-sleep)" if wake else "NOT HELD")
     log.info("=" * 55)
 
     tg(f"🟢 <b>ORB Watchdog Started</b>\nChecking every {CHECK_EVERY}s\n"
+       f"{'🔒 wake-lock held' if wake else '⚠️ wake-lock NOT held'}\n"
        f"⏰ {datetime.now().strftime('%H:%M:%S')}")
 
     while True:
         try:
+            # Re-assert the wake-lock every cycle. ES_CONTINUOUS should persist
+            # on its own, but re-asserting is cheap insurance against anything
+            # that resets the thread execution state.
+            _hold_wake_lock()
             run_cycle()
         except KeyboardInterrupt:
             log.info("Watchdog stopped by user")
+            # Release the wake-lock so the machine can sleep normally again
+            try:
+                ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+            except Exception:
+                pass
             tg("🔴 <b>ORB Watchdog Stopped</b> (manual)")
             break
         except Exception as e:
