@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
 
 const COLS = [
-  { key: 'status',      label: 'Status',   w: 70  },
+  { key: 'status',      label: 'Status',   w: 110 },  // widened to fit PAPER/LIVE chip
   { key: 'city',        label: 'City',     w: 50  },
   { key: 'market_id',   label: 'Market',   w: 140 },
   { key: 'side',        label: 'Side',     w: 50  },
@@ -29,6 +29,24 @@ function StatusBadge({ status }) {
       style={{ background: c.bg, color: c.color, border: `1px solid ${c.border}`, letterSpacing: '0.05em' }}
     >
       {c.text}
+    </span>
+  )
+}
+
+function ModeBadge({ paper }) {
+  // PAPER = yellow chip, LIVE = red chip. paper field is 1/0 or true/false.
+  const isPaper = paper === 1 || paper === true
+  return (
+    <span
+      className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+      style={{
+        background: isPaper ? 'rgba(251,191,36,0.12)' : 'rgba(255,94,125,0.15)',
+        color:      isPaper ? '#fbbf24' : '#ff5e7d',
+        border:    `1px solid ${isPaper ? 'rgba(251,191,36,0.25)' : 'rgba(255,94,125,0.45)'}`,
+        letterSpacing: '0.05em',
+      }}
+    >
+      {isPaper ? 'PAPER' : '⚡ LIVE'}
     </span>
   )
 }
@@ -107,8 +125,9 @@ export default function TradesTable({ trades }) {
                     style={{ borderColor: '#1a1a24' }}
                     onClick={() => setExpanded(isExpanded ? null : t.id)}
                   >
-                    <div className="px-2 py-2" style={{ width: 70, minWidth: 70 }}>
+                    <div className="px-2 py-2 flex items-center gap-1" style={{ width: 110, minWidth: 110 }}>
                       <StatusBadge status={t.status} />
+                      <ModeBadge paper={t.paper} />
                     </div>
                     <div className="px-2 py-2 text-[11px] font-medium text-text-primary" style={{ width: 50, minWidth: 50 }}>
                       {t.city}
@@ -222,10 +241,22 @@ export default function TradesTable({ trades }) {
 
       {/* Footer */}
       <div
-        className="flex items-center justify-between pt-2 border-t text-[10px] shrink-0"
+        className="flex items-center justify-between pt-2 border-t text-[10px] shrink-0 gap-3 flex-wrap"
         style={{ borderColor: '#2a2a3a' }}
       >
-        <span className="text-text-muted">{sorted.length} trades</span>
+        <div className="flex items-center gap-2">
+          <span className="text-text-muted">{sorted.length} total</span>
+          {(() => {
+            const paperN = sorted.filter(t => t.paper === 1 || t.paper === true).length
+            const liveN  = sorted.length - paperN
+            return (
+              <>
+                <span style={{ color: '#fbbf24' }}>{paperN} paper</span>
+                <span style={{ color: liveN > 0 ? '#ff5e7d' : '#64748b' }}>{liveN} live</span>
+              </>
+            )
+          })()}
+        </div>
         <span className="text-text-muted">Click row to verify data</span>
       </div>
     </div>
