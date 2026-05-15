@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Menu, X, Zap, Wifi, WifiOff } from 'lucide-react'
 
 export default function Header({
@@ -10,7 +11,38 @@ export default function Header({
   onScan,
   mobileMenuOpen,
   onToggleMobile,
+  paperMode,        // true = paper, false = live
+  onModeToggle,     // async (toLive: bool) => void
 }) {
+  const [toggling, setToggling] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const handleBadgeClick = () => {
+    if (toggling) return
+    setConfirmOpen(true)
+  }
+  const handleConfirm = async () => {
+    setConfirmOpen(false)
+    setToggling(true)
+    try {
+      // paperMode true means we're currently paper → flip to_live=true
+      await onModeToggle(paperMode === true)
+    } finally {
+      // Re-enable after ~75s (the bot's restart window)
+      setTimeout(() => setToggling(false), 75000)
+    }
+  }
+  const handleCancel = () => setConfirmOpen(false)
+
+  // Three visual states: PAPER (yellow), LIVE (red+pulse), RESTARTING (grey)
+  const isPaper = paperMode === true
+  const isLive  = paperMode === false
+  const badgeStyle = toggling
+    ? { background: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.35)' }
+    : isLive
+    ? { background: 'rgba(255,94,125,0.15)', color: '#ff5e7d', border: '1px solid rgba(255,94,125,0.45)', boxShadow: '0 0 10px rgba(255,94,125,0.4)' }
+    : { background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }
+  const badgeLabel = toggling ? 'RESTARTING…' : isLive ? '⚡ LIVE' : 'PAPER'
   const lifePos = (lifetimePnl ?? 0) >= 0
   const todayPos = (todayPnl ?? 0) >= 0
   const pingColor = !pingMs
@@ -46,18 +78,86 @@ export default function Header({
             WAR ROOM
           </span>
         </div>
-        <span
-          className="text-[10px] font-semibold px-2 py-0.5 rounded shrink-0"
+        <button
+          onClick={handleBadgeClick}
+          disabled={toggling || paperMode == null}
+          title={
+            toggling
+              ? 'Bot restarting — please wait'
+              : isLive
+              ? 'Click to switch to PAPER mode (stop live trading)'
+              : 'Click to switch to LIVE mode (real money)'
+          }
+          className="text-[10px] font-semibold px-2 py-0.5 rounded shrink-0 transition-all hover:scale-105"
           style={{
-            background: 'rgba(251, 191, 36, 0.12)',
-            color: '#fbbf24',
-            border: '1px solid rgba(251, 191, 36, 0.25)',
+            ...badgeStyle,
             letterSpacing: '0.08em',
+            cursor: toggling ? 'wait' : 'pointer',
           }}
         >
-          PAPER
-        </span>
+          {badgeLabel}
+        </button>
       </div>
+
+      {/* Mode-flip confirmation modal */}
+      {confirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={handleCancel}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="rounded-xl p-5 max-w-md w-full"
+            style={{
+              background: 'linear-gradient(135deg, #13131d, #1a1a26)',
+              border: `1px solid ${isPaper ? '#ff5e7d' : '#fbbf24'}55`,
+              boxShadow: `0 0 30px ${isPaper ? '#ff5e7d' : '#fbbf24'}33`,
+            }}
+          >
+            <div className="text-base font-bold mb-2" style={{ color: isPaper ? '#ff5e7d' : '#fbbf24' }}>
+              {isPaper ? '⚠️ Switch to LIVE mode?' : '🟡 Switch back to PAPER mode?'}
+            </div>
+            <div className="text-[12px] leading-relaxed mb-4" style={{ color: '#cbd5e1' }}>
+              {isPaper ? (
+                <>
+                  This will edit <code>kalshi/.env</code> to <code>PAPER_MODE=false</code> and restart the bot.
+                  <br /><br />
+                  <b style={{ color: '#ff5e7d' }}>Next order will use REAL MONEY from your Kalshi account.</b>
+                  <br /><br />
+                  All guardrails (daily loss cap, max trades, capital-at-risk) still apply.
+                  Restart takes ~60s — bot will reconnect via the watchdog automatically.
+                </>
+              ) : (
+                <>
+                  This will edit <code>kalshi/.env</code> to <code>PAPER_MODE=true</code> and restart the bot.
+                  No new live orders will fire. Existing open positions on Kalshi remain — they settle naturally.
+                </>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={handleCancel}
+                className="px-3 py-1.5 rounded text-[11px] font-semibold"
+                style={{ background: '#1a1a26', color: '#94a3b8', border: '1px solid #2a2a3a' }}
+              >
+                CANCEL
+              </button>
+              <button
+                onClick={handleConfirm}
+                className="px-3 py-1.5 rounded text-[11px] font-bold"
+                style={{
+                  background: isPaper ? 'rgba(255,94,125,0.15)' : 'rgba(251,191,36,0.15)',
+                  color: isPaper ? '#ff5e7d' : '#fbbf24',
+                  border: `1px solid ${isPaper ? '#ff5e7d' : '#fbbf24'}55`,
+                }}
+              >
+                {isPaper ? 'GO LIVE' : 'GO PAPER'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="hidden md:flex items-center gap-4">
         <div className="flex items-center gap-2">

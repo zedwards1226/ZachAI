@@ -239,6 +239,70 @@ def api_resume():
     return jsonify({"ok": True, "halted": False})
 
 
+@app.route("/api/mode-toggle", methods=["POST"])
+def api_mode_toggle():
+    """Flip PAPER_MODE in kalshi/.env (paper <-> live) and self-restart the
+    bot so the new value takes effect. WeatherAlpha_Watchdog.vbs respawns
+    the process within ~60s. Frontend should poll /api/health until the
+    paper_mode field reflects the new value.
+
+    Added 2026-05-15 as part of live-cutover prep — Zach wanted a dashboard
+    toggle so he doesn't have to SSH/edit files to flip between paper and
+    live. Confirmation dialog lives in the frontend; this endpoint just
+    does the flip + restart.
+
+    Body: {"to_live": true|false}  — explicit, no implicit flip
+    """
+    import os
+    import threading
+    from pathlib import Path
+
+    payload = request.json or {}
+    if "to_live" not in payload:
+        return jsonify({"ok": False, "error": "missing to_live"}), 400
+    to_live = bool(payload["to_live"])
+    new_value = "false" if to_live else "true"
+
+    env_path = Path(__file__).parent.parent / ".env"
+    if not env_path.exists():
+        return jsonify({"ok": False, "error": ".env not found"}), 500
+
+    # Read .env, replace PAPER_MODE line (preserve all other lines + comments)
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        replaced = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("PAPER_MODE="):
+                lines[i] = f"PAPER_MODE={new_value}"
+                replaced = True
+                break
+        if not replaced:
+            lines.append(f"PAPER_MODE={new_value}")
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"env write failed: {exc}"}), 500
+
+    log_decision(
+        type="system",
+        message=f"MODE TOGGLE via dashboard: PAPER_MODE={new_value} (going {'LIVE' if to_live else 'PAPER'})",
+    )
+
+    # Schedule self-exit AFTER returning the HTTP response so the client
+    # gets a clean 200. Watchdog (scripts/watchdog.py) respawns us within
+    # one cycle (~60s). The new process picks up the updated .env.
+    def _delayed_exit():
+        import time as _t
+        _t.sleep(1)
+        os._exit(0)
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+
+    return jsonify({
+        "ok": True,
+        "new_mode": "live" if to_live else "paper",
+        "restart_seconds": 60,
+    })
+
+
 @app.route("/api/resolve", methods=["POST"])
 def resolve():
     try:

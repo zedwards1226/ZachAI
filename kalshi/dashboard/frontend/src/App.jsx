@@ -205,6 +205,23 @@ export default function App() {
 
   // Derived
   const kalshiOk        = health?.kalshi_connected === true
+  const paperMode       = health?.paper_mode  // true=paper, false=live, undefined=loading
+
+  // Mode flip: edit .env via /api/mode-toggle, bot self-restarts, watchdog respawns.
+  // The dashboard backend proxy auto-injects X-Internal-Secret.
+  const runModeToggle = useCallback(async (toLive) => {
+    try {
+      const r = await fetch('/api/mode-toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_live: toLive }),
+      })
+      const data = await r.json()
+      addLog('system', `Mode toggle: ${toLive ? 'PAPER → LIVE' : 'LIVE → PAPER'} (${data.ok ? 'ok' : data.error}). Restart ~60s.`)
+    } catch (e) {
+      addLog('error', `Mode toggle failed: ${e.message}`)
+    }
+  }, [addLog])
   const capital         = statusData?.capital_usd ?? 80
   const lifetimePnl     = summary?.total_pnl_usd ?? 0
   const startingCapital = capital - lifetimePnl
@@ -237,6 +254,8 @@ export default function App() {
         onScan={runScan}
         mobileMenuOpen={mobileMenuOpen}
         onToggleMobile={() => setMobileMenuOpen(v => !v)}
+        paperMode={paperMode}
+        onModeToggle={runModeToggle}
       />
 
       {/* HERO STRIP */}
