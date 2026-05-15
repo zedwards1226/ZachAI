@@ -35,11 +35,18 @@ def _load_private_key():
 
 def _sign(private_key, timestamp_ms: int, method: str, path: str) -> str:
     """
-    RSA-PSS SHA256 signature of: str(timestamp_ms) + METHOD + /path/without/query
+    RSA-PSS SHA256 signature of: str(timestamp_ms) + METHOD + FULL_PATH
     Returns base64-encoded signature string.
+
+    FULL_PATH must include the /trade-api/v2/ prefix per Kalshi docs — using
+    just /portfolio/balance returns 401. This was a latent bug never caught
+    in paper mode (paper-mode orders short-circuit before _sign is called),
+    surfaced 2026-05-15 when the first authenticated probe hit the live API.
     """
-    # Strip query string from path
+    # Strip query string + ensure /trade-api/v2 prefix
     path_no_query = path.split("?")[0]
+    if not path_no_query.startswith("/trade-api/"):
+        path_no_query = "/trade-api/v2" + path_no_query
     message = f"{timestamp_ms}{method.upper()}{path_no_query}".encode()
     sig = private_key.sign(
         message,
