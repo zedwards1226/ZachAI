@@ -82,12 +82,34 @@ def status():
     summary  = get_summary()
     gs       = guardrail_status()
     from config import STARTING_CAPITAL
+
+    # In LIVE mode, capital is the real Kalshi balance (refreshed from API,
+    # cached 5 min in trader.get_capital). In PAPER mode, fall back to the
+    # synthetic STARTING_CAPITAL + paper P&L sum.
+    # Added 2026-05-15 per Zach: 'when i go live i want see that capital
+    # ... just change the capital' — paper-history P&L shouldn't inflate
+    # the headline once we're trading real money.
+    if PAPER_MODE:
+        capital_usd = round(STARTING_CAPITAL + summary["total_pnl_usd"], 2)
+        capital_source = "paper_history"
+    else:
+        try:
+            from trader import get_capital as _get_live_capital
+            capital_usd = round(_get_live_capital(), 2)
+            capital_source = "kalshi_live"
+        except Exception as e:
+            # Fallback if balance fetch fails: don't show inflated paper P&L
+            # in live mode — show conservative STARTING_CAPITAL.
+            capital_usd = round(STARTING_CAPITAL, 2)
+            capital_source = f"fallback_{type(e).__name__}"
+
     return jsonify({
-        "paper_mode":   PAPER_MODE,
-        "kalshi_demo":  KALSHI_DEMO,
-        "summary":      summary,
-        "guardrails":   gs,
-        "capital_usd":  round(STARTING_CAPITAL + summary["total_pnl_usd"], 2),
+        "paper_mode":     PAPER_MODE,
+        "kalshi_demo":    KALSHI_DEMO,
+        "summary":        summary,
+        "guardrails":     gs,
+        "capital_usd":    capital_usd,
+        "capital_source": capital_source,
     })
 
 
