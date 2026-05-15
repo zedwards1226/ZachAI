@@ -196,6 +196,49 @@ def window_override():
     return jsonify({"ok": True, "window_override": enabled})
 
 
+@app.route("/api/halt", methods=["POST"])
+def api_halt():
+    """Emergency kill switch — sets guardrail_state.halted=True so the bot
+    refuses all new entries. Open positions are NOT cancelled (real Kalshi
+    contracts settle naturally). Use this from phone/curl when live trading
+    goes off the rails and you can't wait for a restart.
+
+    Added 2026-05-15 as part of the live-trading cutover.
+    Reverse with POST /api/resume.
+    """
+    from database import update_guardrail_state, get_guardrail_state
+    payload = request.json or {}
+    reason = payload.get("reason", "manual halt")
+    gs = get_guardrail_state()
+    update_guardrail_state(
+        daily_trades=gs["daily_trades"],
+        daily_pnl_usd=gs["daily_pnl_usd"],
+        consecutive_losses=gs["consecutive_losses"],
+        halted=True,
+        halt_reason=reason,
+    )
+    log_decision(type="system", message=f"HALT engaged via API: {reason}")
+    return jsonify({"ok": True, "halted": True, "reason": reason})
+
+
+@app.route("/api/resume", methods=["POST"])
+def api_resume():
+    """Clear the halt flag set by /api/halt. New entries become eligible
+    again (still gated by all other guardrails: daily loss cap, daily trade
+    limit, consecutive-loss pause, etc)."""
+    from database import update_guardrail_state, get_guardrail_state
+    gs = get_guardrail_state()
+    update_guardrail_state(
+        daily_trades=gs["daily_trades"],
+        daily_pnl_usd=gs["daily_pnl_usd"],
+        consecutive_losses=gs["consecutive_losses"],
+        halted=False,
+        halt_reason=None,
+    )
+    log_decision(type="system", message="HALT cleared via API")
+    return jsonify({"ok": True, "halted": False})
+
+
 @app.route("/api/resolve", methods=["POST"])
 def resolve():
     try:

@@ -5,11 +5,65 @@ Orchestrates: fetch ensemble forecasts -> find markets -> compute edge -> check 
 Uses 31-member GFS ensemble for probability (not normal distribution).
 """
 import logging
+import os
 import time
 from datetime import date, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
+
+
+# ─── Live-trade Telegram alert (live mode only) ────────────────────────────
+# When PAPER_MODE=false and an order successfully places against the real
+# Kalshi API, this fires a Telegram message so Zach knows real money just
+# moved. Self-contained credential load — does not depend on monitor.py
+# (which runs in a separate process). Fails silently if creds missing or
+# network drops, so a Telegram failure never blocks the trade record.
+_TG_TOKEN = None
+_TG_CHAT_ID = None
+
+
+def _load_tg_config() -> tuple[str | None, str | None]:
+    """Load Telegram creds from kalshi/.env, fallback to trading/.env, then env vars."""
+    def _read(path: Path) -> tuple[str | None, str | None]:
+        tok, cid = None, None
+        if not path.exists():
+            return tok, cid
+        for line in path.read_text().splitlines():
+            s = line.strip()
+            if s.startswith("TELEGRAM_BOT_TOKEN="):
+                tok = s.split("=", 1)[1].strip() or None
+            elif s.startswith("TELEGRAM_CHAT_ID="):
+                cid = s.split("=", 1)[1].strip() or None
+        return tok, cid
+    kalshi_env = Path(__file__).parent.parent / ".env"
+    trading_env = Path(__file__).parent.parent.parent / "trading" / ".env"
+    tok, cid = _read(kalshi_env)
+    if not tok or not cid:
+        ftok, fcid = _read(trading_env)
+        tok = tok or ftok
+        cid = cid or fcid
+    tok = os.environ.get("TELEGRAM_BOT_TOKEN", tok)
+    cid = os.environ.get("TELEGRAM_CHAT_ID", cid)
+    return tok, cid
+
+
+def _send_live_trade_alert(msg: str) -> None:
+    """Post msg to Telegram. Silent failure (logged at WARN) — never blocks trading."""
+    global _TG_TOKEN, _TG_CHAT_ID
+    if _TG_TOKEN is None and _TG_CHAT_ID is None:
+        _TG_TOKEN, _TG_CHAT_ID = _load_tg_config()
+    if not _TG_TOKEN or not _TG_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{_TG_TOKEN}/sendMessage",
+            json={"chat_id": _TG_CHAT_ID, "text": msg, "parse_mode": "HTML"},
+            timeout=5,
+        )
+    except Exception as e:
+        log.warning("live-trade telegram alert failed: %s", e)
 
 # IANA timezones per city — used for same-day resolution gate and current-time checks.
 # Phoenix uses America/Phoenix (Arizona doesn't observe DST).
@@ -58,7 +112,47 @@ log = logging.getLogger(__name__)
 MIN_VOLUME = 0
 
 
+# ─── Live-balance cache ────────────────────────────────────────────────────
+# In live mode, get_capital() queries Kalshi /portfolio/balance instead of
+# using the hardcoded STARTING_CAPITAL. The result is cached for 5 minutes
+# so we don't hit the API on every scan (60s cycles). Cache survives across
+# scan ticks but is wiped on bot restart. Fallback chain on API failure:
+# 1. Stale cached balance (if any), 2. STARTING_CAPITAL + lifetime P&L.
+_balance_cache: dict = {"value": None, "fetched_at": 0.0}
+_BALANCE_REFRESH_SECONDS = 300  # 5 minutes
+
+
 def get_capital() -> float:
+    """Return current trading capital in dollars.
+
+    Paper mode: STARTING_CAPITAL + lifetime P&L (no live API call).
+    Live mode:  Kalshi /portfolio/balance, cached 5 min. Fallback to last-
+                known cached value, then STARTING_CAPITAL + P&L, if the
+                API errors or returns 0.
+    """
+    if PAPER_MODE:
+        summary = get_summary()
+        return STARTING_CAPITAL + summary["total_pnl_usd"]
+
+    now = time.time()
+    cached = _balance_cache["value"]
+    if cached is not None and (now - _balance_cache["fetched_at"]) < _BALANCE_REFRESH_SECONDS:
+        return cached
+
+    try:
+        client = get_client()
+        bal = client.get_balance()
+        if bal > 0:
+            _balance_cache["value"] = bal
+            _balance_cache["fetched_at"] = now
+            log.info("live_balance_fetched: $%.2f", bal)
+            return bal
+        log.warning("get_balance returned 0 — using fallback (cache or STARTING_CAPITAL+P&L)")
+    except Exception as e:
+        log.warning("get_balance failed: %s — using fallback", e)
+
+    if cached is not None:
+        return cached
     summary = get_summary()
     return STARTING_CAPITAL + summary["total_pnl_usd"]
 
@@ -402,6 +496,18 @@ def scan_and_trade() -> list[dict]:
                 sizing["contracts"], price_cents,
                 best["abs_edge"] * 100, stake, PAPER_MODE, len(member_highs)
             )
+
+            # Live-trade Telegram alert — only fires on real-money orders.
+            # Format mirrors the dashboard so Zach can sanity-check from phone.
+            if not PAPER_MODE:
+                order_id = (order or {}).get("order_id") or client_order_id
+                _send_live_trade_alert(
+                    f"🟢 <b>LIVE TRADE PLACED</b>\n"
+                    f"  {city_code}  {best['ticker']}\n"
+                    f"  {side.upper()}  {sizing['contracts']}ct @ {price_cents}¢\n"
+                    f"  edge {best['abs_edge']*100:+.1f}%  ·  stake ${stake:.2f}\n"
+                    f"  order_id <code>{str(order_id)[:32]}</code>"
+                )
 
             actions.append({
                 "city": city_code,
