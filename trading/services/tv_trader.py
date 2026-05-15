@@ -432,24 +432,34 @@ async def tv_dom_ready(tv) -> tuple[bool, str]:
         return {ready: false, reason: 'paper_trading_disconnected'};
       }
 
-      // 3. Verify Paper Trading footer/tab is visible — this is the persistent indicator
-      //    that Paper Trading session is connected. "Trade" tab next to it = trade panel
-      //    is reachable. The trade panel may be collapsed; that's fine — place_bracket_order
-      //    opens the Trade tab itself as step 1 of its DOM script.
-      var paperTab = false, tradeTab = false;
-      var btns = document.querySelectorAll('button, [role="button"], [role="tab"]');
-      for (var i = 0; i < btns.length; i++) {
-        var t = (btns[i].textContent || '').trim();
-        if (t === 'Paper Trading') paperTab = true;
-        if (t === 'Trade' || t === 'TradeTrade') tradeTab = true;
-        if (paperTab && tradeTab) break;
+      // 3. Verify Paper Trading session is connected. Two independent signals,
+      //    either one is sufficient:
+      //    (a) The buy-OnZ1FRe5 side tiles are present with real width — this is
+      //        the gold-standard "trade panel is open and functional" check, same
+      //        as agents/preflight._check_paper_broker uses.
+      //    (b) The "Paper Trading" label text is visible anywhere on the page.
+      //        2026-05-14: TV renders this as a plain footer <div> (logo + text),
+      //        NOT a button/tab — the old button-only scan returned a false
+      //        'paper_trading_not_active' even though the panel was fully open.
+      var sideTilesVisible = false;
+      var buys = document.querySelectorAll('[class*="buy-OnZ1FRe5"]');
+      for (var i = 0; i < buys.length; i++) {
+        if (buys[i].getBoundingClientRect().width > 50) { sideTilesVisible = true; break; }
       }
 
-      if (!paperTab) {
-        return {ready: false, reason: 'paper_trading_not_active'};
+      var paperLabelVisible = false;
+      if (!sideTilesVisible) {
+        var all = document.querySelectorAll('*');
+        for (var j = 0; j < all.length; j++) {
+          if ((all[j].textContent || '').trim() === 'Paper Trading') {
+            var r = all[j].getBoundingClientRect();
+            if (r.width > 10 && r.height > 8) { paperLabelVisible = true; break; }
+          }
+        }
       }
-      if (!tradeTab) {
-        return {ready: false, reason: 'trade_tab_missing'};
+
+      if (!sideTilesVisible && !paperLabelVisible) {
+        return {ready: false, reason: 'paper_trading_not_active'};
       }
 
       return {ready: true, reason: 'ok'};
