@@ -181,16 +181,24 @@ class KalshiClient:
         if not self._ready:
             raise RuntimeError("Kalshi client not authenticated")
 
+        # Kalshi's /portfolio/orders rejects requests that include BOTH
+        # yes_price and no_price — must send exactly the one matching `side`.
+        # Old code sent both, which produced 400 "invalid_order: exactly one
+        # of yes_price, no_price, yes_price_dollars, or no_price_dollars
+        # should be provided" on every live order all weekend (caught
+        # 2026-05-17 via direct API probe of the response body).
         body = {
             "ticker":          ticker,
             "action":          "buy",
             "side":            side,
             "type":            "limit",
             "count":           contracts,
-            "yes_price":       price_cents if side == "yes" else 100 - price_cents,
-            "no_price":        price_cents if side == "no"  else 100 - price_cents,
             "client_order_id": client_order_id,
         }
+        if side == "yes":
+            body["yes_price"] = price_cents
+        else:
+            body["no_price"] = price_cents
         response = self._post("/portfolio/orders", body)
         order    = response.get("order") or response
         valid_status = {"resting", "executed", "canceled", "open", "pending"}
