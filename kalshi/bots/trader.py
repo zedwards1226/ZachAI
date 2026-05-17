@@ -665,7 +665,13 @@ def resolve_expired_trades() -> None:
     today = date.today()
 
     for trade in open_trades:
-        if PAPER_MODE:
+        # Settlement path per-trade, NOT per-bot-mode. A leftover paper trade
+        # while in live mode must still settle via Open-Meteo (the Kalshi
+        # market may have no real position to query). Likewise a live trade
+        # while in paper mode (rare but possible after a mode flip) must
+        # still query Kalshi for the actual market resolution.
+        is_paper_trade = bool(trade.get("paper"))
+        if is_paper_trade:
             mkt_id = trade["market_id"]
             if "TEST" in mkt_id.upper():
                 # Test fixtures should never reach the resolver. Skip silently.
@@ -737,23 +743,54 @@ def resolve_expired_trades() -> None:
                 "WON" if won else "LOST", pnl,
             )
         else:
+            # Live trade — query Kalshi for actual market resolution.
+            # Kalshi market terminal statuses we accept:
+            #   'finalized' — settled with a result
+            #   'settled'   — also terminal (alias used in some endpoints)
+            # 'cancelled' (or missing result) means the market was voided —
+            # stake is refunded by Kalshi automatically; we record 0 PnL.
+            # Old code only matched 'finalized' AND required exact case-match
+            # on result ('yes'/'no') and side ('YES'/'NO'), so a result of
+            # 'YES' from Kalshi would have been silently treated as a loss.
             try:
                 client = get_client()
                 market = client.get_market(trade["market_id"])
-                if market and market.get("status") == "finalized":
-                    result = market.get("result")  # "yes" or "no"
-                    won = (result == "yes" and trade["side"] == "YES") or \
-                          (result == "no" and trade["side"] == "NO")
-                    pnl = net_pnl_after_fee(trade["contracts"], trade["price_cents"], won)
+                if not market:
+                    continue
+                mkt_status = (market.get("status") or "").lower()
+                if mkt_status not in ("finalized", "settled", "cancelled", "canceled"):
+                    continue  # still open / pending
+                result_raw = market.get("result")
+                result = (result_raw or "").lower()
+                side_lower = (trade["side"] or "").lower()
+                if mkt_status in ("cancelled", "canceled") or not result:
+                    # Market voided — refund stake, record as flat (no W/L,
+                    # zero PnL). Don't increment consecutive_losses.
+                    pnl = 0.0
+                    won = False
                     resolve_trade(trade["id"], won, pnl)
-                    settle_signal_by_trade(trade["id"], result.upper(), won)
-                    gs = get_guardrail_state()
-                    update_guardrail_state(
-                        daily_pnl_usd=gs["daily_pnl_usd"] + pnl,
-                        consecutive_losses=0 if won else gs["consecutive_losses"] + 1,
-                        halted=gs["halted"],
-                        halt_reason=gs["halt_reason"],
-                        daily_trades=gs["daily_trades"],
+                    settle_signal_by_trade(trade["id"], "VOID", won)
+                    log.info(
+                        "RESOLVED [LIVE-VOID] %s %s -- market cancelled, stake refunded, PnL=$0",
+                        trade["market_id"], trade["side"],
                     )
+                    continue
+                won = (result == side_lower)
+                pnl = net_pnl_after_fee(trade["contracts"], trade["price_cents"], won)
+                resolve_trade(trade["id"], won, pnl)
+                settle_signal_by_trade(trade["id"], result.upper(), won)
+                gs = get_guardrail_state()
+                update_guardrail_state(
+                    daily_pnl_usd=gs["daily_pnl_usd"] + pnl,
+                    consecutive_losses=0 if won else gs["consecutive_losses"] + 1,
+                    halted=gs["halted"],
+                    halt_reason=gs["halt_reason"],
+                    daily_trades=gs["daily_trades"],
+                )
+                log.info(
+                    "RESOLVED [LIVE] %s %s -- result=%s -> %s P&L=$%.2f",
+                    trade["market_id"], trade["side"], result.upper(),
+                    "WON" if won else "LOST", pnl,
+                )
             except Exception as exc:
                 log.warning("Resolution error for trade %s: %s", trade["id"], exc)

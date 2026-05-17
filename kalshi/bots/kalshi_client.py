@@ -93,18 +93,39 @@ class KalshiClient:
             "Content-Type":            "application/json",
         }
 
+    def _check_response(self, resp, method: str, path: str) -> None:
+        """raise_for_status() that ALSO logs Kalshi's response body. The default
+        behavior throws away the response text, which is exactly what hid the
+        weekend's 400 'invalid_order' error. Now every non-2xx surfaces the
+        full error detail in the log AND attaches it to the exception."""
+        if resp.status_code >= 400:
+            try:
+                detail = resp.text[:500]
+            except Exception:
+                detail = "<no response body>"
+            log.error(
+                "Kalshi %s %s -> %s: %s",
+                method, path, resp.status_code, detail,
+            )
+            # raise_for_status() with the body embedded in the message
+            try:
+                resp.raise_for_status()
+            except requests.HTTPError as e:
+                e.args = (f"{e.args[0]} | body: {detail}",)
+                raise
+
     def _get(self, path: str, params: dict | None = None) -> dict:
         url  = f"{KALSHI_BASE}{path}"
         hdrs = self._auth_headers("GET", path) if self._ready else {}
         resp = self.session.get(url, params=params, headers=hdrs, timeout=10)
-        resp.raise_for_status()
+        self._check_response(resp, "GET", path)
         return resp.json()
 
     def _post(self, path: str, body: dict) -> dict:
         url  = f"{KALSHI_BASE}{path}"
         hdrs = self._auth_headers("POST", path) if self._ready else {}
         resp = self.session.post(url, json=body, headers=hdrs, timeout=10)
-        resp.raise_for_status()
+        self._check_response(resp, "POST", path)
         return resp.json()
 
     # ── Market discovery (public — no auth needed for market data) ────────────
@@ -148,12 +169,31 @@ class KalshiClient:
     # ── Authenticated endpoints ────────────────────────────────────────────────
 
     def get_balance(self) -> float:
+        """Live Kalshi cash balance in dollars. Raises HTTPError on auth
+        failure (401/403) so the caller can distinguish 'auth broken' from
+        'empty account'. Network / JSON errors still return 0 (transient).
+
+        Old behavior swallowed ALL exceptions and returned 0.0, hiding
+        the 401 from the bad-credentials episode. Caller (trader.get_capital)
+        now logs the actual reason."""
         if not self._ready:
             return 0.0
         try:
             data = self._get("/portfolio/balance")
             return data.get("balance", 0) / 100
-        except Exception:
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            if status in (401, 403):
+                # Re-raise so caller surfaces the auth failure instead of
+                # falling back silently to STARTING_CAPITAL.
+                log.error("Kalshi /portfolio/balance auth failed (%s) — credentials broken", status)
+                raise
+            # Other HTTP errors (5xx, 429, etc.) are transient — return 0
+            # so the caller falls back to STARTING_CAPITAL gracefully.
+            log.warning("Kalshi /portfolio/balance HTTP %s — returning 0", status)
+            return 0.0
+        except Exception as exc:
+            log.warning("Kalshi /portfolio/balance failed: %s — returning 0", exc)
             return 0.0
 
     def get_positions(self) -> list[dict]:
@@ -201,9 +241,19 @@ class KalshiClient:
             body["no_price"] = price_cents
         response = self._post("/portfolio/orders", body)
         order    = response.get("order") or response
-        valid_status = {"resting", "executed", "canceled", "open", "pending"}
-        if not order.get("order_id") and order.get("status") not in valid_status:
-            raise RuntimeError(f"Kalshi rejected order (ticker={ticker}): {response}")
+        # Acceptable post-place statuses. 'canceled' means Kalshi rejected
+        # the order at submission — we must NOT record a trade for it. Old
+        # logic let canceled-with-order_id through, creating phantom trades.
+        accepted = {"resting", "executed", "open", "pending"}
+        status   = order.get("status")
+        if status == "canceled":
+            raise RuntimeError(
+                f"Kalshi canceled order at submission (ticker={ticker}): {response}"
+            )
+        if not order.get("order_id") or status not in accepted:
+            raise RuntimeError(
+                f"Kalshi rejected order (ticker={ticker}, status={status}): {response}"
+            )
         return order
 
     def get_orders(self, client_order_id: str | None = None,
