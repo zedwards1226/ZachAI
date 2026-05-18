@@ -1,37 +1,97 @@
 {
   "crypto_eth15m_midband": {
-    "no_bands": [],
-    "yes_bands": [[0.65, 0.70, 0.71], [0.80, 0.85, 0.86]],
-    "updated_at": "2026-05-07T03:15:00Z",
-    "source": "validated_by_historical_backtest_2026-05-06",
-    "note": "TIGHTENED from wide May-4 rebalance after backtest of 2832 finalized markets. Only TWO buckets cleared n>=30 + Wilson 95% lo > implied + 3pts: YES 65-70c (n=36, Wilson_lo 71.3%, +3.8 edge) and YES 80-85c (n=49, Wilson_lo 86.3%, +3.8 edge). NO side had no tradeable bucket -> paused. Tonight's biggest loss (YES @67c -$28) was inside the new 65-70c band (sample variance at 71% WR). The other tonight loss (NO @71c -$26) would not fire under new bands."
+    "no_bands": [
+      [
+        0.20,
+        0.40,
+        0.15
+      ]
+    ],
+    "yes_bands": [
+      [
+        0.60,
+        0.75,
+        0.95
+      ]
+    ],
+    "updated_at": "2026-05-17T19:08:00.000000+00:00",
+    "source": "tactical_widen_2026-05-17",
+    "backtest_pnl": 261.26689999999985,
+    "backtest_winrate": 0.8787878787878788,
+    "backtest_trades": 33,
+    "note": "TACTICAL WIDENING from sweep_2026-05-17 [0.25, 0.35] NO / [0.65, 0.70] YES to [0.20, 0.40] NO / [0.60, 0.75] YES. Sweep bands were too tight for current crypto vol — bot scanned 14hrs with zero decisions after the 06:00 update. Same pattern as 5/11 btcd. +5c each edge, forecasts unchanged."
   },
   "crypto_eth_hourly_midband": {
-    "no_bands": [[0.10, 0.30, 0.08]],
+    "no_bands": [
+      [
+        0.10,
+        0.35,
+        0.05
+      ]
+    ],
     "yes_bands": [],
-    "updated_at": "2026-05-04T17:00:00Z",
-    "source": "rebalanced_2026-05-04",
-    "note": "Slightly widened NO band lower bound. KXETH calibration showed YES has no edge — keeping NO-only."
+    "updated_at": "2026-05-17T19:08:00.000000+00:00",
+    "source": "tactical_widen_2026-05-17",
+    "backtest_pnl": 161.97650000000033,
+    "backtest_winrate": 0.9333333333333333,
+    "backtest_trades": 30,
+    "note": "TACTICAL WIDENING from [0.15, 0.30] to [0.10, 0.35] NO. +5c each edge."
   },
   "crypto_sol15m_midband": {
-    "no_bands": [],
-    "yes_bands": [],
-    "updated_at": "2026-05-07T03:15:00Z",
-    "source": "paused_after_no_edge_found_2026-05-06",
-    "note": "PAUSED ENTIRELY after backtest of 2831 finalized markets. ZERO buckets across both YES and NO sides cleared n>=30 + Wilson 95% lo > implied + 3pts. Sample sizes are adequate (most buckets n=30-50) so this isn't a sample-size problem; the strategy just doesn't have edge on SOL15M markets in the last 30 days. Tonight's losses (YES @80c -$21, NO @71c -$23) were both in NEAR_FAIR zones. Revisit if regime changes."
+    "no_bands": [
+      [
+        0.10,
+        0.35,
+        0.15
+      ]
+    ],
+    "yes_bands": [
+      [
+        0.55,
+        0.80,
+        0.95
+      ]
+    ],
+    "updated_at": "2026-05-17T19:08:00.000000+00:00",
+    "source": "tactical_widen_2026-05-17",
+    "backtest_pnl": 221.05320000000017,
+    "backtest_winrate": 0.8780487804878049,
+    "backtest_trades": 41,
+    "note": "TACTICAL WIDENING from [0.15, 0.30] NO / [0.60, 0.75] YES to [0.10, 0.35] NO / [0.55, 0.80] YES. +5c each edge."
   },
   "crypto_btcd_midband": {
     "no_bands": [],
-    "yes_bands": [[0.65, 0.88, 0.82]],
+    "yes_bands": [
+      [
+        0.65,
+        0.88,
+        0.82
+      ]
+    ],
     "updated_at": "2026-05-12T02:00:00Z",
     "source": "tactical_widen_2026-05-11",
-    "note": "TACTICAL WIDENING from prior [0.70, 0.85, 0.85] to [0.65, 0.88, 0.82] to restore trade volume. After 5/6 audit tightened bands, OmniAlpha went 3 days (5/9-5/11) with zero trades — paper bot generating zero signal teaches nothing. This is the only strategy with demonstrated lifetime YES edge (88% WR, +$61.60). Forecast trimmed from 0.85 to 0.82 (closer to Wilson 95% lower bound) to stay conservative on edge calculation while accepting more variance in entry probability. Other 4 strategies left tight per 5/6 audit. REVIEW 2026-05-17: if fires >=5 trades and PnL > -$30, keep these bands; if <3 trades or loss > $30, revert to [0.70, 0.85, 0.85] and run jbecker recalibration on fresh data."
+    "note": "Held at [0.65, 0.88, 0.82] (5/11 tactical widening unchanged this round — already widened recently). REVIEW: if fires >=5 trades and PnL > -$30, keep; if <3 trades or loss > $30, revert to [0.70, 0.85, 0.85] and run jbecker recalibration."
   },
   "crypto_btc15m_midband": {
-    "no_bands": [[0.20, 0.30, 0.15]],
-    "yes_bands": [[0.75, 0.80, 0.81]],
-    "updated_at": "2026-05-07T01:00:00Z",
-    "source": "validated_by_historical_backtest_2026-05-06",
-    "note": "YES 75-80c is the ONLY band with confirmed edge in 2832-market historical backtest: n=34, WR=94.1%, Wilson95 lo=80.9%, implied=77.5%, edge=+3.4%. Forecast trimmed from 0.85 (stale 2-month-old calibration) to 0.81 (Wilson 95% lower bound). YES 80-95c had n=256 across 4 buckets and showed NO edge — kept dropped. NO band 20-30c had n=35-78 across buckets, all NEAR_FAIR — kept as-is from prior live config."
+    "no_bands": [
+      [
+        0.20,
+        0.35,
+        0.05
+      ]
+    ],
+    "yes_bands": [
+      [
+        0.60,
+        0.77,
+        0.80
+      ]
+    ],
+    "updated_at": "2026-05-17T19:08:00.000000+00:00",
+    "source": "tactical_widen_2026-05-17",
+    "backtest_pnl": 155.5721000000002,
+    "backtest_winrate": 0.84375,
+    "backtest_trades": 32,
+    "note": "TACTICAL WIDENING from [0.25, 0.30] NO / [0.65, 0.72] YES to [0.20, 0.35] NO / [0.60, 0.77] YES. +5c each edge. Bot was scanning 200 KXBTCD snapshots/min with zero decisions for 14 hours after the 06:00 sweep tightened bands."
   }
 }
