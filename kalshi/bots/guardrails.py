@@ -64,9 +64,13 @@ def check_consecutive_losses(state: dict) -> tuple[bool, str]:
 
 
 def check_capital_at_risk(state: dict, new_stake: float, capital: float) -> tuple[bool, str]:
-    # Compute actual risk from open trades — never trust incremental counter
+    # Compute actual risk from open trades — never trust incremental counter.
+    # Mode-scoped: in live mode we must not count paper open positions as
+    # capital-at-risk against the live bankroll (and vice-versa). Audit
+    # 2026-05-17 fix.
     from database import get_open_trades
-    open_trades = get_open_trades()
+    from config import PAPER_MODE
+    open_trades = get_open_trades(paper=int(PAPER_MODE))
     current_risk = sum(t["stake_usd"] for t in open_trades)
     if capital <= 0:
         return False, "No capital"
@@ -224,14 +228,34 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
 
 
 def guardrail_status() -> dict:
-    """Return human-readable guardrail status for the dashboard."""
+    """Return human-readable guardrail status for the dashboard.
+
+    Capital source must match the bot's runtime sizing source:
+      - LIVE  → trader.get_capital() (real Kalshi balance, cached)
+      - PAPER → STARTING_CAPITAL + paper-mode PnL
+    Audit 2026-05-17: was unconditionally STARTING_CAPITAL + total_pnl
+    (which mixed paper PnL into live capital display, inflating the
+    max-capital-at-risk ceiling shown on the dashboard).
+    """
     from database import get_open_trades
-    state   = get_guardrail_state()
-    summary = get_summary()
-    capital = STARTING_CAPITAL + summary["total_pnl_usd"]
+    from config import PAPER_MODE
+    state = get_guardrail_state()
+    if PAPER_MODE:
+        summary = get_summary(paper=1)
+        capital = STARTING_CAPITAL + summary["total_pnl_usd"]
+    else:
+        try:
+            import trader
+            capital = trader.get_capital()
+        except Exception:
+            # Fallback: live PnL on top of STARTING_CAPITAL (last-resort,
+            # never silently mix paper data in)
+            summary = get_summary(paper=0)
+            capital = STARTING_CAPITAL + summary["total_pnl_usd"]
 
     # Compute actual risk from open trades — authoritative source
-    open_trades = get_open_trades()
+    # (mode-scoped to match capital basis above)
+    open_trades = get_open_trades(paper=int(PAPER_MODE))
     actual_risk = sum(t["stake_usd"] for t in open_trades)
 
     window_ok, window_msg   = check_trade_window()

@@ -224,33 +224,44 @@ def get_open_trades(paper: int | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def has_open_trade_for_market(market_id: str) -> bool:
+def has_open_trade_for_market(market_id: str, paper: int | None = None) -> bool:
+    """Duplicate guard. paper=0/1 filters by mode; None=all (legacy).
+    CRITICAL: callers in trader.scan_and_trade MUST pass paper=int(PAPER_MODE)
+    so a paper-history entry doesn't block a live entry (or vice-versa).
+    Fixed 2026-05-17 audit — was mode-blind, would have silently blocked
+    every Monday 5 AM live trade on cities/markets that had a paper trade
+    from the prior weekend."""
+    extra = "" if paper is None else f" AND paper={int(paper)}"
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id FROM trades WHERE market_id=? AND status='open' LIMIT 1",
+            f"SELECT id FROM trades WHERE market_id=? AND status='open'{extra} LIMIT 1",
             (market_id,)
         ).fetchone()
     return row is not None
 
 
-def has_trade_for_market_today(market_id: str) -> bool:
+def has_trade_for_market_today(market_id: str, paper: int | None = None) -> bool:
     """Check if ANY trade (open, won, lost) was placed today for this market.
-    Prevents duplicate entries during rapid restarts or repeated scans."""
+    Prevents duplicate entries during rapid restarts or repeated scans.
+    See has_open_trade_for_market docstring re: paper-filter criticality."""
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    extra = "" if paper is None else f" AND paper={int(paper)}"
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id FROM trades WHERE market_id=? AND timestamp LIKE ? LIMIT 1",
+            f"SELECT id FROM trades WHERE market_id=? AND timestamp LIKE ?{extra} LIMIT 1",
             (market_id, f"{today_str}%")
         ).fetchone()
     return row is not None
 
 
-def has_open_trade_for_city(city: str) -> bool:
+def has_open_trade_for_city(city: str, paper: int | None = None) -> bool:
     """Check if there's already an open trade for this city.
-    Prevents multiple bets on same city (different strikes)."""
+    Prevents multiple bets on same city (different strikes).
+    See has_open_trade_for_market docstring re: paper-filter criticality."""
+    extra = "" if paper is None else f" AND paper={int(paper)}"
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id FROM trades WHERE city=? AND status='open' LIMIT 1",
+            f"SELECT id FROM trades WHERE city=? AND status='open'{extra} LIMIT 1",
             (city,)
         ).fetchone()
     return row is not None

@@ -408,18 +408,21 @@ def scan_and_trade() -> list[dict]:
             raw_weather=forecast.get("raw"),
         )
 
-        # 9a. Skip duplicates
-        if has_open_trade_for_market(best["ticker"]):
+        # 9a. Skip duplicates — MUST filter by current mode. A paper trade
+        # from yesterday must NOT block a live trade on the same market today
+        # (and vice-versa). Audit 2026-05-17 found these guards were mode-blind.
+        mode_filter = int(PAPER_MODE)
+        if has_open_trade_for_market(best["ticker"], paper=mode_filter):
             log.info("Skipping %s %s -- already have open position", city_code, best["ticker"])
             actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate", "reason": "open position"})
             insert_signal(**_sig, reason_skipped="duplicate open position")
             continue
-        if has_trade_for_market_today(best["ticker"]):
+        if has_trade_for_market_today(best["ticker"], paper=mode_filter):
             log.info("Skipping %s %s -- already traded this market today", city_code, best["ticker"])
             actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate", "reason": "already traded today"})
             insert_signal(**_sig, reason_skipped="already traded today")
             continue
-        if has_open_trade_for_city(city_code):
+        if has_open_trade_for_city(city_code, paper=mode_filter):
             log.info("Skipping %s %s -- already have open trade for this city", city_code, best["ticker"])
             actions.append({"city": city_code, "ticker": best["ticker"], "action": "skipped_duplicate", "reason": "city has open trade"})
             insert_signal(**_sig, reason_skipped="city already has open trade")
@@ -555,7 +558,8 @@ def scan_and_trade() -> list[dict]:
                 insert_signal(**_sig, reason_skipped=f"order error: {exc}")
 
     # Live-compute open risk — no more trusting the cached counter.
-    open_risk = round(sum(t["stake_usd"] for t in get_open_trades()), 2)
+    # Mode-scoped so paper stakes don't inflate live open_risk after a flip.
+    open_risk = round(sum(t["stake_usd"] for t in get_open_trades(paper=int(PAPER_MODE))), 2)
     snapshot_pnl(capital, open_risk)
     log.info("=== Scan complete -- %d actions ===", len(actions))
     return actions
