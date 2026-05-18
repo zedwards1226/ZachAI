@@ -385,9 +385,13 @@ def get_today_filled_count() -> int:
     """
     today = datetime.now(ET).strftime("%Y-%m-%d")
     with get_conn() as conn:
+        # Audit 2026-05-17 T3: was `NOT IN ('FAILED_PLACEMENT')` which counted
+        # OPEN and RECONCILED_CLOSED as "filled". A bracket that auto-closed
+        # and got reconcile-adopted ate both daily slots, locking the bot out
+        # for the rest of the session. Now only count truly-settled trades.
         row = conn.execute(
             "SELECT COUNT(*) AS n FROM trades "
-            "WHERE date = ? AND outcome NOT IN ('FAILED_PLACEMENT')",
+            "WHERE date = ? AND outcome IN ('WIN', 'LOSS', 'SCRATCH')",
             (today,)
         ).fetchone()
         return int(row["n"] or 0)

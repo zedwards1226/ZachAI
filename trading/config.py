@@ -74,12 +74,22 @@ ROLLING_WR_ALERT_WEEKS = 2  # For 2 consecutive weeks
 MAX_RISK_PER_TRADE_DOLLARS = 350   # 7% — bumped 2026-04-30 from $250. Today's 101pt ORB needed $308-341 risk; $250 was blocking most NQ ORBs in the wider 100-150pt regime.
 DAILY_LOSS_LIMIT_DOLLARS = 200     # 4% — bumped from $150 to keep ratio with per-trade cap. One losing trade can't blow the day twice.
 
+# HARD per-trade ceiling — uncondtionally enforced inside place_bracket_order
+# regardless of RISK_CAP_ENABLED. Set 2x the soft cap. Audit 2026-05-17 T4:
+# with RISK_CAP_ENABLED=False, a 200-pt ORB at 1.25x stop extension = $500
+# actual exposure, which was uncapped. This is the absolute floor — any
+# trade that would risk more than this gets refused at the broker layer,
+# not just the signal layer. Cannot be toggled off via env or config flag.
+HARD_PER_TRADE_RISK_CEILING_DOLLARS = 700
+
 # Per-trade $ risk gate (combiner.py). When False, the gate is skipped and
 # wide-OR signals fire regardless of stop distance. Set False on 2026-05-04
 # at Zach's call after the cap was blocking most signals in the 200+ pt
-# volatility regime. The bracket order's stop-loss still caps actual losses
-# at MAX_RISK_PER_TRADE_DOLLARS — this flag only controls whether the
-# signal-generator pre-veto fires.
+# volatility regime. Audit 2026-05-17 T4 (corrected understanding): the
+# bracket order's stop-loss does NOT cap actual losses at
+# MAX_RISK_PER_TRADE_DOLLARS — actual stop distance depends on ORB range.
+# That misunderstanding lived in the comment for 13 days. The HARD ceiling
+# above is the real ceiling now; this flag controls the soft signal-volume veto.
 RISK_CAP_ENABLED = False
 
 # Mid-trade intervention thresholds (used by tv_trader.monitor_trades)

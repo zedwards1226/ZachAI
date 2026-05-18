@@ -113,6 +113,13 @@ def circuit_breaker_status() -> dict:
 _FAILED_ATTEMPT_TTL_S = 180.0  # 3 reconcile cycles — enough for slow days
 _recent_failed_attempts: dict[int, dict] = {}
 
+# Audit 2026-05-17 T8: rolling baseline for "flat available funds" — refreshed
+# whenever tv_get_positions confirms position count = 0. Replaces the stale
+# hardcoded STARTING_CAPITAL=$5000 in position-open heuristic so the threshold
+# tracks account growth (or drawdown) automatically. None until first
+# confirmed-flat observation; falls back to STARTING_CAPITAL on cold start.
+_flat_baseline_avail: float | None = None
+
 
 def _record_failed_attempt(
     trade_id: int,
@@ -232,15 +239,57 @@ async def place_bracket_order(direction: str, entry_price: float,
     Single CDP call — opens Trade panel, clicks Buy/Sell, sets Market,
     qty=1, enables TP/SL, sets prices, clicks submit. ~300ms total.
     """
-    # Paper-mode guard — refuse to place orders unless explicitly authorized
+    # Paper-mode guard — refuse to place orders unless explicitly authorized.
+    # Audit 2026-05-17 T2: the original error message was misleading. There
+    # is no live-trading code path. Setting PAPER_MODE=false today does NOT
+    # route to a live broker — it just refuses to place anything because the
+    # CDP is still connected to TradingView's paper account. Going actually
+    # live requires a separate broker integration (not built). For now this
+    # guard's job is: defend the paper-only assumption.
     if os.getenv("PAPER_MODE", "true").lower() != "true":
         logger.error("PAPER_MODE != true — refusing to place order. "
-                     "Set PAPER_MODE=true in trading/.env to confirm paper trading.")
+                     "Live broker integration is NOT implemented. Setting "
+                     "PAPER_MODE=false would only refuse all orders while the "
+                     "CDP remains connected to TV paper. Set PAPER_MODE=true.")
         try:
-            journal.mark_failed_placement(trade_id, "PAPER_MODE not authorized")
+            journal.mark_failed_placement(trade_id, "PAPER_MODE not authorized (live broker not implemented)")
         except Exception as e:
             logger.error("Failed to mark trade %d FAILED_PLACEMENT: %s", trade_id, e)
-        raise RuntimeError("Live trading not authorized — set PAPER_MODE=true in .env")
+        raise RuntimeError("PAPER_MODE=false refused — live broker not implemented")
+
+    # HARD per-trade risk ceiling — enforced regardless of RISK_CAP_ENABLED
+    # config flag (audit 2026-05-17 T4). Computes actual dollar risk from
+    # entry-to-stop distance × MNQ multiplier × slippage cushion. If a
+    # combiner-stage signal slipped through with too-wide a stop (or risk
+    # cap was toggled off intentionally), this catches it at the broker
+    # layer before any CDP click happens.
+    from config import HARD_PER_TRADE_RISK_CEILING_DOLLARS, MULTIPLIER, SLIPPAGE_PTS
+    risk_pts = abs(entry_price - stop_price)
+    hard_risk_dollars = (risk_pts + SLIPPAGE_PTS) * MULTIPLIER
+    if hard_risk_dollars > HARD_PER_TRADE_RISK_CEILING_DOLLARS:
+        logger.error(
+            "HARD risk ceiling breach: trade %d risk=$%.0f > ceiling=$%d "
+            "(risk_pts=%.1f, slippage=%.1f, mult=%d). REFUSING order.",
+            trade_id, hard_risk_dollars, HARD_PER_TRADE_RISK_CEILING_DOLLARS,
+            risk_pts, SLIPPAGE_PTS, MULTIPLIER,
+        )
+        try:
+            journal.mark_failed_placement(
+                trade_id,
+                f"hard_risk_ceiling:${hard_risk_dollars:.0f}>{HARD_PER_TRADE_RISK_CEILING_DOLLARS}"
+            )
+        except Exception as e:
+            logger.error("Failed to mark trade %d FAILED_PLACEMENT: %s", trade_id, e)
+        try:
+            await telegram.send(
+                f"🛑 <b>HARD RISK CEILING — Order Refused</b>\n"
+                f"Trade {trade_id}: would risk ${hard_risk_dollars:.0f} "
+                f"vs hard ceiling ${HARD_PER_TRADE_RISK_CEILING_DOLLARS}\n"
+                f"Risk pts: {risk_pts:.1f} × ${MULTIPLIER}/pt + ${SLIPPAGE_PTS*MULTIPLIER} slippage"
+            )
+        except Exception:
+            pass
+        return False
 
     tv = await get_client()
     side = "buy" if direction == "LONG" else "sell"
@@ -514,11 +563,20 @@ async def tv_get_positions(tv) -> dict:
     avail = r.get("avail")
     has_avg_fill = bool(r.get("hasAvgFill"))
 
+    # Audit 2026-05-17 T8: instead of STARTING_CAPITAL=$5000 (hardcoded,
+    # stale once account compounds), use _flat_baseline_avail — the most
+    # recent observed available-funds value while reconcile confirmed
+    # position count = 0. That tracks account growth automatically.
+    # Falls back to STARTING_CAPITAL only on cold-start before any
+    # confirmed-flat observation.
+    global _flat_baseline_avail
+    baseline = _flat_baseline_avail if _flat_baseline_avail is not None else STARTING_CAPITAL
+
     # Direct signal — TV is showing position rows
     if has_avg_fill:
         # Estimate count from margin used (each MNQ takes ~$2720 margin)
         if avail is not None:
-            margin_used = STARTING_CAPITAL - avail
+            margin_used = baseline - avail
             est_count = max(1, round(margin_used / 2720))
         else:
             est_count = 1
@@ -527,12 +585,15 @@ async def tv_get_positions(tv) -> dict:
 
     # Heuristic — available funds dropped below threshold = position open
     if avail is not None:
-        threshold = STARTING_CAPITAL * POSITION_OPEN_FUNDS_THRESHOLD
+        threshold = baseline * POSITION_OPEN_FUNDS_THRESHOLD
         if avail < threshold:
-            margin_used = STARTING_CAPITAL - avail
+            margin_used = baseline - avail
             est_count = max(1, round(margin_used / 2720))
             return {"count": est_count, "has_position": True,
                     "available_funds": avail, "signal": "low_avail_funds"}
+        # Confirmed-flat observation — refresh the baseline so future
+        # heuristic threshold stays calibrated to actual account size.
+        _flat_baseline_avail = avail
         return {"count": 0, "has_position": False,
                 "available_funds": avail, "signal": "full_avail_funds"}
 
@@ -751,19 +812,71 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
       }}
       await sleep(50);
 
-      // Step 6: Set TP and SL prices
+      // Step 6: Set TP and SL prices.
+      // AUDIT 2026-05-17 T1 (CRITICAL): the old positional-only assignment
+      // (rightInputs[0]=TP, rightInputs[1]=SL) had no label verification. A
+      // TradingView UI update could reorder the rows and we'd write the stop
+      // price into the TP field — broker auto-triggers TP at what should
+      // be a loss. Now: find each input's nearby label text, match to
+      // TP/SL by keyword, and ABORT if labels can't be confirmed.
       var allInputs = document.querySelectorAll('input');
-      var rightInputs = [];
+      var labeledInputs = [];
+      var labelKeywords = {{
+        tp: ['take profit', 'tp', 'profit'],
+        sl: ['stop loss', 'sl', 'stop']
+      }};
       for (var i = 0; i < allInputs.length; i++) {{
-        var rect = allInputs[i].getBoundingClientRect();
-        if (rect.x > 350 && rect.width > 40 && rect.height > 0 && rect.y > 320 && allInputs[i].type !== 'checkbox') {{
-          rightInputs.push({{el: allInputs[i], y: rect.y}});
+        var inp = allInputs[i];
+        var rect = inp.getBoundingClientRect();
+        if (!(rect.x > 350 && rect.width > 40 && rect.height > 0 && rect.y > 320 && inp.type !== 'checkbox')) continue;
+        // Walk up to 4 ancestors looking for label text in any sibling/descendant
+        var labelText = '';
+        var node = inp;
+        for (var depth = 0; depth < 4 && node && node.parentElement; depth++) {{
+          node = node.parentElement;
+          var t = (node.textContent || '').toLowerCase();
+          if (t.length > 0 && t.length < 200) {{ labelText = t; break; }}
+        }}
+        var kind = 'unknown';
+        for (var k = 0; k < labelKeywords.sl.length; k++) {{
+          if (labelText.indexOf(labelKeywords.sl[k]) !== -1) {{ kind = 'sl'; break; }}
+        }}
+        if (kind === 'unknown') {{
+          for (var k = 0; k < labelKeywords.tp.length; k++) {{
+            if (labelText.indexOf(labelKeywords.tp[k]) !== -1) {{ kind = 'tp'; break; }}
+          }}
+        }}
+        labeledInputs.push({{el: inp, y: rect.y, kind: kind, labelSnippet: labelText.substring(0, 60)}});
+      }}
+      labeledInputs.sort(function(a,b) {{ return a.y - b.y; }});
+
+      var tpInput = null, slInput = null;
+      for (var i = 0; i < labeledInputs.length; i++) {{
+        if (!tpInput && labeledInputs[i].kind === 'tp') tpInput = labeledInputs[i];
+        if (!slInput && labeledInputs[i].kind === 'sl') slInput = labeledInputs[i];
+      }}
+
+      // Fallback (with warning): use positional only if BOTH labels were
+      // unresolvable. Never accept "one labeled, one positional" — that's
+      // the swap-trap scenario.
+      var labelMatchMode = 'labeled';
+      if ((!tpInput || !slInput) && labeledInputs.length >= 2) {{
+        if (!tpInput && !slInput) {{
+          tpInput = labeledInputs[0];  // top input
+          slInput = labeledInputs[1];  // below
+          labelMatchMode = 'positional_fallback';
+        }} else {{
+          // EXACTLY one labeled — refuse rather than guess
+          return {{clicked: false, reason: 'tp_sl_label_ambiguous',
+                   pricesSet: 0, sideMatch: sideMatch,
+                   tpFound: !!tpInput, slFound: !!slInput,
+                   inputCount: labeledInputs.length}};
         }}
       }}
-      rightInputs.sort(function(a,b) {{ return a.y - b.y; }});
+
       var pricesSet = 0;
-      if (rightInputs.length >= 1) {{
-        var tpEl = rightInputs[0].el;
+      if (tpInput) {{
+        var tpEl = tpInput.el;
         tpEl.focus(); tpEl.select();
         setter.call(tpEl, '{tp:.2f}');
         tpEl.dispatchEvent(new Event('input', {{bubbles: true}}));
@@ -771,8 +884,8 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
         tpEl.blur();
         pricesSet++;
       }}
-      if (rightInputs.length >= 2) {{
-        var slEl = rightInputs[1].el;
+      if (slInput) {{
+        var slEl = slInput.el;
         slEl.focus(); slEl.select();
         setter.call(slEl, '{stop:.2f}');
         slEl.dispatchEvent(new Event('input', {{bubbles: true}}));
@@ -781,6 +894,27 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
         pricesSet++;
       }}
       await sleep(200);
+
+      // Read-back verification — confirm what's actually in the fields
+      // matches what we wrote. If the DOM swapped between write and now
+      // (TV reactivity), this catches it before we hit Buy.
+      var tpReadback = tpInput ? parseFloat(tpInput.el.value) : null;
+      var slReadback = slInput ? parseFloat(slInput.el.value) : null;
+      var expectedTp = {tp:.2f};
+      var expectedSl = {stop:.2f};
+      if (tpReadback !== null && slReadback !== null) {{
+        var tpMatch = Math.abs(tpReadback - expectedTp) < 0.01;
+        var slMatch = Math.abs(slReadback - expectedSl) < 0.01;
+        var crossSwap = (Math.abs(tpReadback - expectedSl) < 0.01) && (Math.abs(slReadback - expectedTp) < 0.01);
+        if (!tpMatch || !slMatch) {{
+          return {{clicked: false, reason: crossSwap ? 'tp_sl_swap_detected' : 'tp_sl_readback_mismatch',
+                   pricesSet: pricesSet, sideMatch: sideMatch,
+                   labelMode: labelMatchMode,
+                   expected: {{tp: expectedTp, sl: expectedSl}},
+                   actual: {{tp: tpReadback, sl: slReadback}},
+                   tpLabel: tpInput.labelSnippet, slLabel: slInput.labelSnippet}};
+        }}
+      }}
 
       // Step 7: Click submit button (handles two-step: "Start creating order" → "Buy/Sell MNQ")
       var findAndClickSubmit = function() {{
@@ -835,6 +969,32 @@ async def _place_via_trading_panel(tv, side: str, stop: float, tp: float) -> tup
         else:
             reason = (result or {}).get("reason", "unknown")
             logger.warning("Order placement failed: %s", result)
+            # TP/SL swap protection alerts (audit 2026-05-17 T1): these reasons
+            # mean the JS detected a label-ambiguous or readback-mismatched
+            # bracket — order was NEVER submitted. Worst-case prevented.
+            if reason in ("tp_sl_swap_detected", "tp_sl_readback_mismatch",
+                          "tp_sl_label_ambiguous"):
+                logger.error("TP/SL safety abort: %s | full result: %s", reason, result)
+                try:
+                    expected = (result or {}).get("expected", {})
+                    actual = (result or {}).get("actual", {})
+                    await telegram.send(
+                        f"🛑 <b>TP/SL SAFETY ABORT</b>\n"
+                        f"Reason: <code>{reason}</code>\n"
+                        f"Side: {side.upper()}\n"
+                        f"Expected: TP={expected.get('tp')} SL={expected.get('sl')}\n"
+                        f"Actual:   TP={actual.get('tp')} SL={actual.get('sl')}\n"
+                        f"TP label: <code>{(result or {}).get('tpLabel', '?')}</code>\n"
+                        f"SL label: <code>{(result or {}).get('slLabel', '?')}</code>\n\n"
+                        f"Order was NOT submitted (correct behavior). "
+                        f"TradingView likely shipped a UI update reordering the "
+                        f"trade-panel inputs. Inspect <code>tv_trader.py</code> "
+                        f"Step 6 label-matching block."
+                    )
+                except Exception:
+                    pass
+                return False, reason
+            # Generic order-placement failure path (broker disconnect, etc).
             # Fail loud — journal already has a phantom OPEN trade row at this point.
             # Zach needs to know immediately so he can reconnect broker / kill the row.
             try:
@@ -1124,10 +1284,28 @@ async def monitor_trades() -> None:
         # (audit Finding D — today's trade #23 was time-exited at +\$32 when
         # the trail would have caught +\$60. Trail wins ties now.)
 
-        # VIX intervention — VIX spike since trade open
+        # VIX intervention — VIX spike since trade open.
+        # Audit 2026-05-17 T7: skip if structure data is stale (>30 min old).
+        # The structure agent runs at 8:45 AM and writes state. If a VIX spike
+        # happens at 1:30 PM but the structure hasn't been refreshed since,
+        # acting on a 4+ hour old VIX is worse than not acting.
         vix_now = structure.get("vix")
         vix_at_open = order.get("vix_at_open")
-        if vix_now and vix_at_open and vix_now >= vix_at_open * (1 + VIX_INTERVENTION_PCT):
+        structure_age_ok = True
+        struct_updated_at = structure.get("updated_at") or structure.get("captured_at")
+        if struct_updated_at:
+            try:
+                from datetime import datetime as _dt
+                sa = _dt.fromisoformat(struct_updated_at.replace("Z", "+00:00"))
+                age_min = (_dt.now(sa.tzinfo).timestamp() - sa.timestamp()) / 60.0
+                if age_min > 30:
+                    structure_age_ok = False
+                    logger.debug("Skipping VIX intervention: structure %s is %.0f min old",
+                                 struct_updated_at, age_min)
+            except Exception:
+                pass  # if we can't parse the timestamp, err toward acting (old behavior)
+        if (structure_age_ok and vix_now and vix_at_open
+                and vix_now >= vix_at_open * (1 + VIX_INTERVENTION_PCT)):
             logger.warning("VIX intervention for trade %d: %.1f -> %.1f (+%.0f%%)",
                            trade_id, vix_at_open, vix_now,
                            (vix_now / vix_at_open - 1) * 100)
@@ -1378,11 +1556,56 @@ async def reconcile_with_tv() -> dict:
             "Likely TV-side bracket close we missed. Cleaning journal.",
             local_count, tv_signal, tv_pos.get("available_funds"),
         )
+        # Audit 2026-05-17 T5: old code used order.get("entry", 0) as the
+        # close price, which records P&L=$0 on every reconcile. That
+        # corrupts daily/weekly loss caps (they undercount real losses
+        # and let more trades through). Now: estimate the close price.
+        # Best-effort guess based on which side likely triggered:
+        #   - Pull current TV quote
+        #   - For LONG: if quote < entry, SL most likely fired -> use stop
+        #     if quote > entry, TP most likely fired -> use target_2
+        #   - For SHORT: inverted
+        #   - If no quote: fall back to stop (conservative; over-counts
+        #     losses, which is safer than under-counting them)
+        quote_close = None
+        try:
+            bars = await tv.get_ohlcv(count=1)
+            if bars:
+                quote_close = bars[-1].get("close")
+        except Exception as e:
+            logger.warning("Could not fetch reconcile quote: %s", e)
+
         for trade_id, order in list(_active_orders.items()):
+            entry = order.get("entry", 0)
+            stop = order.get("stop")
+            target_2 = order.get("target_2")
+            direction = order.get("direction", "")
+            # Pick most-likely exit
+            estimated_exit = entry  # ultra-fallback (preserves old behavior)
+            exit_basis = "entry_fallback"
+            if quote_close and stop and target_2:
+                if direction == "LONG":
+                    if quote_close <= entry and stop:
+                        estimated_exit = stop
+                        exit_basis = "long_assume_sl"
+                    elif quote_close > entry and target_2:
+                        estimated_exit = target_2
+                        exit_basis = "long_assume_tp"
+                elif direction == "SHORT":
+                    if quote_close >= entry and stop:
+                        estimated_exit = stop
+                        exit_basis = "short_assume_sl"
+                    elif quote_close < entry and target_2:
+                        estimated_exit = target_2
+                        exit_basis = "short_assume_tp"
+            elif stop:
+                # No quote — assume SL fired (conservative)
+                estimated_exit = stop
+                exit_basis = "no_quote_assume_sl"
             try:
                 journal.log_trade_close(
-                    trade_id, order.get("entry", 0), "RECONCILED_CLOSED",
-                    notes="reconciled_orphan_order — TV flat but local tracked open"
+                    trade_id, estimated_exit, "RECONCILED_CLOSED",
+                    notes=f"reconciled_orphan_order [{exit_basis}] entry={entry} quote={quote_close}"
                 )
             except Exception as e:
                 logger.error("Failed to journal-close trade %d during reconcile: %s",

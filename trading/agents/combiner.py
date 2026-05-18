@@ -57,6 +57,11 @@ _logged_weekly_cap: bool = False
 # Arm-gate notification flag — same once-per-day pattern. Set when the
 # 9:25 preflight gate has blocked arming and we've already told Zach.
 _logged_arm_block: bool = False
+# Consecutive-loss pause notification flag — audit 2026-05-17 T6:
+# the consec-loss circuit breaker used to return None silently with
+# no Telegram alert. Zach had to check the log to know the bot was
+# sitting out. Now: alert once when the pause first triggers.
+_logged_consecutive_losses: bool = False
 
 
 def _persist_session() -> None:
@@ -203,6 +208,20 @@ async def poll() -> Optional[dict]:
     # Check circuit breaker
     stats = journal.get_today_stats()
     if stats["consecutive_losses"] >= MAX_CONSECUTIVE_LOSSES:
+        global _logged_consecutive_losses
+        if not _logged_consecutive_losses:
+            logger.warning(
+                "Consecutive-loss circuit breaker: %d losses in a row. Paused for today.",
+                stats["consecutive_losses"],
+            )
+            try:
+                await telegram.notify_hard_block(
+                    f"Circuit breaker: {stats['consecutive_losses']} consecutive losses "
+                    f"(limit {MAX_CONSECUTIVE_LOSSES}). Trading paused for today."
+                )
+            except Exception as e:
+                logger.warning("Telegram notify_hard_block failed: %s", e)
+            _logged_consecutive_losses = True
         return None
 
     # Daily $ loss cap
@@ -379,13 +398,16 @@ async def poll() -> Optional[dict]:
     risk = abs(price - stop)
     rr = abs(target_2 - price) / risk if risk > 0 else 0  # RR vs T2 (actual TP)
 
-    # Per-trade $ risk pre-veto. Disabled 2026-05-04 — the bracket-order
-    # stop-loss already caps actual loss at risk_dollars, and Zach wants
-    # the bot to TRADE in the current 200+ pt volatility regime so it can
-    # learn from real outcomes. RISK_CAP_ENABLED gates this back on if/when
-    # account size or volatility regime changes.
-    risk_dollars = risk * MULTIPLIER
-    from config import RISK_CAP_ENABLED
+    # Per-trade $ risk pre-veto. Disabled 2026-05-04 in config
+    # (RISK_CAP_ENABLED=False). The HARD ceiling inside place_bracket_order
+    # is what actually defends real-money loss now (audit 2026-05-17 T4).
+    # Audit T9: include slippage in the risk estimate. A 2-pt MNQ slippage
+    # is $4 of additional loss on top of the stop distance — without it,
+    # this gate could pass trades that are $4 over the soft cap once
+    # fills land. Trivial dollar impact while T4-disabled but matches the
+    # math the hard ceiling uses.
+    from config import RISK_CAP_ENABLED, SLIPPAGE_PTS
+    risk_dollars = (risk + SLIPPAGE_PTS) * MULTIPLIER
     if RISK_CAP_ENABLED and risk_dollars > MAX_RISK_PER_TRADE_DOLLARS:
         logger.info(
             "Trade skipped: stop $%.0f exceeds per-trade cap $%d (ORB range %.1f too wide)",
