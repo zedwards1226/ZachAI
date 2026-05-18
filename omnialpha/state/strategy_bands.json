@@ -2,96 +2,90 @@
   "crypto_eth15m_midband": {
     "no_bands": [
       [
-        0.20,
-        0.40,
+        0.25,
+        0.35,
         0.15
       ]
     ],
     "yes_bands": [
       [
-        0.60,
-        0.75,
+        0.65,
+        0.70,
         0.95
       ]
     ],
-    "updated_at": "2026-05-17T19:08:00.000000+00:00",
-    "source": "tactical_widen_2026-05-17",
+    "updated_at": "2026-05-17T19:15:00.000000+00:00",
+    "source": "ev_cap_2026-05-17",
     "backtest_pnl": 261.26689999999985,
     "backtest_winrate": 0.8787878787878788,
     "backtest_trades": 33,
-    "note": "TACTICAL WIDENING from sweep_2026-05-17 [0.25, 0.35] NO / [0.65, 0.70] YES to [0.20, 0.40] NO / [0.60, 0.75] YES. Sweep bands were too tight for current crypto vol — bot scanned 14hrs with zero decisions after the 06:00 update. Same pattern as 5/11 btcd. +5c each edge, forecasts unchanged."
+    "note": "Reverted 19:08 widening. YES cap held at 0.70 (already at break-even WR threshold for 80.8% live WR). Forecast 0.95 untouched."
   },
   "crypto_eth_hourly_midband": {
     "no_bands": [
       [
-        0.10,
-        0.35,
+        0.15,
+        0.30,
         0.05
       ]
     ],
     "yes_bands": [],
-    "updated_at": "2026-05-17T19:08:00.000000+00:00",
-    "source": "tactical_widen_2026-05-17",
+    "updated_at": "2026-05-17T19:15:00.000000+00:00",
+    "source": "ev_cap_2026-05-17",
     "backtest_pnl": 161.97650000000033,
     "backtest_winrate": 0.9333333333333333,
     "backtest_trades": 30,
-    "note": "TACTICAL WIDENING from [0.15, 0.30] to [0.10, 0.35] NO. +5c each edge."
+    "note": "Reverted 19:08 widening. NO entry already <=30c — math is favorable. Strategy is +$25 lifetime, safe to keep."
   },
   "crypto_sol15m_midband": {
     "no_bands": [
       [
-        0.10,
-        0.35,
+        0.15,
+        0.30,
         0.15
       ]
     ],
     "yes_bands": [
       [
-        0.55,
-        0.80,
+        0.60,
+        0.70,
         0.95
       ]
     ],
-    "updated_at": "2026-05-17T19:08:00.000000+00:00",
-    "source": "tactical_widen_2026-05-17",
+    "updated_at": "2026-05-17T19:15:00.000000+00:00",
+    "source": "ev_cap_2026-05-17",
     "backtest_pnl": 221.05320000000017,
     "backtest_winrate": 0.8780487804878049,
     "backtest_trades": 41,
-    "note": "TACTICAL WIDENING from [0.15, 0.30] NO / [0.60, 0.75] YES to [0.10, 0.35] NO / [0.55, 0.80] YES. +5c each edge."
+    "note": "Reverted 19:08 widening. YES cap tightened from 0.75 -> 0.70 (break-even WR threshold). Sol15m lifetime +$15.26 — small sample, capping cap preserves EV."
   },
   "crypto_btcd_midband": {
     "no_bands": [],
-    "yes_bands": [
-      [
-        0.65,
-        0.88,
-        0.82
-      ]
-    ],
-    "updated_at": "2026-05-12T02:00:00Z",
-    "source": "tactical_widen_2026-05-11",
-    "note": "Held at [0.65, 0.88, 0.82] (5/11 tactical widening unchanged this round — already widened recently). REVIEW: if fires >=5 trades and PnL > -$30, keep; if <3 trades or loss > $30, revert to [0.70, 0.85, 0.85] and run jbecker recalibration."
+    "yes_bands": [],
+    "updated_at": "2026-05-17T19:15:00.000000+00:00",
+    "source": "paused_2026-05-17",
+    "note": "PAUSED. Lifetime: 94 trades, 69.1% WR, -$107.67 PnL, avg entry 75.9c. At that entry price the break-even WR is 76%, so 69% live WR is mathematically guaranteed to bleed (avg win $4.34 vs avg loss -$13.43). Responsible for 86% of OmniAlpha's lifetime loss. Empty bands = strategy never fires. Resume only after: (a) fresh backtest with current 2026 data, (b) entry cap moved to <=65c, or (c) jbecker recalibration produces a positive-EV variant."
   },
   "crypto_btc15m_midband": {
     "no_bands": [
       [
-        0.20,
-        0.35,
+        0.25,
+        0.30,
         0.05
       ]
     ],
     "yes_bands": [
       [
-        0.60,
-        0.77,
+        0.65,
+        0.70,
         0.80
       ]
     ],
-    "updated_at": "2026-05-17T19:08:00.000000+00:00",
-    "source": "tactical_widen_2026-05-17",
+    "updated_at": "2026-05-17T19:15:00.000000+00:00",
+    "source": "ev_cap_2026-05-17",
     "backtest_pnl": 155.5721000000002,
     "backtest_winrate": 0.84375,
     "backtest_trades": 32,
-    "note": "TACTICAL WIDENING from [0.25, 0.30] NO / [0.65, 0.72] YES to [0.20, 0.35] NO / [0.60, 0.77] YES. +5c each edge. Bot was scanning 200 KXBTCD snapshots/min with zero decisions for 14 hours after the 06:00 sweep tightened bands."
+    "note": "Reverted 19:08 widening. YES cap tightened from 0.72 -> 0.70 (break-even WR threshold). Live 77.5% WR was just barely under break-even at 77.9c avg entry — capping at 70c restores positive EV."
   }
 }
