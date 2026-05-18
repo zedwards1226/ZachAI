@@ -163,6 +163,16 @@ class CryptoMidBandStrategy(Strategy):
         if full_kelly <= 0:
             return None  # no edge after fees/spread; skip
 
+        # EV gate (added 2026-05-17 audit fix O2).
+        # full_kelly>0 is a SIGN check, not a MAGNITUDE check. A 0.001
+        # Kelly can still bleed money once fees + slippage land. Require
+        # absolute EV per $1 risked to clear a 2c floor — that covers
+        # the ~1c/contract Kalshi fee plus a 1c safety margin.
+        # EV per $1 risked = p_win*(1-p) - p_lose*p   (binary contract)
+        ev_per_dollar = forecast_p_win * (1.0 - p) - (1.0 - forecast_p_win) * p
+        if ev_per_dollar < 0.02:
+            return None  # EV too thin — refuse regardless of Kelly sign
+
         kelly_frac = full_kelly * self.kelly_fraction
 
         # Convert Kelly fraction → stake → contract count.

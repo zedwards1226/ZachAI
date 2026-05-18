@@ -34,8 +34,20 @@ logger = logging.getLogger(__name__)
 # ── Tunables ─────────────────────────────────────────────────────────────
 REVIEW_WINDOW_DAYS = 30      # rolling lookback
 MIN_TRADES = 20              # need at least this many settled trades to grade
-MIN_WINRATE = 0.50           # below this = candidate for pause
-                              # (calibrated bands forecast 60-95%; 50% is "much worse than predicted")
+
+# Hard floor — even on cheap NO entries (e.g. 0.30) we want SOME absolute
+# WR signal. 0.50 = "the bot is doing worse than a coinflip" regardless
+# of entry price. Used as a max() with the dynamic break-even threshold.
+MIN_WINRATE_FLOOR = 0.50
+
+# Margin added to break-even WR. Covers Kalshi fees (~0.5-1c per contract
+# on settled trades) + spread/slippage. Without this, a strategy exactly
+# at break-even WR would still slowly bleed.
+WR_BREAKEVEN_MARGIN = 0.02
+
+# Audit 2026-05-17 fix O1: the old flat MIN_WINRATE=0.50 let btcd run
+# 92 paper trades at 68.5% WR with avg entry 75.9c (break-even WR = 75%)
+# before any pause triggered. New rule: pause if WR < max(0.50, avg_entry + 2%).
 
 
 def _now_iso() -> str:
@@ -76,7 +88,8 @@ def grade_strategies() -> dict:
                    COUNT(*)                                                  n,
                    SUM(CASE WHEN status='won'  THEN 1 ELSE 0 END)            wins,
                    SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END)            losses,
-                   COALESCE(SUM(pnl_usd), 0)                                 pnl
+                   COALESCE(SUM(pnl_usd), 0)                                 pnl,
+                   COALESCE(AVG(price_cents), 0)                             avg_entry_cents
             FROM trades
             WHERE status IN ('won','lost')
               AND COALESCE(resolved_at, timestamp, '') >= ?
@@ -91,10 +104,19 @@ def grade_strategies() -> dict:
             wins = int(row["wins"])
             pnl = float(row["pnl"] or 0)
             winrate = wins / n if n else 0.0
+            avg_entry = float(row["avg_entry_cents"] or 0) / 100.0  # 0.0-1.0
+
+            # Dynamic break-even WR: at entry price p, you need to win p
+            # fraction of the time just to cover the stake. Add margin
+            # to cover fees + slippage. Use MIN_WINRATE_FLOOR as a hard
+            # absolute minimum so cheap-NO strategies still get a sanity
+            # check.
+            break_even_wr = max(MIN_WINRATE_FLOOR, avg_entry + WR_BREAKEVEN_MARGIN)
 
             entry = {
                 "n": n, "wins": wins, "losses": int(row["losses"]),
                 "winrate": winrate, "pnl_usd": pnl,
+                "avg_entry": avg_entry, "break_even_wr": break_even_wr,
                 "decision": "skip", "reason": "",
             }
 
@@ -102,48 +124,67 @@ def grade_strategies() -> dict:
             if n < MIN_TRADES:
                 entry["decision"] = "skip"
                 entry["reason"] = f"not enough trades (n={n} < {MIN_TRADES})"
-            elif winrate < MIN_WINRATE and pnl < 0:
+            elif winrate < break_even_wr and pnl < 0:
                 entry["decision"] = "pause"
                 entry["reason"] = (
-                    f"winrate {winrate*100:.1f}% < {MIN_WINRATE*100:.0f}% "
-                    f"and P&L ${pnl:+.2f} < 0 over n={n}"
+                    f"winrate {winrate*100:.1f}% < break_even {break_even_wr*100:.1f}% "
+                    f"(avg entry {avg_entry*100:.1f}c + margin) and P&L ${pnl:+.2f} < 0 over n={n}"
                 )
-            elif winrate < MIN_WINRATE:
+            elif winrate < break_even_wr:
                 entry["decision"] = "watch"
                 entry["reason"] = (
-                    f"low winrate {winrate*100:.1f}% but P&L positive ${pnl:+.2f} (variance)"
+                    f"low winrate {winrate*100:.1f}% vs break_even {break_even_wr*100:.1f}% "
+                    f"but P&L positive ${pnl:+.2f} (variance — watch for reversion)"
                 )
             elif pnl < 0:
                 entry["decision"] = "watch"
                 entry["reason"] = (
-                    f"negative P&L ${pnl:+.2f} but winrate {winrate*100:.1f}% holding"
+                    f"negative P&L ${pnl:+.2f} but winrate {winrate*100:.1f}% "
+                    f">= break_even {break_even_wr*100:.1f}% (asymmetric losses — investigate)"
                 )
             else:
                 entry["decision"] = "active"
-                entry["reason"] = "healthy"
+                entry["reason"] = f"healthy (WR {winrate*100:.1f}% vs break_even {break_even_wr*100:.1f}%)"
 
-            # Persist last_review fields no matter what; only set paused_at on pause.
+            # Persist last_review fields no matter what; only set paused_at
+            # on pause. Latent bug fix 2026-05-17: the old f-string built
+            # ", paused_at = ?" into the INSERT column list (invalid SQL —
+            # column-list entries are bare names). Bug never fired because
+            # the old flat MIN_WINRATE never triggered a pause; the new
+            # break-even threshold would expose it. Rewritten as two
+            # explicit branches.
             now = _now_iso()
-            paused_at_clause = ", paused_at = ?" if entry["decision"] == "pause" else ""
-            params: list = [name, now, n, winrate, pnl, entry["reason"]]
-            if entry["decision"] == "pause":
-                params.append(now)
-
-            # Upsert via INSERT ... ON CONFLICT (SQLite 3.24+, Python ships 3.x bundled).
-            sql = f"""
-                INSERT INTO strategy_state (
-                    strategy_name, last_review_at, last_review_n,
-                    last_review_winrate, last_review_pnl, pause_reason
-                    {paused_at_clause}
-                ) VALUES (?, ?, ?, ?, ?, ? {', ?' if entry['decision'] == 'pause' else ''})
-                ON CONFLICT(strategy_name) DO UPDATE SET
-                    last_review_at = excluded.last_review_at,
-                    last_review_n = excluded.last_review_n,
-                    last_review_winrate = excluded.last_review_winrate,
-                    last_review_pnl = excluded.last_review_pnl,
-                    pause_reason = excluded.pause_reason
-                    {(', paused_at = excluded.paused_at') if entry['decision'] == 'pause' else ''}
-            """
+            is_pause = entry["decision"] == "pause"
+            if is_pause:
+                sql = """
+                    INSERT INTO strategy_state (
+                        strategy_name, last_review_at, last_review_n,
+                        last_review_winrate, last_review_pnl, pause_reason,
+                        paused_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(strategy_name) DO UPDATE SET
+                        last_review_at = excluded.last_review_at,
+                        last_review_n = excluded.last_review_n,
+                        last_review_winrate = excluded.last_review_winrate,
+                        last_review_pnl = excluded.last_review_pnl,
+                        pause_reason = excluded.pause_reason,
+                        paused_at = excluded.paused_at
+                """
+                params = [name, now, n, winrate, pnl, entry["reason"], now]
+            else:
+                sql = """
+                    INSERT INTO strategy_state (
+                        strategy_name, last_review_at, last_review_n,
+                        last_review_winrate, last_review_pnl, pause_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(strategy_name) DO UPDATE SET
+                        last_review_at = excluded.last_review_at,
+                        last_review_n = excluded.last_review_n,
+                        last_review_winrate = excluded.last_review_winrate,
+                        last_review_pnl = excluded.last_review_pnl,
+                        pause_reason = excluded.pause_reason
+                """
+                params = [name, now, n, winrate, pnl, entry["reason"]]
             conn.execute(sql, params)
 
             if entry["decision"] == "pause":

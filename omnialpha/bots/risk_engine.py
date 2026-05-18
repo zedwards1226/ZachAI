@@ -106,7 +106,12 @@ def _count_open_in_bucket(strategy_name: str, series_key: str, side: str) -> int
             "could not count open bucket (%s/%s/%s): %s",
             strategy_name, series_key, side, e,
         )
-        return 0  # fail-open — don't block trades because the DB hiccupped
+        # Fail-CLOSED (audit 2026-05-17 fix O6). Returning 0 here would
+        # let a same-series-same-side stacking trade through on any DB
+        # hiccup — that was the actual cause of the correlated $48
+        # position on 5/5. A missed opportunity is cheaper than a
+        # correlated double-position bleed.
+        return 1
 
 
 def check_entry(
@@ -197,32 +202,29 @@ def check_entry(
             )
 
     # Gate 5: drawdown / loss caps (compounding — % of live capital).
-    # In PAPER_MODE we deliberately SKIP these caps. The whole point of
-    # paper-mode is to generate learning signal from a wider sample of
-    # trades, including the ones that lose. Treating fake money like real
-    # money with a kill-switch defeats the learning purpose (Zach 2026-05-12:
-    # "its fake money we trying to learn how can we learn if we dont trade").
-    # When PAPER_MODE flips off (live trading), the caps re-engage.
-    # PAPER_MODE is already imported at module level (line 41) — re-importing
-    # in-function would make Python treat it as a local variable and break
-    # the existing reference at line 128 with UnboundLocalError.
-    if not PAPER_MODE:
-        daily_cap = daily_loss_cap_usd(context.capital_usd)
-        weekly_cap = weekly_loss_cap_usd(context.capital_usd)
-        if -context.daily_realized_pnl_usd >= daily_cap:
-            return RiskCheckResult(
-                approved=False,
-                reason="daily_loss_cap",
-                detail=f"daily loss ${context.daily_realized_pnl_usd:+.2f} exceeds cap ${daily_cap:.2f} (live)",
-                clamped_contracts=0,
-            )
-        if -context.weekly_realized_pnl_usd >= weekly_cap:
-            return RiskCheckResult(
-                approved=False,
-                reason="weekly_loss_cap",
-                detail=f"weekly loss ${context.weekly_realized_pnl_usd:+.2f} exceeds cap ${weekly_cap:.2f} (live)",
-                clamped_contracts=0,
-            )
+    # Audit 2026-05-17 fix O3: dollar caps now apply in PAPER_MODE too.
+    # Original reasoning was "fake money, let it learn from losses" — but
+    # the bot bled $125 paper before anyone noticed. Paper losses ARE the
+    # signal that something is broken; ignoring them just delays the
+    # diagnosis. If we'd had these caps live in paper, the 5/5-5/15
+    # btcd bleed would have tripped a daily-cap halt and triggered a
+    # forced review long before -$108 accumulated.
+    daily_cap = daily_loss_cap_usd(context.capital_usd)
+    weekly_cap = weekly_loss_cap_usd(context.capital_usd)
+    if -context.daily_realized_pnl_usd >= daily_cap:
+        return RiskCheckResult(
+            approved=False,
+            reason="daily_loss_cap",
+            detail=f"daily loss ${context.daily_realized_pnl_usd:+.2f} exceeds cap ${daily_cap:.2f}",
+            clamped_contracts=0,
+        )
+    if -context.weekly_realized_pnl_usd >= weekly_cap:
+        return RiskCheckResult(
+            approved=False,
+            reason="weekly_loss_cap",
+            detail=f"weekly loss ${context.weekly_realized_pnl_usd:+.2f} exceeds cap ${weekly_cap:.2f}",
+            clamped_contracts=0,
+        )
     if context.consecutive_losses_in_sector >= MAX_CONSEC_LOSSES_BEFORE_PAUSE:
         return RiskCheckResult(
             approved=False,
