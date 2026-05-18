@@ -452,7 +452,13 @@ def scan_and_trade() -> list[dict]:
         # 10. Place order
         # Deterministic client_order_id so we can reconcile if the network drops
         # between us sending the request and receiving a response.
-        client_order_id = f"wa-{city_code}-{best['ticker']}-{int(time.time())}"
+        # SANITIZED 2026-05-18: B-strike tickers contain '.' (e.g. B86.5).
+        # Kalshi's API silently rejects orders with dots in client_order_id
+        # for some market series — surfaces as 400 invalid_parameters. Replace
+        # dots with hyphens to keep the id reconcile-friendly while passing
+        # Kalshi's validator.
+        _safe_ticker = best['ticker'].replace('.', '-')
+        client_order_id = f"wa-{city_code}-{_safe_ticker}-{int(time.time())}"
         try:
             order = client.place_order(
                 ticker=best["ticker"],

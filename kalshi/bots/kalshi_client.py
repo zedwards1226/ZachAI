@@ -221,19 +221,29 @@ class KalshiClient:
         if not self._ready:
             raise RuntimeError("Kalshi client not authenticated")
 
-        # Kalshi's /portfolio/orders rejects requests that include BOTH
-        # yes_price and no_price — must send exactly the one matching `side`.
-        # Old code sent both, which produced 400 "invalid_order: exactly one
-        # of yes_price, no_price, yes_price_dollars, or no_price_dollars
-        # should be provided" on every live order all weekend (caught
-        # 2026-05-17 via direct API probe of the response body).
+        # Kalshi /portfolio/orders body — current API spec (2026-05-18 verified):
+        # Required: ticker, side, action
+        # Pricing: exactly one of yes_price | no_price | yes_price_dollars | no_price_dollars
+        # Sending price implies LIMIT order — explicit `type` field is no longer
+        # recognized by Kalshi's API.
+        #
+        # Bug history:
+        #  2026-05-17: sent BOTH yes_price + no_price → 400 invalid_order (fixed)
+        #  2026-05-18 06:00 first live morning: 4 of 5 orders rejected with
+        #    "invalid_parameters" — all 4 were B-strike (between) markets,
+        #    the one that succeeded was T-strike (greater than). Common factor:
+        #    the deprecated `"type": "limit"` field. T-markets ignored it,
+        #    B-markets strictly rejected it. Removed the field; per docs an
+        #    order with a price field IS a limit order by default. Adding
+        #    explicit time_in_force=good_till_canceled to match prior
+        #    "limit" semantics (rest on book until filled or cancelled).
         body = {
             "ticker":          ticker,
             "action":          "buy",
             "side":            side,
-            "type":            "limit",
             "count":           contracts,
             "client_order_id": client_order_id,
+            "time_in_force":   "good_till_canceled",
         }
         if side == "yes":
             body["yes_price"] = price_cents
