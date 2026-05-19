@@ -84,7 +84,13 @@ def start_scheduler() -> BackgroundScheduler:
     )
     _scheduler.add_job(
         _resolve_job,
-        trigger=IntervalTrigger(minutes=30, timezone=tz),
+        # 5-min cadence (was 30 min) — audit 2026-05-19: when Kalshi
+        # finalizes a market, bot detects within ~5 min instead of up
+        # to 30 min lag, which means stuck-open cities unblock faster
+        # for new entries. Same logic, same API calls, just tighter
+        # poll. Each cycle is ~5 cheap GET /markets/{ticker} calls
+        # which is well under Kalshi rate limits.
+        trigger=IntervalTrigger(minutes=5, timezone=tz),
         id="resolve",
         name="Resolve expired trades",
         replace_existing=True,
