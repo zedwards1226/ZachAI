@@ -1490,6 +1490,18 @@ _RECONCILE_LAST_DRIFT_ALERT_TS: float = 0.0
 _RECONCILE_DRIFT_ALERT_COOLDOWN = 900
 _RECONCILE_DRIFT_ACTIVE: bool = False  # tracks whether last cycle was drifted; flipped → triggers RESOLVED
 
+# Audit 2026-05-18: soft-drift escalation. The reconcile loop's soft path
+# ("low_avail_funds heuristic but no avg_fill_price_visible") used to wait
+# FOREVER for TV to render a strong signal. If the user has the trading
+# panel collapsed or TV is hiding the position row, the strong signal never
+# comes — bot logged "transient margin lag" every minute and silently
+# blocked all new entries. This happened TWICE in May 2026, costing a full
+# trading day each time. Now: count consecutive soft-drift cycles; after
+# N (= 5 minutes given 60s reconcile cadence) escalate to HARD phantom
+# (trip circuit breaker + Telegram alert).
+_SOFT_DRIFT_ESCALATION_CYCLES = 5
+_soft_drift_consecutive: int = 0
+
 
 async def reconcile_with_tv() -> dict:
     """Reconcile local _active_orders state against TV's actual position state.
@@ -1513,6 +1525,7 @@ async def reconcile_with_tv() -> dict:
         Bot will refuse new entries until cleared.
     """
     global _RECONCILE_LAST_DRIFT_ALERT_TS, _RECONCILE_DRIFT_ACTIVE, _CIRCUIT_OPEN_UNTIL
+    global _soft_drift_consecutive
 
     try:
         tv = await get_client()
@@ -1530,6 +1543,14 @@ async def reconcile_with_tv() -> dict:
     # Case 1: in sync (most common path). If we were drifted and just resolved,
     # send a one-shot RESOLVED ping and reset the circuit breaker.
     if (local_count > 0) == bool(tv_has_pos):
+        # Reset soft-drift counter on any clean read — drift is over
+        # (whether it was the soft path or just normal flat state).
+        if _soft_drift_consecutive > 0:
+            logger.info(
+                "RECONCILE soft-drift counter reset (was at %d).",
+                _soft_drift_consecutive,
+            )
+            _soft_drift_consecutive = 0
         if _RECONCILE_DRIFT_ACTIVE:
             _RECONCILE_DRIFT_ACTIVE = False
             # Drift cleared on its own (Zach manually closed, or adoption took).
@@ -1732,19 +1753,43 @@ async def reconcile_with_tv() -> dict:
                     "tv_count": tv_count, "tv_signal": tv_signal,
                     "action_taken": "circuit_breaker_tripped_alerted"}
 
-        # Weak signal (low_avail_funds heuristic) — log a warning and skip
-        # this cycle. Reconcile loop runs every 60s, so a real phantom will
-        # confirm itself on the next strong-signal read; a transient margin
-        # lag will clear by then.
+        # Weak signal (low_avail_funds heuristic) — log a warning. ESCALATE
+        # to hard phantom if soft drift persists for N consecutive cycles
+        # (audit 2026-05-18 fix — was looping silently for hours, blocking
+        # all trades while user had no idea anything was wrong).
+        _soft_drift_consecutive += 1
         logger.warning(
-            "RECONCILE soft drift — TV avail dropped below threshold but no "
-            "Avg Fill Price visible (signal=%s, avail=%s, tv_count=%d). "
-            "Treating as transient margin lag, NOT tripping circuit breaker. "
-            "Will re-check next cycle.",
+            "RECONCILE soft drift cycle %d/%d — TV avail dropped below threshold "
+            "but no Avg Fill Price visible (signal=%s, avail=%s, tv_count=%d). "
+            "If this persists 5 cycles (~5 min) it will escalate to hard phantom.",
+            _soft_drift_consecutive, _SOFT_DRIFT_ESCALATION_CYCLES,
             tv_signal, tv_pos.get("available_funds"), tv_count,
         )
-        # Don't set _RECONCILE_DRIFT_ACTIVE here — we don't want a false
-        # 'Drift RESOLVED' ping on the next clean read.
+        if _soft_drift_consecutive >= _SOFT_DRIFT_ESCALATION_CYCLES:
+            logger.error(
+                "RECONCILE SOFT-DRIFT ESCALATION — TV has shown phantom margin "
+                "(avail=%s, count=%d) for %d consecutive cycles. Treating as "
+                "REAL phantom position. Tripping circuit breaker.",
+                tv_pos.get("available_funds"), tv_count, _soft_drift_consecutive,
+            )
+            record_broker_failure(f"phantom_soft_persistent:cycles={_soft_drift_consecutive}")
+            record_broker_failure(f"phantom_soft_persistent:cycles={_soft_drift_consecutive}")
+            record_broker_failure(f"phantom_soft_persistent:cycles={_soft_drift_consecutive}")
+            if now_ts - _RECONCILE_LAST_DRIFT_ALERT_TS > _RECONCILE_DRIFT_ALERT_COOLDOWN:
+                try:
+                    await telegram.notify_hard_block(
+                        f"⚠️ PHANTOM POSITION (persistent soft drift): TV avail=${tv_pos.get('available_funds')} "
+                        f"for {_soft_drift_consecutive}+ cycles. Bot is HALTED. "
+                        f"Open TradingView trading panel, close the open MNQ position manually, "
+                        f"then bot will auto-resume."
+                    )
+                    _RECONCILE_LAST_DRIFT_ALERT_TS = now_ts
+                except Exception:
+                    pass
+            return {"in_sync": False, "drift_type": "phantom_soft_persistent",
+                    "local_count": 0, "tv_count": tv_count, "tv_signal": tv_signal,
+                    "action_taken": "escalated_circuit_breaker_tripped"}
+        # Below escalation threshold — wait for self-resolution.
         _RECONCILE_DRIFT_ACTIVE = False
         return {"in_sync": True, "drift_type": "soft_low_funds", "local_count": 0,
                 "tv_count": tv_count, "tv_signal": tv_signal,
