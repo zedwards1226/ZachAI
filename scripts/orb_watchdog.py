@@ -90,6 +90,13 @@ BOT_TOKEN = CFG.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = CFG.get("TELEGRAM_CHAT_ID", "")
 
 # ─── Logging ──────────────────────────────────────────────────────────────
+# Use UTF-8 for stdout too — Windows cp1252 default chokes on emoji and
+# spams "UnicodeEncodeError" to the log when alerts contain 🚨/⚠️/✅.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [ORB-WATCHDOG] %(message)s",
@@ -469,6 +476,303 @@ def check_jarvis_bot() -> bool:
     return False
 
 
+# ─── ORB Bulletproof v1 (added 2026-05-18) ────────────────────────────────
+# Five additional checks that catch silent-failure modes that today's
+# disasters revealed. Each runs every cycle, each only alerts once per
+# cooldown, each is defensive (returns True on its own error so it can't
+# break the watchdog).
+import json
+import sqlite3
+import re
+
+ORB_TRADING_LOG    = TRADING_DIR / "logs" / "trading.log"
+ORB_BROKER_STATE   = TRADING_DIR / "state" / "broker_state.json"
+ORB_ACTIVE_ORDERS  = TRADING_DIR / "state" / "active_orders.json"
+ORB_JOURNAL_DB     = TRADING_DIR / "journal.db"
+ORB_SUMMARY_URL    = "http://localhost:8502/api/summary"
+
+# Per-check consecutive-failure counters (escalate after N consecutive)
+_orb_drift_consec = 0
+_orb_stuck_scan_consec = 0
+ORB_DRIFT_ESCALATE_AFTER = 3   # 3 cycles (~3 min) of state drift -> alert
+ORB_STUCK_SCAN_AFTER     = 3   # 3 cycles (~3 min) of no combiner activity -> restart
+ORB_UNTRACKED_PNL_THRESH = 50.0  # USD — alert if dashboard untracked_pnl exceeds this
+ORB_PREFLIGHT_HOUR_ET    = 9   # 9:25 ET = 5 min before RTH
+ORB_PREFLIGHT_MIN_ET     = 25
+ORB_ENTRY_THRESHOLD      = 5   # score >= this would normally take a trade
+
+
+def _now_et_components() -> tuple[int, int, int]:
+    """Return (weekday 0=Mon-6=Sun, hour, minute) in America/New_York."""
+    try:
+        from zoneinfo import ZoneInfo
+        n = datetime.now(ZoneInfo("America/New_York"))
+        return n.weekday(), n.hour, n.minute
+    except Exception:
+        # Fallback: assume local == ET (close enough for the time-window check)
+        n = datetime.now()
+        return n.weekday(), n.hour, n.minute
+
+
+def _is_rth_now() -> bool:
+    """True if current time is within US RTH (9:30–16:00 ET, Mon–Fri)."""
+    wd, h, m = _now_et_components()
+    if wd >= 5:  # Sat/Sun
+        return False
+    minutes = h * 60 + m
+    return 9 * 60 + 30 <= minutes < 16 * 60
+
+
+def check_orb_stuck_scan() -> bool:
+    """During RTH, ensure the bot is actively scanning. Tail trading.log for
+    the most recent 'Combiner Poll executed successfully' marker. If older
+    than 3 min during RTH, bot is hung — restart and alert.
+    """
+    global _orb_stuck_scan_consec
+    if not _is_rth_now():
+        _orb_stuck_scan_consec = 0
+        _clear_cooldown("orb_stuck_scan")
+        return True
+    if not ORB_TRADING_LOG.exists():
+        return True  # log not initialized yet, don't false-alarm
+    try:
+        # Tail last ~200 lines (cheap on Windows even for big logs)
+        with open(ORB_TRADING_LOG, "r", encoding="utf-8", errors="replace") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 32_000))
+            tail = f.read().splitlines()
+        last_ts = None
+        for line in reversed(tail):
+            if "Combiner Poll" in line and "executed successfully" in line:
+                # Format: "2026-05-18 09:35:04 INFO ..."
+                m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                if m:
+                    last_ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                    break
+        if last_ts is None:
+            return True  # no marker found yet — bot may have just started
+        age_s = (datetime.now() - last_ts).total_seconds()
+        if age_s > 180:  # 3 min
+            _orb_stuck_scan_consec += 1
+            if _orb_stuck_scan_consec >= ORB_STUCK_SCAN_AFTER:
+                log.warning("ORB stuck scan — last combiner poll %.0fs ago (cycles=%d)",
+                            age_s, _orb_stuck_scan_consec)
+                alert("orb_stuck_scan",
+                      f"🚨 <b>ORB STUCK — no scan for {int(age_s)}s during RTH</b>\n"
+                      f"Last Combiner Poll: {last_ts.strftime('%H:%M:%S')}\n"
+                      f"🔧 Restarting via ORBAgents.vbs\n"
+                      f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+                # Kill + restart
+                try:
+                    if ORB_PID_FILE.exists():
+                        pid = int(ORB_PID_FILE.read_text().strip())
+                        if _pid_alive(pid):
+                            subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                           capture_output=True, creationflags=_NO_WINDOW)
+                        ORB_PID_FILE.unlink(missing_ok=True)
+                except Exception as e:
+                    log.error("Failed to kill stuck ORB: %s", e)
+                _start_vbs(ORB_VBS)
+                _orb_stuck_scan_consec = 0
+            return False
+        else:
+            _orb_stuck_scan_consec = 0
+            _clear_cooldown("orb_stuck_scan")
+            return True
+    except Exception as e:
+        log.debug("check_orb_stuck_scan error: %s", e)
+        return True  # fail-open — don't break watchdog
+
+
+def check_orb_state_drift() -> bool:
+    """Compare TV broker position count to local active_orders. If divergent
+    for 3+ consecutive cycles, alert. Catches phantom positions early
+    (before the soft-drift escalation inside the bot would, AND from
+    outside the bot in case the bot's reconcile is itself hung).
+    """
+    global _orb_drift_consec
+    try:
+        if not ORB_BROKER_STATE.exists():
+            return True
+        broker = json.loads(ORB_BROKER_STATE.read_text(encoding="utf-8"))
+        tv_count = int(broker.get("tv_position_count") or 0)
+        local_count = int(broker.get("local_active_orders") or 0)
+        if tv_count == local_count:
+            _orb_drift_consec = 0
+            _clear_cooldown("orb_state_drift")
+            return True
+        _orb_drift_consec += 1
+        if _orb_drift_consec >= ORB_DRIFT_ESCALATE_AFTER:
+            alert("orb_state_drift",
+                  f"🚨 <b>ORB STATE DRIFT — {_orb_drift_consec}+ cycles</b>\n"
+                  f"TV broker shows {tv_count} position(s), bot tracks {local_count}.\n"
+                  f"TV avail: ${broker.get('available_funds')}\n"
+                  f"Signal: {broker.get('tv_signal')}\n\n"
+                  f"<b>Action:</b> Open TradingView → close MNQ position manually.\n"
+                  f"Bot will auto-resume within 60s after TV is flat.\n"
+                  f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+            return False
+        return True
+    except Exception as e:
+        log.debug("check_orb_state_drift error: %s", e)
+        return True
+
+
+def check_orb_balance_discrepancy() -> bool:
+    """Read /api/summary. If untracked_pnl_usd > $50, hidden P&L has appeared
+    (typically from a phantom position or unrecorded trade). Alert once
+    per cooldown so user knows the dashboard's "real" balance moved
+    without a journal trade explaining it.
+    """
+    try:
+        r = requests.get(ORB_SUMMARY_URL, timeout=5)
+        if r.status_code != 200:
+            return True
+        data = r.json()
+        untracked = float(data.get("untracked_pnl_usd") or 0)
+        if abs(untracked) >= ORB_UNTRACKED_PNL_THRESH:
+            direction = "LOSS" if untracked > 0 else "GAIN"
+            alert("orb_balance_discrepancy",
+                  f"🚨 <b>ORB HIDDEN {direction} ${abs(untracked):.2f}</b>\n"
+                  f"Computed (journal-only): ${data.get('computed_capital_usd')}\n"
+                  f"Real broker balance:     ${data.get('current_capital_usd')}\n"
+                  f"Gap means a position opened/closed without ORB tracking it.\n"
+                  f"<b>Action:</b> Check TradingView for phantom positions or "
+                  f"trades you placed manually.\n"
+                  f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+            return False
+        _clear_cooldown("orb_balance_discrepancy")
+        return True
+    except Exception as e:
+        log.debug("check_orb_balance_discrepancy error: %s", e)
+        return True
+
+
+def check_orb_preflight() -> bool:
+    """At 9:25 ET each weekday, run a pre-RTH health check and send a single
+    Telegram with the pass/fail summary. Cooldown is 1 day so this fires
+    once per session.
+    """
+    wd, h, m = _now_et_components()
+    if wd >= 5 or h != ORB_PREFLIGHT_HOUR_ET or m != ORB_PREFLIGHT_MIN_ET:
+        return True
+    key = f"orb_preflight_{datetime.now().strftime('%Y%m%d')}"
+    if not _cooldown_ok(key):
+        return True  # already ran today
+    items = []
+    # 1) CDP
+    try:
+        r = requests.get(CDP_URL, timeout=5)
+        items.append(("CDP 9222", r.status_code == 200))
+    except Exception:
+        items.append(("CDP 9222", False))
+    # 2) ORB main alive
+    items.append(("ORB main", ORB_PID_FILE.exists() and
+                  _pid_alive(int(ORB_PID_FILE.read_text().strip()))))
+    # 3) Dashboard responding
+    try:
+        items.append(("ORB dashboard", requests.get(
+            ORB_DASHBOARD_URL, timeout=5).status_code == 200))
+    except Exception:
+        items.append(("ORB dashboard", False))
+    # 4) Broker state fresh + has funds + no phantom
+    try:
+        broker = json.loads(ORB_BROKER_STATE.read_text(encoding="utf-8"))
+        items.append(("Broker reachable", broker.get("available_funds") is not None))
+        items.append(("Funds > $0", float(broker.get("available_funds") or 0) > 0))
+        items.append(("No phantom position",
+                      int(broker.get("tv_position_count") or 0) ==
+                      int(broker.get("local_active_orders") or 0)))
+    except Exception:
+        items.append(("Broker state", False))
+    # 5) Untracked PnL clean
+    try:
+        data = requests.get(ORB_SUMMARY_URL, timeout=5).json()
+        items.append(("Capital matches journal",
+                      abs(float(data.get("untracked_pnl_usd") or 0)) < 1.0))
+    except Exception:
+        pass
+    all_pass = all(ok for _, ok in items)
+    lines = "\n".join(f"  {'✅' if ok else '❌'} {name}" for name, ok in items)
+    if all_pass:
+        tg(f"✅ <b>ORB Preflight Pass</b> ({datetime.now().strftime('%H:%M')})\n{lines}\n"
+           f"Ready for 9:30 RTH open.")
+    else:
+        failed = [n for n, ok in items if not ok]
+        tg(f"❌ <b>ORB Preflight FAIL</b> ({datetime.now().strftime('%H:%M')})\n{lines}\n\n"
+           f"<b>Action needed:</b> fix {', '.join(failed)} before 9:30 ET.")
+    return all_pass
+
+
+def check_orb_signal_without_trade() -> bool:
+    """Detect signals scored high enough to trade that didn't result in an
+    order. Cross-reference signal_history vs trades. If the block_reason
+    is a TECHNICAL failure (not a deliberate risk-mgmt skip), alert —
+    that's the case Zach asked about ("it sees a trade but can't trade").
+    """
+    if not ORB_JOURNAL_DB.exists():
+        return True
+    try:
+        # Read-only connection so the bot's writes are never locked
+        conn = sqlite3.connect(f"file:{ORB_JOURNAL_DB}?mode=ro", uri=True, timeout=5)
+        c = conn.cursor()
+        # Make sure signal_history exists
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='signal_history'")
+        if not c.fetchone():
+            conn.close()
+            return True
+        # Look at signals from last 10 minutes that scored high
+        # but have no matching trade. Use timestamp diff in the DB layer.
+        # signal_history schema: id, date, time, direction, score, block_reason, ...
+        today = datetime.now().strftime("%Y-%m-%d")
+        c.execute(
+            "SELECT id, time, direction, score, block_reason "
+            "FROM signal_history "
+            "WHERE date = ? AND score >= ? "
+            "AND time(time) >= time('now', '-10 minutes', 'localtime') "
+            "ORDER BY id DESC",
+            (today, ORB_ENTRY_THRESHOLD),
+        )
+        rows = c.fetchall()
+        conn.close()
+        if not rows:
+            return True
+        # Technical (NOT-by-design) failure patterns
+        TECHNICAL_PATTERNS = (
+            "broker_disconnect", "dom_not_ready", "side_not_found",
+            "circuit_breaker", "circuit_open", "FAILED_PLACEMENT",
+            "phantom_position", "submit_failed", "submit_not_found",
+            "exception", "place_bracket_order failed", "tp_sl_",
+        )
+        # Risk-mgmt skips that are intentional — don't alert on these
+        EXPECTED_PATTERNS = (
+            "Daily trade limit", "consecutive losses", "loss cap",
+            "Edge .* below minimum", "Strike type 'less'", "news",
+            "Ensemble spread", "Outside trade window", "Score below threshold",
+            "risk_too_wide", "halt",
+        )
+        for sig_id, sig_time, direction, score, reason in rows:
+            reason = reason or ""
+            is_technical = any(p.lower() in reason.lower() for p in TECHNICAL_PATTERNS)
+            is_expected = any(re.search(p, reason, re.IGNORECASE) for p in EXPECTED_PATTERNS)
+            if is_technical and not is_expected:
+                key = f"orb_signal_skip_{sig_id}"
+                if _cooldown_ok(key):
+                    alert(key,
+                          f"🚨 <b>ORB SAW TRADE BUT COULDN'T EXECUTE</b>\n"
+                          f"Signal #{sig_id} at {sig_time}: {direction} score={score}\n"
+                          f"Reason: <code>{reason[:150]}</code>\n"
+                          f"<b>Action:</b> investigate plumbing — broker, CDP, "
+                          f"or DOM state\n"
+                          f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+                return False
+        return True
+    except Exception as e:
+        log.debug("check_orb_signal_without_trade error: %s", e)
+        return True
+
+
 # ─── Main loop ────────────────────────────────────────────────────────────
 def run_cycle() -> None:
     log.info("--- ORB watchdog cycle ---")
@@ -479,6 +783,12 @@ def run_cycle() -> None:
         "jarvis_bot":          check_jarvis_bot(),
         "omnialpha_main":      check_omnialpha_main(),
         "omnialpha_dashboard": check_omnialpha_dashboard(),
+        # ORB bulletproof v1 (2026-05-18)
+        "orb_stuck_scan":      check_orb_stuck_scan(),
+        "orb_state_drift":     check_orb_state_drift(),
+        "orb_balance_discrep": check_orb_balance_discrepancy(),
+        "orb_preflight":       check_orb_preflight(),
+        "orb_signal_skip":     check_orb_signal_without_trade(),
     }
     if not all(results.values()):
         failed = [k for k, v in results.items() if not v]
