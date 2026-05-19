@@ -1540,6 +1540,26 @@ async def reconcile_with_tv() -> dict:
     tv_signal = tv_pos.get("signal", "unknown")
     tv_has_pos = tv_pos.get("has_position", False)
 
+    # Write broker state to disk for the dashboard. Bot-only state files
+    # don't normally surface broker data; this lets serve.py show the REAL
+    # TV available_funds (instead of computing $5000 + journal_pnl, which
+    # silently lies whenever there's an untracked phantom position).
+    # Audit 2026-05-18 fix: dashboard read $5,366 while real TV balance was
+    # $4,816 — a $550 phantom-position loss invisible because the dashboard
+    # math was journal-only.
+    try:
+        from datetime import datetime as _dt_now
+        write_state("broker_state", {
+            "available_funds": tv_pos.get("available_funds"),
+            "tv_position_count": tv_count,
+            "tv_signal": tv_signal,
+            "tv_has_position": tv_has_pos,
+            "local_active_orders": local_count,
+            "updated_at": _dt_now.utcnow().isoformat() + "Z",
+        })
+    except Exception as e:
+        logger.debug("broker_state write failed: %s", e)
+
     # Case 1: in sync (most common path). If we were drifted and just resolved,
     # send a one-shot RESOLVED ping and reset the circuit breaker.
     if (local_count > 0) == bool(tv_has_pos):

@@ -52,6 +52,45 @@ def _starting_capital() -> float:
     except Exception:
         return 5000.0
 
+
+def _real_broker_balance() -> tuple[float | None, str | None]:
+    """Pull the LATEST real TV broker available_funds from broker_state.json.
+
+    The bot writes this every 60s in reconcile_tv_state. If the file is
+    fresh (< 5 min), use it as authoritative; if stale or missing, return
+    None so caller falls back to journal-computed capital.
+
+    Audit 2026-05-18 fix: dashboard was computing capital as
+      $5,000 + sum(journal.pnl_after_slippage)
+    which silently lied when there was a phantom position the bot didn't
+    know about. Today's $550 phantom-position loss was invisible because
+    of this — Zach saw $5,366 in dashboard while real broker was $4,816.
+    Now we surface the real number AND flag any discrepancy.
+    """
+    state_file = STATE_DIR / "broker_state.json"
+    if not state_file.exists():
+        return (None, "broker_state.json missing — bot hasn't written it yet")
+    try:
+        with open(state_file, "r") as f:
+            data = json.load(f)
+        avail = data.get("available_funds")
+        updated_at = data.get("updated_at")
+        if avail is None:
+            return (None, "broker_state has no available_funds")
+        # Freshness check — if older than 5 min, broker data is stale
+        if updated_at:
+            try:
+                # Tolerate both "Z" suffix and explicit "+00:00"
+                ts = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                age_s = (datetime.now(ts.tzinfo).timestamp() - ts.timestamp())
+                if age_s > 300:
+                    return (None, f"broker_state stale ({int(age_s)}s old)")
+            except Exception:
+                pass
+        return (float(avail), None)
+    except Exception as e:
+        return (None, f"broker_state read error: {e}")
+
 app = Flask(__name__, static_folder=None)
 CORS(app, origins=[
     f"http://localhost:{SERVE_PORT}",
@@ -168,8 +207,22 @@ def api_summary():
         lifetime_wr = round(life_row["w"] / life_row["n"] * 100, 1)
 
     lifetime_pnl = float(life_row["pnl"] or 0)
-    current_capital = starting_capital + lifetime_pnl
-    return_pct = (lifetime_pnl / starting_capital * 100) if starting_capital else 0.0
+    computed_capital = starting_capital + lifetime_pnl
+
+    # Real broker balance (authoritative) vs journal-computed (optimistic).
+    # If the bot wrote a fresh broker_state, use the real number; otherwise
+    # fall back to computed. Always expose BOTH + a discrepancy flag so the
+    # UI can warn about untracked phantom positions / hidden losses.
+    real_balance, real_balance_err = _real_broker_balance()
+    if real_balance is not None:
+        current_capital = real_balance
+        capital_source = "broker_live"
+    else:
+        current_capital = computed_capital
+        capital_source = f"journal_computed_fallback ({real_balance_err})"
+
+    discrepancy_usd = round(computed_capital - current_capital, 2)
+    return_pct = ((current_capital - starting_capital) / starting_capital * 100) if starting_capital else 0.0
 
     return jsonify({
         "paper_mode": _paper_mode(),
@@ -188,6 +241,9 @@ def api_summary():
         "open_positions": open_count,
         "starting_capital_usd": round(starting_capital, 2),
         "current_capital_usd": round(current_capital, 2),
+        "capital_source": capital_source,
+        "computed_capital_usd": round(computed_capital, 2),
+        "untracked_pnl_usd": discrepancy_usd,  # >0 means real balance is LOWER than journal expects (hidden losses)
         "return_pct": round(return_pct, 2),
     })
 
