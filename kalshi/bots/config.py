@@ -24,6 +24,12 @@ STARTING_CAPITAL = float(os.getenv("STARTING_CAPITAL", "1000"))
 MAX_BET = float(os.getenv("MAX_BET", "100"))
 MAX_DAILY_TRADES = int(os.getenv("MAX_DAILY_TRADES", "5"))
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "150"))
+# Audit 2026-05-18: MAX_DAILY_LOSS alone is dollar-fixed and stops scaling
+# once bankroll grows. At a $5K bankroll a $20 cap halts the bot after one
+# small loser. Effective cap = max(MAX_DAILY_LOSS, capital * MAX_DAILY_LOSS_PCT).
+# Default 10% keeps the bot trading through normal variance while still
+# capping a bad-streak day at a known % of capital.
+MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.10"))
 MAX_CAPITAL_AT_RISK = float(os.getenv("MAX_CAPITAL_AT_RISK", "0.40"))
 MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
 MIN_EDGE = float(os.getenv("MIN_EDGE", "0.08"))

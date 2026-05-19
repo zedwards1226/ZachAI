@@ -6,7 +6,8 @@ import logging
 from datetime import datetime
 import pytz
 from config import (
-    MAX_BET, MAX_DAILY_TRADES, MAX_DAILY_LOSS, MAX_CAPITAL_AT_RISK,
+    MAX_BET, MAX_DAILY_TRADES, MAX_DAILY_LOSS, MAX_DAILY_LOSS_PCT,
+    MAX_CAPITAL_AT_RISK,
     MAX_CONSECUTIVE_LOSSES, MIN_EDGE, MIN_PRICE_CENTS, TRADE_WINDOW_START_HOUR,
     TRADE_WINDOW_END_HOUR, TIMEZONE, STARTING_CAPITAL, BLOCK_STRIKE_TYPES
 )
@@ -51,9 +52,21 @@ def check_daily_trades(state: dict) -> tuple[bool, str]:
     return True, "ok"
 
 
-def check_daily_loss(state: dict) -> tuple[bool, str]:
-    if state["daily_pnl_usd"] <= -MAX_DAILY_LOSS:
-        return False, f"Daily loss limit hit (${-state['daily_pnl_usd']:.2f} / ${MAX_DAILY_LOSS})"
+def effective_max_daily_loss(capital: float) -> float:
+    """Effective daily-loss cap = max(MAX_DAILY_LOSS floor, capital * pct).
+    Floor protects small accounts (won't drop below the configured $20-50).
+    Percent makes the cap auto-scale as the account grows past ~$200-500.
+    Audit 2026-05-18 fix — fixed cap would halt the bot on a single losing
+    trade once bankroll passed ~$500 ($20 cap / $250 stake = halt instantly).
+    """
+    pct_cap = max(0.0, capital) * MAX_DAILY_LOSS_PCT
+    return max(MAX_DAILY_LOSS, pct_cap)
+
+
+def check_daily_loss(state: dict, capital: float | None = None) -> tuple[bool, str]:
+    cap = effective_max_daily_loss(capital if capital is not None else 0.0)
+    if state["daily_pnl_usd"] <= -cap:
+        return False, f"Daily loss limit hit (${-state['daily_pnl_usd']:.2f} / ${cap:.2f})"
     return True, "ok"
 
 
@@ -203,7 +216,7 @@ def all_checks(edge: float, stake: float, capital: float, price_cents: int = 50,
         check_edge(edge),
         check_bet_size(stake),
         check_daily_trades(state),
-        check_daily_loss(state),
+        check_daily_loss(state, capital),
         check_consecutive_losses(state),
         check_capital_at_risk(state, stake, capital),
     ])
@@ -270,7 +283,9 @@ def guardrail_status() -> dict:
         "daily_trades":        state["daily_trades"],
         "max_daily_trades":    MAX_DAILY_TRADES,
         "daily_pnl_usd":       round(state["daily_pnl_usd"], 2),
-        "max_daily_loss":      MAX_DAILY_LOSS,
+        "max_daily_loss":      round(effective_max_daily_loss(capital), 2),
+        "max_daily_loss_floor": MAX_DAILY_LOSS,
+        "max_daily_loss_pct":  MAX_DAILY_LOSS_PCT,
         "consecutive_losses":  state["consecutive_losses"],
         "max_consecutive_losses": MAX_CONSECUTIVE_LOSSES,
         "capital_at_risk_usd": round(actual_risk, 2),
