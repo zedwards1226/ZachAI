@@ -229,16 +229,17 @@ export default function App() {
   const losses          = summary?.losses ?? 0
   const trades          = summary?.total_trades ?? 0
   const openRisk        = summary?.open_risk_usd ?? 0
-  // FIX 2026-05-19 (round 2): use Kalshi's real equity (cash + portfolio_value)
-  // when available. Falls back to cost-basis equity (cash + openRisk) if the
-  // backend hasn't sent the new field yet. portfolio_value = current market
-  // value of open positions (Kalshi computes this). Unrealized gains/losses
-  // sit here. Round 1 only used cost basis = lost the $8.60 unrealized gain.
-  const portfolioValue  = statusData?.portfolio_value_usd ?? null
-  const equity          = statusData?.equity_usd ?? (cash + (portfolioValue ?? openRisk))
-  const capital         = equity   // displayed "Capital" = true equity, not cash
-  const startingCapital = (cash + openRisk) - lifetimePnl  // cost-basis ref
-  const pctGain         = startingCapital > 0 ? ((equity - startingCapital) / startingCapital) * 100 : 0
+  // Round 3 (2026-05-19 Zach request): displayed balance must NOT change
+  // until trades actually close. Use cost-basis equity (cash + openRisk)
+  // so the headline stays at $83.50 while trades are open and only moves
+  // when each trade settles (cash flips up by payout OR down by stake loss,
+  // openRisk drops by stake — net = realized P&L).
+  // We still expose `equity_usd` (= cash + portfolio_value, Kalshi's
+  // mark-to-market) as a separate field for anyone who wants the live view.
+  const equity          = cash + openRisk     // cost basis — stable until settle
+  const capital         = equity              // headline 'Capital' = stable
+  const startingCapital = equity - lifetimePnl
+  const pctGain         = startingCapital > 0 ? (lifetimePnl / startingCapital) * 100 : 0
   const todayPnl        = today?.pnl_today_usd ?? 0
   const unrealized      = posData?.total_unrealized_pnl ?? 0
   const lifePos         = lifetimePnl >= 0
