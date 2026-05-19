@@ -184,17 +184,36 @@ class KalshiClient:
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else 0
             if status in (401, 403):
-                # Re-raise so caller surfaces the auth failure instead of
-                # falling back silently to STARTING_CAPITAL.
                 log.error("Kalshi /portfolio/balance auth failed (%s) — credentials broken", status)
                 raise
-            # Other HTTP errors (5xx, 429, etc.) are transient — return 0
-            # so the caller falls back to STARTING_CAPITAL gracefully.
             log.warning("Kalshi /portfolio/balance HTTP %s — returning 0", status)
             return 0.0
         except Exception as exc:
             log.warning("Kalshi /portfolio/balance failed: %s — returning 0", exc)
             return 0.0
+
+    def get_full_balance(self) -> dict:
+        """Returns {cash, portfolio_value, equity} from Kalshi /portfolio/balance.
+
+        Audit 2026-05-19: get_balance() only returned the 'balance' field (cash).
+        Kalshi's response ALSO includes 'portfolio_value' (current market value
+        of open positions). Without it, the dashboard showed $65.48 'Capital'
+        while Kalshi's UI showed $92.10 — a missed $26.62 of unrealized gains.
+        """
+        if not self._ready:
+            return {"cash": 0.0, "portfolio_value": 0.0, "equity": 0.0}
+        try:
+            data = self._get("/portfolio/balance")
+            cash = data.get("balance", 0) / 100
+            portfolio_value = data.get("portfolio_value", 0) / 100
+            return {
+                "cash": cash,
+                "portfolio_value": portfolio_value,
+                "equity": cash + portfolio_value,
+            }
+        except Exception as exc:
+            log.warning("Kalshi /portfolio/balance (full) failed: %s", exc)
+            return {"cash": 0.0, "portfolio_value": 0.0, "equity": 0.0}
 
     def get_positions(self) -> list[dict]:
         if not self._ready:

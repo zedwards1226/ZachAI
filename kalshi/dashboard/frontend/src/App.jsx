@@ -222,20 +222,23 @@ export default function App() {
       addLog('error', `Mode toggle failed: ${e.message}`)
     }
   }, [addLog])
-  const capital         = statusData?.capital_usd ?? 80
+  const cash            = statusData?.capital_usd ?? 80
   const lifetimePnl     = summary?.total_pnl_usd ?? 0
   const winRate         = summary?.win_rate ?? null
   const wins            = summary?.wins ?? 0
   const losses          = summary?.losses ?? 0
   const trades          = summary?.total_trades ?? 0
   const openRisk        = summary?.open_risk_usd ?? 0
-  // FIX 2026-05-19: capital_usd is Kalshi CASH only — stakes locked in open
-  // trades are subtracted from cash. To get true equity / starting basis we
-  // must add openRisk back. Old formula (capital - lifetimePnl) gave wrong
-  // 'started at' value while trades were open (showed $65 instead of $83.50).
-  const equity          = capital + openRisk
-  const startingCapital = equity - lifetimePnl
-  const pctGain         = startingCapital > 0 ? (lifetimePnl / startingCapital) * 100 : 0
+  // FIX 2026-05-19 (round 2): use Kalshi's real equity (cash + portfolio_value)
+  // when available. Falls back to cost-basis equity (cash + openRisk) if the
+  // backend hasn't sent the new field yet. portfolio_value = current market
+  // value of open positions (Kalshi computes this). Unrealized gains/losses
+  // sit here. Round 1 only used cost basis = lost the $8.60 unrealized gain.
+  const portfolioValue  = statusData?.portfolio_value_usd ?? null
+  const equity          = statusData?.equity_usd ?? (cash + (portfolioValue ?? openRisk))
+  const capital         = equity   // displayed "Capital" = true equity, not cash
+  const startingCapital = (cash + openRisk) - lifetimePnl  // cost-basis ref
+  const pctGain         = startingCapital > 0 ? ((equity - startingCapital) / startingCapital) * 100 : 0
   const todayPnl        = today?.pnl_today_usd ?? 0
   const unrealized      = posData?.total_unrealized_pnl ?? 0
   const lifePos         = lifetimePnl >= 0

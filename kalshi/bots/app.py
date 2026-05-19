@@ -94,27 +94,35 @@ def status():
     # Added 2026-05-15 per Zach: 'when i go live i want see that capital
     # ... just change the capital' — paper-history P&L shouldn't inflate
     # the headline once we're trading real money.
+    portfolio_value_usd = 0.0
+    equity_usd = None
     if PAPER_MODE:
         capital_usd = round(STARTING_CAPITAL + summary["total_pnl_usd"], 2)
         capital_source = "paper_history"
+        equity_usd = capital_usd  # paper mode has no separate portfolio value
     else:
         try:
-            from trader import get_capital as _get_live_capital
-            capital_usd = round(_get_live_capital(), 2)
+            from kalshi_client import get_client as _get_kc
+            balances = _get_kc().get_full_balance()
+            capital_usd = round(balances.get("cash", 0.0), 2)
+            portfolio_value_usd = round(balances.get("portfolio_value", 0.0), 2)
+            equity_usd = round(balances.get("equity", 0.0), 2)
             capital_source = "kalshi_live"
         except Exception as e:
-            # Fallback if balance fetch fails: don't show inflated paper P&L
-            # in live mode — show conservative STARTING_CAPITAL.
+            # Fallback if balance fetch fails: conservative STARTING_CAPITAL
             capital_usd = round(STARTING_CAPITAL, 2)
+            equity_usd = capital_usd
             capital_source = f"fallback_{type(e).__name__}"
 
     return jsonify({
-        "paper_mode":     PAPER_MODE,
-        "kalshi_demo":    KALSHI_DEMO,
-        "summary":        summary,
-        "guardrails":     gs,
-        "capital_usd":    capital_usd,
-        "capital_source": capital_source,
+        "paper_mode":          PAPER_MODE,
+        "kalshi_demo":         KALSHI_DEMO,
+        "summary":             summary,
+        "guardrails":          gs,
+        "capital_usd":         capital_usd,           # cash only (for sizing decisions)
+        "portfolio_value_usd": portfolio_value_usd,   # current market value of open positions
+        "equity_usd":          equity_usd,            # cash + portfolio_value (true account size)
+        "capital_source":      capital_source,
     })
 
 
