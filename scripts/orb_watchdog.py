@@ -624,12 +624,25 @@ def check_orb_balance_discrepancy() -> bool:
     (typically from a phantom position or unrecorded trade). Alert once
     per cooldown so user knows the dashboard's "real" balance moved
     without a journal trade explaining it.
+
+    Skip when a TRACKED position is open (audit 2026-05-19): TV locks
+    ~$2,720 of cash per MNQ contract as margin while the position is
+    held. The dashboard's "current_capital_usd" reads broker cash only,
+    so an open MNQ trade looks like a $2,720+ untracked loss even though
+    nothing actually went wrong — the cash is just sitting in margin.
+    When the trade closes (TP/SL), cash is released and the check
+    re-engages. If a position appears that the BOT doesn't track,
+    check_orb_state_drift catches that instead.
     """
     try:
         r = requests.get(ORB_SUMMARY_URL, timeout=5)
         if r.status_code != 200:
             return True
         data = r.json()
+        # Skip when ORB has an open tracked position — see docstring
+        if int(data.get("open_positions") or 0) > 0:
+            _clear_cooldown("orb_balance_discrepancy")
+            return True
         untracked = float(data.get("untracked_pnl_usd") or 0)
         if abs(untracked) >= ORB_UNTRACKED_PNL_THRESH:
             direction = "LOSS" if untracked > 0 else "GAIN"
