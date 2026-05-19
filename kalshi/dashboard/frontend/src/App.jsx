@@ -224,14 +224,19 @@ export default function App() {
   }, [addLog])
   const capital         = statusData?.capital_usd ?? 80
   const lifetimePnl     = summary?.total_pnl_usd ?? 0
-  const startingCapital = capital - lifetimePnl
-  const pctGain         = startingCapital > 0 ? (lifetimePnl / startingCapital) * 100 : 0
-  const todayPnl        = today?.pnl_today_usd ?? 0
   const winRate         = summary?.win_rate ?? null
   const wins            = summary?.wins ?? 0
   const losses          = summary?.losses ?? 0
   const trades          = summary?.total_trades ?? 0
   const openRisk        = summary?.open_risk_usd ?? 0
+  // FIX 2026-05-19: capital_usd is Kalshi CASH only — stakes locked in open
+  // trades are subtracted from cash. To get true equity / starting basis we
+  // must add openRisk back. Old formula (capital - lifetimePnl) gave wrong
+  // 'started at' value while trades were open (showed $65 instead of $83.50).
+  const equity          = capital + openRisk
+  const startingCapital = equity - lifetimePnl
+  const pctGain         = startingCapital > 0 ? (lifetimePnl / startingCapital) * 100 : 0
+  const todayPnl        = today?.pnl_today_usd ?? 0
   const unrealized      = posData?.total_unrealized_pnl ?? 0
   const lifePos         = lifetimePnl >= 0
   const todayPos        = todayPnl >= 0
