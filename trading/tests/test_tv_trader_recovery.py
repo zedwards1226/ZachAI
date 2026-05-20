@@ -336,7 +336,7 @@ def test_reconcile_halts_phantom_with_no_recent_attempt(monkeypatch, _isolate):
     monkeypatch.setattr(tv_trader, "get_client", AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(tv_trader, "tv_get_positions", AsyncMock(return_value={
         "count": 1, "has_position": True,
-        "available_funds": 2497.88, "signal": "low_avail_funds",
+        "available_funds": 2497.88, "signal": "acct_margin_open",
     }))
 
     result = asyncio.run(tv_trader.reconcile_with_tv())

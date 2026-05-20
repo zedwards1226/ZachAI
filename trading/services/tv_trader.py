@@ -525,6 +525,14 @@ async def tv_dom_ready(tv) -> tuple[bool, str]:
         return (False, "exception")
 
 
+# TV paper margin consumed per open MNQ contract (used only to estimate the
+# CONTRACT COUNT once a position is confirmed open — not to decide open/flat).
+_MNQ_MARGIN_PER_CONTRACT = 2720.0
+# Account margin at/below this (USD) means no open position. TV shows exactly
+# 0.00 when flat; epsilon guards against float-format noise.
+_POSITION_MARGIN_EPSILON = 1.0
+
+
 async def tv_get_positions(tv) -> dict:
     """Query TV-live for current open position state. SOURCE OF TRUTH for
     'are we flat?' decisions, replacing local-state assumptions.
@@ -537,105 +545,100 @@ async def tv_get_positions(tv) -> dict:
         "signal": str,             # how we determined the answer (debug)
       }
 
-    The available-funds heuristic is the most reliable signal across TV's
-    various trading-panel states (collapsed, expanded, account-info view).
-    Positions consume ~$2,720 of margin per MNQ contract, so a drop in
-    available funds tells us a position is open even when the position rows
-    aren't visible in the current panel tab.
+    Position state is read from the broker's own **Account margin** figure in
+    the Account Manager panel — the capital consumed by OPEN positions. It is
+    exactly 0.00 when flat, regardless of account balance.
+
+    This replaces the old available-funds-vs-baseline heuristic (removed
+    2026-05-19). That heuristic declared a phantom position whenever available
+    funds fell below 90% of a $5000 baseline — but the baseline was an
+    in-memory global that reset to the hardcoded STARTING_CAPITAL on every
+    reboot, so once cumulative *realized* losses pushed the real account below
+    $4500 the bot fabricated a phantom on every restart. It also scraped the
+    whole page, so it latched onto Strategy-Tester margin numbers when the
+    broker panel wasn't the visible tab. Account margin avoids both failures.
+
+    If the Account Manager panel is not in the DOM, we attempt to open the
+    'Paper Trading' tab once; if it still can't be read we return
+    signal='panel_unavailable' and DO NOT fabricate a position — reconcile
+    treats that as a skip.
     """
     js = r"""
-    (function() {
-      var allText = document.body.innerText || '';
-      // Strong direct signal: "Avg Fill Price" only appears when a position row is rendered
-      var hasAvgFill = allText.includes('Avg Fill Price');
-      // Margin display "X / Y" — Y is available funds for new orders
-      var m = allText.match(/Margin[\s\S]{1,30}?([\d,]+\.\d+)\s*\/\s*([\d,]+\.\d+)/);
-      var avail = m ? parseFloat(m[2].replace(/,/g, '')) : null;
-      return {hasAvgFill: hasAvgFill, avail: avail};
+    (async function() {
+      function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+      var am = document.querySelector('[class*="accountManager"]');
+      if (!am) {
+        var tab = Array.from(document.querySelectorAll('button,[role="button"],[data-name]'))
+          .find(function(e){ return (e.innerText || '').trim() === 'Paper Trading'; });
+        if (tab) { tab.click(); await sleep(400); }
+        am = document.querySelector('[class*="accountManager"]');
+      }
+      if (!am) return {panel: false};
+      var txt = am.innerText || '';
+      function pluck(label) {
+        var i = txt.indexOf(label);
+        if (i < 0) return null;
+        var seg = txt.substr(i + label.length, 40);
+        var m = seg.match(/[−-]?\s*([\d,]+\.\d{2})/);
+        return m ? parseFloat(m[1].replace(/,/g, '')) : null;
+      }
+      return {
+        panel: true,
+        acctMargin: pluck('Account margin'),
+        ordersMargin: pluck('Orders margin'),
+        avail: pluck('Available funds'),
+        unreal: pluck('Unrealized PnL'),
+        balance: pluck('Account balance')
+      };
     })()
     """
     try:
-        r = await tv.evaluate(js) or {}
+        # async IIFE (opens the broker panel if needed) → must await the promise
+        r = await tv.evaluate_async(js) or {}
     except Exception as e:
         logger.warning("tv_get_positions JS failed: %s", e)
         return {"count": 0, "has_position": False, "available_funds": None,
                 "signal": "exception"}
 
+    if not r.get("panel"):
+        # Broker panel not in DOM even after trying to open it. Do NOT guess.
+        return {"count": 0, "has_position": False, "available_funds": None,
+                "signal": "panel_unavailable"}
+
+    acct_margin = r.get("acctMargin")
     avail = r.get("avail")
-    has_avg_fill = bool(r.get("hasAvgFill"))
 
-    # Audit 2026-05-17 T8: instead of STARTING_CAPITAL=$5000 (hardcoded,
-    # stale once account compounds), use _flat_baseline_avail — the most
-    # recent observed available-funds value while reconcile confirmed
-    # position count = 0. That tracks account growth automatically.
-    # Falls back to STARTING_CAPITAL only on cold-start before any
-    # confirmed-flat observation.
-    global _flat_baseline_avail
-    baseline = _flat_baseline_avail if _flat_baseline_avail is not None else STARTING_CAPITAL
+    if acct_margin is None:
+        # Panel open but the margin figure couldn't be parsed. Don't fabricate.
+        return {"count": 0, "has_position": False, "available_funds": avail,
+                "signal": "margin_unreadable"}
 
-    # Direct signal — TV is showing position rows
-    if has_avg_fill:
-        # Estimate count from margin used (each MNQ takes ~$2720 margin)
-        if avail is not None:
-            margin_used = baseline - avail
-            est_count = max(1, round(margin_used / 2720))
-        else:
-            est_count = 1
+    if acct_margin > _POSITION_MARGIN_EPSILON:
+        est_count = max(1, round(acct_margin / _MNQ_MARGIN_PER_CONTRACT))
         return {"count": est_count, "has_position": True,
-                "available_funds": avail, "signal": "avg_fill_price_visible"}
+                "available_funds": avail, "signal": "acct_margin_open"}
 
-    # Heuristic — available funds dropped below threshold = position open
-    if avail is not None:
-        threshold = baseline * POSITION_OPEN_FUNDS_THRESHOLD
-        if avail < threshold:
-            margin_used = baseline - avail
-            est_count = max(1, round(margin_used / 2720))
-            return {"count": est_count, "has_position": True,
-                    "available_funds": avail, "signal": "low_avail_funds"}
-        # Confirmed-flat observation — refresh the baseline so future
-        # heuristic threshold stays calibrated to actual account size.
-        _flat_baseline_avail = avail
-        return {"count": 0, "has_position": False,
-                "available_funds": avail, "signal": "full_avail_funds"}
-
-    # Couldn't determine — return unknown
-    return {"count": 0, "has_position": False, "available_funds": None,
-            "signal": "unknown"}
+    return {"count": 0, "has_position": False,
+            "available_funds": avail, "signal": "acct_margin_flat"}
 
 
 async def _has_open_position(tv) -> Optional[bool]:
     """Best-effort check: does TV show an open MNQ position?
 
     Returns True if confident a position is open, False if confident flat,
-    None if can't determine. Uses available-funds heuristic: positions consume
-    margin (~$2,720 per MNQ contract) so available drops well below the
-    starting balance when a position is open.
-    """
-    js = """
-    (function() {
-      var allText = document.body.innerText || '';
-      // Strong direct signal: "Avg Fill Price" only appears when a position row is rendered
-      if (allText.includes('Avg Fill Price')) return {has: true, signal: 'avg_fill_price'};
-      // Margin display "X / Y" — Y is available funds for new orders
-      var m = allText.match(/Margin[\\s\\S]{1,30}?([\\d,]+\\.\\d+)\\s*\\/\\s*([\\d,]+\\.\\d+)/);
-      if (m) {
-        var avail = parseFloat(m[2].replace(/,/g, ''));
-        return {has: null, signal: 'margin_display', avail: avail};
-      }
-      return {has: null, signal: 'unknown', avail: null};
-    })()
+    None if can't determine. Delegates to tv_get_positions, which reads the
+    broker's Account margin (0.00 == flat) — see that function for why the old
+    available-funds heuristic was removed (it fabricated phantoms after every
+    reboot once realized losses pushed the balance below the stale baseline).
     """
     try:
-        r = await tv.evaluate(js) or {}
+        pos = await tv_get_positions(tv)
     except Exception:
         return None
-    if r.get("has") is True:
-        return True
-    avail = r.get("avail")
-    if avail is None:
+    if pos.get("signal") in ("panel_unavailable", "margin_unreadable",
+                             "unknown", "exception"):
         return None
-    threshold = STARTING_CAPITAL * POSITION_OPEN_FUNDS_THRESHOLD
-    return avail < threshold
+    return bool(pos.get("has_position"))
 
 
 # MNQ contract consumes ~$2,720 of margin. Use $2,400 as the threshold so a
@@ -1603,6 +1606,14 @@ async def reconcile_with_tv() -> dict:
     tv_signal = tv_pos.get("signal", "unknown")
     tv_has_pos = tv_pos.get("has_position", False)
 
+    # Broker panel couldn't be read this cycle (not in DOM, unparseable). Skip
+    # rather than fabricate drift — a flat-looking read here could wrongly
+    # close a real tracked order, and a phantom-looking one could halt trading.
+    if tv_signal in ("panel_unavailable", "margin_unreadable", "unknown"):
+        logger.info("Reconcile: broker panel unreadable (signal=%s) — skipping cycle.", tv_signal)
+        return {"in_sync": True, "drift_type": "panel_unreadable", "local_count": local_count,
+                "tv_count": local_count, "tv_signal": tv_signal, "action_taken": "skipped"}
+
     # Write broker state to disk for the dashboard. Bot-only state files
     # don't normally surface broker data; this lets serve.py show the REAL
     # TV available_funds (instead of computing $5000 + journal_pnl, which
@@ -1806,7 +1817,10 @@ async def reconcile_with_tv() -> dict:
         # phantom that blocks legitimate score-7 second-break entries
         # (observed 2026-05-07: 3 score-7 LONG signals blocked, est cost
         # several hundred dollars in missed trades).
-        STRONG_PHANTOM_SIGNALS = ("avg_fill_price_visible",)
+        # acct_margin_open is the authoritative position signal (broker's own
+        # Account margin > 0 — real capital consumed by an open position).
+        # avg_fill_price_visible kept for back-compat with any older read path.
+        STRONG_PHANTOM_SIGNALS = ("acct_margin_open", "avg_fill_price_visible")
 
         if tv_signal in STRONG_PHANTOM_SIGNALS:
             logger.error(
