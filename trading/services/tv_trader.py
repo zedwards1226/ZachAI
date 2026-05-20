@@ -19,7 +19,7 @@ import pytz
 from config import (
     TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time,
     VIX_INTERVENTION_PCT,
-    TRAIL_DISTANCE_RATIO, POSITION_OPEN_FUNDS_THRESHOLD, STARTING_CAPITAL,
+    TRAIL_DISTANCE_RATIO,
     PRE_T1_BE_PROGRESS, PRE_T1_BE_PULLBACK,
     STALL_MIN_MFE_POINTS, STALL_NO_PROGRESS_MIN, STALL_LOCK_PCT,
     MFE_GIVEBACK_RATIO, MFE_GIVEBACK_ACTIVATE_R,
@@ -113,14 +113,6 @@ def circuit_breaker_status() -> dict:
 # 5h of phantom alerts and a manual close. The buffer fixes that.
 _FAILED_ATTEMPT_TTL_S = 180.0  # 3 reconcile cycles — enough for slow days
 _recent_failed_attempts: dict[int, dict] = {}
-
-# Audit 2026-05-17 T8: rolling baseline for "flat available funds" — refreshed
-# whenever tv_get_positions confirms position count = 0. Replaces the stale
-# hardcoded STARTING_CAPITAL=$5000 in position-open heuristic so the threshold
-# tracks account growth (or drawdown) automatically. None until first
-# confirmed-flat observation; falls back to STARTING_CAPITAL on cold start.
-_flat_baseline_avail: float | None = None
-
 
 def _record_failed_attempt(
     trade_id: int,
