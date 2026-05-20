@@ -644,22 +644,24 @@ def _score_trade(direction: Direction, is_second_break: bool,
 
 
 def _check_hard_blocks(states: dict, orb: ORBRange) -> Optional[str]:
-    """Check for hard blocks that prevent any trading regardless of score."""
-    structure = states.get("structure", {})
-    sentinel = states.get("sentinel", {})
+    """Check for hard blocks that prevent any trading regardless of score.
 
-    # VIX > 30
-    vix = structure.get("vix", 0)
-    if vix and vix > VIX_HARD_BLOCK:
-        return f"VIX {vix:.1f} above {VIX_HARD_BLOCK} hard block"
-
-    # FOMC/CPI/NFP day — hard block entire day (Finding 8: news days destroy ORB)
-    for event in sentinel.get("economic_events", []):
-        if event.get("impact") == "HIGH" and event.get("within_session_window"):
-            event_name = event.get("event", "").upper()
-            if any(kw in event_name for kw in ("CPI", "NFP", "NON-FARM", "FOMC", "FED")):
-                return f"High-impact news day: {event.get('event')} — no ORB trades"
-
+    2026-05-20: ALL hard blocks DISABLED at Zach's explicit request (paper
+    mode). The VIX>30 block and the FOMC/CPI/NFP news-day block are both off.
+    VIX is also non-binding via VIX_HARD_BLOCK=100000 in config. To restore,
+    re-enable the checks below (preserved in comments).
+    """
+    # DISABLED — original blocks preserved for easy revert:
+    #   structure = states.get("structure", {})
+    #   sentinel = states.get("sentinel", {})
+    #   vix = structure.get("vix", 0)
+    #   if vix and vix > VIX_HARD_BLOCK:
+    #       return f"VIX {vix:.1f} above {VIX_HARD_BLOCK} hard block"
+    #   for event in sentinel.get("economic_events", []):
+    #       if event.get("impact") == "HIGH" and event.get("within_session_window"):
+    #           event_name = event.get("event", "").upper()
+    #           if any(kw in event_name for kw in ("CPI", "NFP", "NON-FARM", "FOMC", "FED")):
+    #               return f"High-impact news day: {event.get('event')} — no ORB trades"
     return None
 
 

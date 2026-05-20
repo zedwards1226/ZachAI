@@ -43,7 +43,7 @@ ATR_LOOKBACK_DAYS = 14
 # level regardless of trade direction, dragging average scores down by ~1-2pts.
 SCORE_FULL_SIZE = 8
 SCORE_HALF_SIZE = 5
-MAX_TRADES_PER_SESSION = 1  # 2026-05-19: 1/day rule. Zach lost $700 after being up $200 — multiple-trade re-entry was the wound. First valid breakout only.
+MAX_TRADES_PER_SESSION = 999999  # 2026-05-20: ALL LIMITS DISABLED at Zach's explicit request (paper mode). Was 1/day.
 
 # Factor weight defaults — these can be overridden by state/learned_config.json
 # (see LEARNABLE_KNOBS in agents/config_loader.py). Added 2026-05-11 after the
@@ -71,14 +71,17 @@ TARGET_2_MULT = 2.0   # Runner TP — 2.0x ORB range from entry
 SLIPPAGE_PTS = 2  # Deduct 2 pts MNQ ($4) from every trade P&L
 
 # Risk Management (Finding 12: circuit breaker)
-MAX_CONSECUTIVE_LOSSES = 3  # Pause for rest of day
-WEEKLY_LOSS_LIMIT_PCT = 0.07  # 7% of capital — enforced via combiner.poll()
+# 2026-05-20: ALL RISK LIMITS DISABLED at Zach's explicit request (paper mode).
+# Set to non-binding values so combiner.poll()/daily_pnl_guard never pause the
+# bot. Revert by restoring the originals (in comments) if going back to capped.
+MAX_CONSECUTIVE_LOSSES = 999999  # was 3 (pause for rest of day)
+WEEKLY_LOSS_LIMIT_PCT = 1000000.0  # was 0.07 (7% of capital)
 ROLLING_WR_ALERT_THRESHOLD = 0.40  # Alert if 20-trade WR drops below 40%
 ROLLING_WR_ALERT_WEEKS = 2  # For 2 consecutive weeks
 
 # Per-trade and per-day risk caps (account size aware — $5,000 paper baseline)
-MAX_RISK_PER_TRADE_DOLLARS = 350   # 7% — bumped 2026-04-30 from $250. Today's 101pt ORB needed $308-341 risk; $250 was blocking most NQ ORBs in the wider 100-150pt regime.
-DAILY_LOSS_LIMIT_DOLLARS = 200     # 4% — bumped from $150 to keep ratio with per-trade cap. One losing trade can't blow the day twice.
+MAX_RISK_PER_TRADE_DOLLARS = 1000000000   # 2026-05-20 DISABLED (was 350)
+DAILY_LOSS_LIMIT_DOLLARS = 1000000000     # 2026-05-20 DISABLED (was 200)
 
 # ── Phase 0.5 profit protection (2026-05-19) ────────────────────────────
 # Zach lost $700 today after being up $200 — bot had no daily-lock and the
@@ -86,7 +89,7 @@ DAILY_LOSS_LIMIT_DOLLARS = 200     # 4% — bumped from $150 to keep ratio with 
 #   - Daily +$200 target: stop trading once realized + unrealized P&L hits target
 #   - Daily -$200 stop: overlap with DAILY_LOSS_LIMIT_DOLLARS — both checked
 #   - MFE 50% giveback exit: after +1R captured, if runner gives back 50% of MFE peak, market close
-DAILY_PROFIT_TARGET_DOLLARS = 200.0  # +$200 → flat any runner + block new entries
+DAILY_PROFIT_TARGET_DOLLARS = 1000000000.0  # 2026-05-20 DISABLED (was 200.0) — let winners run
 MFE_GIVEBACK_RATIO = 0.5             # Exit runner if price retraces 50% from MFE peak
 MFE_GIVEBACK_ACTIVATE_R = 1.0        # Only active once trade has captured at least +1R
 
@@ -96,7 +99,7 @@ MFE_GIVEBACK_ACTIVATE_R = 1.0        # Only active once trade has captured at le
 # actual exposure, which was uncapped. This is the absolute floor — any
 # trade that would risk more than this gets refused at the broker layer,
 # not just the signal layer. Cannot be toggled off via env or config flag.
-HARD_PER_TRADE_RISK_CEILING_DOLLARS = 700
+HARD_PER_TRADE_RISK_CEILING_DOLLARS = 1000000000  # 2026-05-20 DISABLED (was 700)
 
 # Per-trade $ risk gate (combiner.py). When False, the gate is skipped and
 # wide-OR signals fire regardless of stop distance. Set False on 2026-05-04
@@ -126,7 +129,7 @@ STALL_NO_PROGRESS_MIN = 30   # If MFE hasn't advanced in 30 min, tighten stop
 STALL_LOCK_PCT = 0.50        # Lock 50% of MFE-from-entry when stall fires
 
 # VIX Regime (Finding 7)
-VIX_HARD_BLOCK = 30  # No trading above VIX 30
+VIX_HARD_BLOCK = 100000  # 2026-05-20 DISABLED (was 30)
 VIX_SWEET_SPOT_LOW = 15
 VIX_SWEET_SPOT_HIGH = 25
 
