@@ -22,10 +22,11 @@ from config import (
     TRAIL_DISTANCE_RATIO, POSITION_OPEN_FUNDS_THRESHOLD, STARTING_CAPITAL,
     PRE_T1_BE_PROGRESS, PRE_T1_BE_PULLBACK,
     STALL_MIN_MFE_POINTS, STALL_NO_PROGRESS_MIN, STALL_LOCK_PCT,
+    MFE_GIVEBACK_RATIO, MFE_GIVEBACK_ACTIVATE_R,
 )
 from services.tv_client import get_client
 from services.state_manager import read_state, write_state
-from agents import journal
+from agents import journal, daily_pnl_guard
 from services import telegram
 
 logger = logging.getLogger(__name__)
@@ -1244,6 +1245,31 @@ async def monitor_trades() -> None:
     if price == 0:
         return
 
+    # ── Phase 0.5 daily P&L guard (2026-05-19) ─────────────────────────
+    # Computes realized + unrealized today; if total crosses +DAILY_PROFIT_TARGET
+    # or -DAILY_LOSS_LIMIT, market-close every open runner and lock the day.
+    # Runs BEFORE any per-trade logic so we don't keep trailing/scaling a
+    # position the guard is about to flatten.
+    guard_event = daily_pnl_guard.check(_active_orders, price)
+    if guard_event is not None:
+        kind, total_pnl = guard_event
+        logger.warning("Daily P&L guard fired: %s at $%.2f — flattening all runners",
+                       kind, total_pnl)
+        for trade_id, order in list(_active_orders.items()):
+            direction = order["direction"]
+            entry = order["entry"]
+            outcome = _outcome_from_pnl(direction, entry, price)
+            reason = f"Daily {kind.lower()} lock (today ${total_pnl:+.2f})"
+            await close_position(trade_id, price, reason, outcome=outcome)
+        try:
+            await telegram.notify_daily_lock(
+                kind, total_pnl,
+                f"All open runners closed at {price:.2f}.",
+            )
+        except Exception as e:
+            logger.warning("Telegram notify_daily_lock failed: %s", e)
+        return  # Day is locked; no further per-trade work.
+
     # Fresh structure state for VIX intervention
     structure = read_state("structure") or {}
 
@@ -1384,6 +1410,43 @@ async def monitor_trades() -> None:
                             trade_id, mfe, stall_minutes, new_vstop,
                             lock_amount, mfe_from_entry,
                         )
+
+        # ── MFE 50% giveback exit (Phase 0.5, 2026-05-19) ─────────────────
+        # After +1R captured, if price retraces MFE_GIVEBACK_RATIO of the
+        # MFE-from-entry distance, MARKET CLOSE the runner. Protects against
+        # winners turning into losers (today: +$200 → -$700).
+        # Risk = |entry - original stop|, R = mfe_from_entry / risk.
+        if order.get("mfe_price") and not order.get("mfe_giveback_fired"):
+            mfe = order["mfe_price"]
+            mfe_from_entry = abs(mfe - entry)
+            risk = abs(entry - stop)
+            if risk > 0:
+                mfe_r = mfe_from_entry / risk
+                if mfe_r >= MFE_GIVEBACK_ACTIVATE_R:
+                    # Giveback measured against MFE-from-entry distance
+                    if direction == "LONG":
+                        giveback = (mfe - price) / mfe_from_entry if mfe_from_entry > 0 else 0
+                    else:
+                        giveback = (price - mfe) / mfe_from_entry if mfe_from_entry > 0 else 0
+                    if giveback >= MFE_GIVEBACK_RATIO:
+                        order["mfe_giveback_fired"] = True
+                        _persist_active_orders()
+                        outcome = _outcome_from_pnl(direction, entry, price)
+                        logger.warning(
+                            "MFE giveback for trade %d: peak %.2f (+%.1fR) → %.2f "
+                            "(giveback %.0f%%) — market close",
+                            trade_id, mfe, mfe_r, price, giveback * 100,
+                        )
+                        try:
+                            await telegram.notify_mfe_giveback(
+                                trade_id, direction, mfe_r, mfe, price,
+                            )
+                        except Exception as e:
+                            logger.warning("Telegram notify_mfe_giveback failed: %s", e)
+                        await close_position(trade_id, price,
+                                             f"MFE giveback {giveback:.0%} after +{mfe_r:.1f}R",
+                                             outcome=outcome)
+                        continue
 
         # Continuous trail after T1 hit — lock in profit as price runs further.
         # trail_distance = TRAIL_DISTANCE_RATIO × ORB range (ORB range = |T2 - T1|).

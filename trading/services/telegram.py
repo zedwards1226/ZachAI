@@ -263,14 +263,55 @@ async def notify_skip(direction: str, score: int, reason: str) -> bool:
 
 
 async def notify_be_move(trade_id: int, direction: str, entry: float) -> bool:
-    """Notify that virtual stop has moved to breakeven after T1 reached."""
+    """Notify that VIRTUAL stop has moved to breakeven after T1 reached.
+
+    NOTE (2026-05-19): chart-side bracket SL is NOT moved yet — Phase 2 of the
+    overhaul will add CDP drag of the chart line. Until then the chart shows
+    the original SL and the BE is enforced purely by the Python monitor's
+    virtual_stop fire (which sends a market close if price drifts back to entry).
+    """
     direction_word = "long" if direction == "LONG" else "short"
     msg = (
-        f"🎯 <b>First target hit — stop moved to breakeven</b>\n\n"
+        f"🎯 <b>First target hit — virtual stop tightened to BE</b>\n\n"
         f"Trade #{trade_id} ({direction_word}) reached its first target.\n"
-        f"The bot just moved the stop up to entry price <b>{entry:.2f}</b>.\n\n"
-        f"<i>Worst case from here: we exit flat. The bot is now letting "
-        f"the rest run for the second target.</i>"
+        f"Virtual safety stop now sits at entry <b>{entry:.2f}</b>.\n\n"
+        f"<i>Chart bracket SL is unchanged — the Python monitor will market-close "
+        f"if price drifts back through entry. Phase 2 will move the chart line too.</i>"
+    )
+    return await send(msg)
+
+
+async def notify_daily_lock(target_or_stop: str, daily_pnl: float, action: str) -> bool:
+    """Notify when the daily P&L hit the +$200 target or -$200 stop.
+
+    target_or_stop: 'TARGET' or 'STOP'
+    action: human description of what was done (e.g. 'Runner closed at $215')
+    """
+    icon = "💰" if target_or_stop == "TARGET" else "🛑"
+    label = "Daily target +$200 hit" if target_or_stop == "TARGET" else "Daily stop -$200 hit"
+    msg = (
+        f"{icon} <b>{label}</b>\n\n"
+        f"Today's P&L: <b>${daily_pnl:+.2f}</b>\n"
+        f"{action}\n\n"
+        f"<i>Trading locked for the day. Resets at tomorrow's open.</i>"
+    )
+    return await send(msg)
+
+
+async def notify_mfe_giveback(trade_id: int, direction: str, mfe_r: float,
+                              mfe_price: float, exit_price: float) -> bool:
+    """Notify when the runner was force-closed because price gave back 50% of MFE.
+
+    Fires after the trade has captured at least +1R then retraced through the
+    50% giveback band — protects against winners turning into losers.
+    """
+    direction_word = "long" if direction == "LONG" else "short"
+    msg = (
+        f"⏬ <b>Runner closed — gave back half the profit</b>\n\n"
+        f"Trade #{trade_id} ({direction_word}) peaked at +{mfe_r:.1f}R "
+        f"(price <b>{mfe_price:.2f}</b>) then retraced 50%.\n"
+        f"Bot flat at <b>{exit_price:.2f}</b>.\n\n"
+        f"<i>Locked in part of the move instead of letting it round-trip.</i>"
     )
     return await send(msg)
 

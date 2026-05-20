@@ -43,7 +43,7 @@ ATR_LOOKBACK_DAYS = 14
 # level regardless of trade direction, dragging average scores down by ~1-2pts.
 SCORE_FULL_SIZE = 8
 SCORE_HALF_SIZE = 5
-MAX_TRADES_PER_SESSION = 2  # Strict ORB: first break + optional second-break (Zarattini)
+MAX_TRADES_PER_SESSION = 1  # 2026-05-19: 1/day rule. Zach lost $700 after being up $200 — multiple-trade re-entry was the wound. First valid breakout only.
 
 # Factor weight defaults — these can be overridden by state/learned_config.json
 # (see LEARNABLE_KNOBS in agents/config_loader.py). Added 2026-05-11 after the
@@ -56,10 +56,16 @@ MAX_TRADES_PER_SESSION = 2  # Strict ORB: first break + optional second-break (Z
 WEIGHT_SECOND_BREAK = 2
 WEIGHT_ORB_CANDLE_DIRECTION = 3
 
-# Stop/Target (Finding 2: extension-based, 7x Sharpe improvement)
-STOP_EXTENSION_MULT = 1.25  # Stop at 1.25x ORB range beyond opposite boundary
-TARGET_1_MULT = 0.50  # Close 50% at 0.5x ORB range
-TARGET_2_MULT = 1.50  # Trail remainder to 1.5x ORB range
+# Stop/Target (2026-05-19 rewrite — Zarattini/Aziz SSRN 4416622, Concretum)
+# Old setting STOP_EXTENSION_MULT=1.25 placed stop at 0.25x range BEYOND the
+# opposite OR boundary, giving stop≈1.25x range vs TP=1.5x range = R:R 1.2:1.
+# Foundational ORB literature uses stop AT the opposite OR edge (1.0R) with
+# TP up to 10R. We move TP to 2.0x range for a real 2:1 R:R baseline.
+# NOTE: NO MIN_RR refuse-trade gate. Bot trades the first valid breakout
+# regardless of computed R:R — learning needs trades to happen.
+STOP_EXTENSION_MULT = 1.0  # Stop AT the OR opposite edge (no beyond-buffer)
+TARGET_1_MULT = 0.50  # BE trigger + 50% scale (Phase 1.5)
+TARGET_2_MULT = 2.0   # Runner TP — 2.0x ORB range from entry
 
 # Slippage (Finding 9: paper-to-live gap)
 SLIPPAGE_PTS = 2  # Deduct 2 pts MNQ ($4) from every trade P&L
@@ -73,6 +79,16 @@ ROLLING_WR_ALERT_WEEKS = 2  # For 2 consecutive weeks
 # Per-trade and per-day risk caps (account size aware — $5,000 paper baseline)
 MAX_RISK_PER_TRADE_DOLLARS = 350   # 7% — bumped 2026-04-30 from $250. Today's 101pt ORB needed $308-341 risk; $250 was blocking most NQ ORBs in the wider 100-150pt regime.
 DAILY_LOSS_LIMIT_DOLLARS = 200     # 4% — bumped from $150 to keep ratio with per-trade cap. One losing trade can't blow the day twice.
+
+# ── Phase 0.5 profit protection (2026-05-19) ────────────────────────────
+# Zach lost $700 today after being up $200 — bot had no daily-lock and the
+# stall logic was too loose to catch the give-back. These knobs add:
+#   - Daily +$200 target: stop trading once realized + unrealized P&L hits target
+#   - Daily -$200 stop: overlap with DAILY_LOSS_LIMIT_DOLLARS — both checked
+#   - MFE 50% giveback exit: after +1R captured, if runner gives back 50% of MFE peak, market close
+DAILY_PROFIT_TARGET_DOLLARS = 200.0  # +$200 → flat any runner + block new entries
+MFE_GIVEBACK_RATIO = 0.5             # Exit runner if price retraces 50% from MFE peak
+MFE_GIVEBACK_ACTIVATE_R = 1.0        # Only active once trade has captured at least +1R
 
 # HARD per-trade ceiling — uncondtionally enforced inside place_bracket_order
 # regardless of RISK_CAP_ENABLED. Set 2x the soft cap. Audit 2026-05-17 T4:
