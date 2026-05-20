@@ -17,7 +17,7 @@ trading/main.py (APScheduler)
 | File | Purpose | Auto-start |
 |------|---------|------------|
 | `trading/main.py` | ORB multi-agent controller (APScheduler, PID lock) | Startup/ORBAgents.vbs |
-| `trading/agents/` | sentinel, sweep, combiner, briefing, structure, memory, journal, preflight | — |
+| `trading/agents/` | sentinel, sweep, combiner, briefing, structure, memory, journal, preflight, daily_pnl_guard | — |
 | `trading/services/tv_client.py` | CDP WebSocket client (auto-reconnect) | — |
 | `trading/services/tv_trader.py` | Places bracket orders via CDP evaluate() | — |
 | `trading/services/telegram.py` | Telegram alert sender | — |
@@ -123,6 +123,9 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 | `scripts/watchdog.py` | WeatherAlpha watchdog |
 | `scripts/WeatherAlpha_Watchdog.vbs` | Auto-start for WeatherAlpha watchdog |
 | `trading/agents/preflight.py` | 7:00 AM ET stack verification (CDP, disk, calendar, journal) |
+| `trading/agents/daily_pnl_guard.py` | Phase 0.5: real-time daily P&L lock (+$200 target / -$200 stop) — flats runners when triggered |
+| `trading/tests/test_daily_pnl_guard.py` | Unit tests for daily P&L guard math and lock idempotency |
+| `trading/tests/test_mfe_giveback.py` | Unit tests for MFE 50% giveback exit math after +1R |
 
 ---
 

@@ -123,6 +123,12 @@ def _reset_session():
     _logged_daily_cap = False
     _logged_weekly_cap = False
     _logged_arm_block = False
+    # Phase 0.5: clear yesterday's daily P&L lock so today gets a fresh shot.
+    try:
+        from agents import daily_pnl_guard
+        daily_pnl_guard.reset_for_new_session()
+    except Exception:
+        logger.exception("daily_pnl_guard.reset_for_new_session failed")
 
 
 def _arm_status_for_today() -> Optional[dict]:
