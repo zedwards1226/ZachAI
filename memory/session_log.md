@@ -2,6 +2,103 @@
 
 ---
 
+## 2026-05-19 (Evening — recurring false phantom-position bug: ROOT CAUSE + fix)
+
+**Symptom:** After a PC restart, ORB watchdog fired STATE DRIFT — broker_state
+showed `tv_position_count: 1` while bot was flat. Zach: "nothing was open last
+night either, same shit, fix it — I thought we went through the whole code."
+
+**Ground truth (via live TV account-manager scrape):** account was FLAT.
+Account margin $0.00, Unrealized PnL $0.00, zero position rows. Balance was
+$4,250.16 ONLY because of −$749.84 cumulative *realized* (closed) losses.
+
+**Root cause:** `tv_get_positions()` decided "position open" from
+`available_funds < 90% × $5000` baseline. The baseline (`_flat_baseline_avail`)
+is an in-memory global that RESETS to hardcoded STARTING_CAPITAL ($5000) on
+every reboot. Once realized losses pushed the real account below $4,500, the
+heuristic was permanently true after any restart → fabricated a phantom every
+reboot, tripped the circuit breaker, blocked ALL trading. Also scraped
+whole-page innerText → latched onto Strategy-Tester margin numbers when the
+broker panel wasn't the visible tab (the flapping True/False).
+
+**Fix (commits d906c3f + 9da74d0, on master — NOT pushed, awaiting Zach OK
+per tv_trader.py auto-merge exception):**
+- `tv_get_positions()` now reads the broker's own **Account margin** from the
+  Account Manager panel (0.00 == flat, independent of balance). Auto-opens the
+  "Paper Trading" tab if panel missing; returns `panel_unavailable` (reconcile
+  skips) rather than fabricating. Uses `evaluate_async` (async IIFE).
+- `_has_open_position()` delegates to the same signal — fixed two latent bugs:
+  pre-trade gate refusing all orders, and close_position opening a phantom
+  short on a flat account.
+- `STRONG_PHANTOM_SIGNALS` now keys on `acct_margin_open`.
+- Removed dead `_flat_baseline_avail` global + `POSITION_OPEN_FUNDS_THRESHOLD`
+  config constant + unused imports ("take baseline out").
+
+**Verified end-to-end (live):** new ORB process PID 10308 wrote correct
+broker_state (`acct_margin_flat`, $4,250.16, count 0); watchdog all-green
+(orb_state_drift True, orb_balance_discrep True after stale transient cleared,
+gap only −$12.83). Zero circuit-breaker/phantom log lines post-restart. 15
+tests pass (6 new `test_tv_position_detection.py` + 9 recovery). 8 unrelated
+combiner/cascade test failures are PRE-EXISTING on master (AttributeError in
+fixtures), not from this change.
+
+**Also this session:**
+- WeatherAlpha dashboard (:3001) didn't auto-start after reboot (API :5000 +
+  monitor came up, dashboard serve.py didn't). Relaunched via
+  `WeatherAlpha_Dashboard.vbs` → PID 1504, verified "War Room" UI + API 200.
+- Dashboard links confirmed: ORB http://localhost:8502, OmniAlpha
+  http://localhost:8503, WeatherAlpha http://localhost:3001.
+- Explained WeatherAlpha edge to Zach (no code change): 31-member GFS ensemble
+  prob vs Shin-adjusted Kalshi price; MIN_EDGE 0.08 (YES 0.15), 25%
+  shrink-to-market, 15% fractional Kelly. YES side historically anti-predictive
+  (GFS hot-tail over-extrapolation) — flagged as the part to watch.
+
+**OPEN ITEM for next session:** 2 commits (d906c3f, 9da74d0) sit on master
+LOCAL ONLY — awaiting Zach's approval to push (tv_trader.py = live-execution
+auto-merge exception). Running bot already has the fix loaded from disk.
+
+---
+
+## 2026-05-10 (Morning — Jarvis bot 32-hour outage: root cause + auto-restart fix)
+
+**Symptom:** Zach said "everything is off". Actually only Jarvis Telegram bot
+was down — had been silent since 2026-05-09 01:33:12 (~32 hrs). ORD Trading
+Alerts channel was firing hourly "Jarvis Telegram bot dead" notices the
+whole time.
+
+**Root causes (two independent bugs that compounded):**
+1. `scripts/orb_watchdog.py:check_jarvis_bot()` only ALERTED, never restarted —
+   asymmetric vs sibling `check_orb_main()` which auto-restarts ORB.
+2. `scripts/Jarvis_Bot.vbs` invoked bare `pythonw bot.py`. Bare `pythonw` isn't
+   on PATH in non-interactive contexts (Bash/cmd spawns), so even if the
+   watchdog HAD called the VBS, it would have silently failed.
+
+**Fixes (committed e883318, pushed to master):**
+- `Jarvis_Bot.vbs`: use full path `C:\Python314\pythonw.exe`
+- `orb_watchdog.check_jarvis_bot()`: added auto-restart mirroring
+  `check_orb_main` (alert → start_vbs → re-check → resolved/fail)
+
+**Verified end-to-end:**
+- Manual restart: bot back online 08:41:38 (PID 5804 → later 28908 after kill-test)
+- Watchdog sees it: `jarvis_bot: True` from 08:42:01 onward
+- Kill-test: stopped bot 08:44:40 → watchdog detected 08:45:36 → respawned 08:45:37
+  (~57s end-to-end, fully autonomous)
+
+**Security finding:** bot.log (41 MB, no rotation) had Telegram token
+`8671092372:AAGl…` in plaintext on every getUpdates line. Truncated the log;
+prompted Zach to rotate token via @BotFather. `.gitignore` already covers
+`*.log` and `.env` so token never reached GitHub.
+
+**Pending Zach approval:**
+- bot.py log rotation (RotatingFileHandler, 10 MB × 3 backups). Diff prepared,
+  CLAUDE.md protection rule requires explicit sign-off before edit.
+
+**Why bot died at 01:33 on 5/9:** unknown. Event Viewer had no relevant
+entries (likely needed elevation). Daily 2 AM snapshot job is a suspect but
+unconfirmed. Auto-restart now covers it regardless.
+
+---
+
 ## 2026-04-24 (Evening — Kalshi audit + Tier 1/2/3 fixes + 'less' strike block)
 
 **Worked on:**
@@ -232,3 +329,263 @@
 2. After first close: confirm `journal.get_today_pnl()` matches sum of journal trades + risk-cap flags tracking correctly.
 3. Do not escalate to live money — staged criteria are the gate.
 4. WeatherAlpha tunnel still broken (cloudflared.exe missing from prior session) — not addressed today, separate task.
+
+---
+
+## 2026-05-01 (Friday — Zach worked OT)
+
+### Phantom-fill bug (this morning, 09:00 EDT)
+ORB submitted LONG MNQ1! @ 27871.25. `_check_order_acceptance` 4s timeout fired before TV surfaced position rows (TV took ~10s). Trade 10 marked FAILED_PLACEMENT, not persisted to active_orders. Reconcile loop alerted 1/min for 5.5h → 100+ Telegram messages. Zach manually closed mid-day. Avail recovered $5357 by 17:42.
+
+### Phase 1 — phantom-fill recovery (PR #2 → merged 441d18c)
+- `_check_order_acceptance` 4s → 12s; polls toast + position rows + margin drop ≥ $2,400 in parallel
+- New `_recent_failed_attempts` buffer (180s TTL) → reconcile ADOPTS phantoms with recent failed-acceptance match
+- `journal.reopen_as_adopted()` flips FAILED_PLACEMENT → OPEN for adopted trades
+- Phantom alert throttle: 5min → 15min cooldown, one-shot RESOLVED ping when drift clears
+- Circuit breaker auto-resets when drift clears (was stuck open 5h+ today)
+- 9 new tests in `tests/test_tv_trader_recovery.py` — all green
+- Restarted ORB cleanly with new code (PID 31756 final)
+
+### Phase 2.2 — slash commands (PR #3 → reverted, never merged)
+- Added `/orb_status`, `/orb_pause`, `/orb_resume` to bot.py + pause-flag check in combiner.py
+- Zach: "i didnt need that i could just ask him in conversation" → full revert
+- Saved memory `feedback_no_slash_commands.md` — prefer conversational; don't propose new slash commands
+
+### Cleanup pass
+- Removed 3 stale Claude worktrees (vigorous-cray, focused-kapitsa, cool-fermat) + 3 fully-merged orphan branches + 4 stale remote branches
+- Kept: `claude/friendly-spence-b75bd4` (has unmerged commit "persist every scored signal to journal.db signal_history" — Zach to review)
+- Updated stale memory `project_orb_pipeline.md` (paper_trader.py / tunnel pipeline retired 2026-04-17)
+- Updated MEMORY.md index entry to match
+- **Caught + fixed test pollution bug:** `test_tv_trader_recovery` was writing fake adopted trade rows to live `state/active_orders.json`. Fixed via `monkeypatch.setattr(tv_trader, "_persist_active_orders", lambda: None)` in autouse fixture. Pollution wiped, test re-verified green. Commit 85b4bcf.
+
+### Final state at session end
+- master @ 85b4bcf
+- ORB: paper mode, PID 31756, 16 jobs scheduled, no active orders, no errors
+- Jarvis bot: PID 9664
+- Kalshi: WeatherAlpha :5000 + dashboard :3001 + monitor + watchdog all green
+- TV CDP :9222 listening, MNQ1! 5m, api_available=true
+- Sunday 6PM ET reopen ready
+
+### Open items for next session
+1. Sunday open is the live verification of the phantom-fill fix. If a setup fires and TV is slow, watch for either a clean fill (margin-drop signal) or a `🛡️ Adopted phantom from trade #N` Telegram instead of orphan spam.
+2. `claude/friendly-spence-b75bd4` remote branch has unmerged "signal_history" feature — review whether to merge or close.
+3. `condescending-swanson-ded9ca` worktree still exists with uncommitted `.claude/settings.local.json` — Zach to review/discard.
+4. 8 pre-existing test failures in `test_cascade_second_break.py` + `test_combiner_reversal.py` reference removed `combiner._check_cascade` — separate cleanup PR worth ~30 min.
+5. If conversational pause is wanted, no code change needed — Jarvis can already do it via Read/Bash tools (e.g., kill the python process or write a flag — but no flag-check exists in combiner anymore since Phase 2.2 was reverted; if Zach wants pause without process kill, that's a future change).
+
+### Lessons
+- **Don't propose new slash commands** — the conversational handler already covers everything (saved as feedback memory).
+- **Tests must mock `_persist_active_orders`** when calling `reconcile_with_tv()` or any path that triggers a save — production state is at risk.
+- The phantom-fill bug is a TIMING issue; fix is more time + multiple confirmation signals + automatic recovery, not stricter validation.
+
+**Commits (all on master, pushed):** 5250f55 (PR #2 — phantom-fill), 441d18c (merge), 85b4bcf (test isolation fix)
+
+---
+
+## 2026-05-01 (continued, late Friday) — OmniAlpha built
+
+Zach said "complete the bot tonight don't stop till it's done. going to bed." — auto mode was on, executed straight through.
+
+### What shipped (PR #4, branch `kalshi-multi/scaffold`)
+
+**Phase 1 — Scaffold (committed earlier)**
+- `omnialpha/` directory with CLAUDE.md, ACTIVE_FILES.md, .env.example, .gitignore, requirements.txt
+- `bots/kalshi_public.py` — unauthenticated `/historical/*` puller. No API key needed.
+- `data_layer/database.py` — 7-table SQLite schema
+- `data_layer/historical_pull.py` — idempotent bulk ingest
+- `cli.py` — health / init-db / pull-historical / status
+- 6 unit tests passing
+
+**Phase 2 — Functional bot**
+- `strategies/base.py` — Strategy ABC + MarketSnapshot + EntryDecision + ExitDecision
+- `strategies/crypto_midband.py` — first strategy, rule-based, no LLM
+- `backtest/runner.py` — replays settled markets through any Strategy, applies risk engine inline
+- `backtest/calibration.py` — Brier + log loss + calibration curve
+- `bots/kalshi_client.py` — RSA-PSS signed REST client (auth lazy-loaded)
+- `bots/order_placer.py` — paper writer + LOCKED live path (two-flag gate)
+- `bots/risk_engine.py` — 5-gate filter + cross-bot risk_state.json coupling
+- `bots/trade_monitor.py` — settle open trades, write pnl_snapshots
+- `bots/telegram_alerts.py` — send-only [OmniAlpha] prefix on Jarvis bot
+- `bots/events_scanner.py` — universe scanner (paper-mode reads historical store)
+- `main.py` — APScheduler, refuses start if PAPER_MODE != true
+- `scripts/OmniAlpha.vbs` — auto-start launcher (NOT yet in Startup folder)
+- 32 additional tests, including 1 full end-to-end lifecycle test
+- TOTAL: 38 tests, all passing
+
+### Edge found in calibration
+
+KXBTC15M Brier 0.0136 (Kalshi accurate overall), BUT systematic mid-band miscalibration:
+- yes_price 0.20-0.30 → actual ~10-15% → bet NO
+- yes_price 0.30-0.40 → actual ~7-25% → bet NO
+- yes_price 0.70-0.85 → actual ~85-100% → bet YES
+
+Backtest with risk engine + Kelly=0.10:
+- 95 trades, 85.3% WR
+- $100 → $162 (+62% over 7 days)
+- Max DD $14.91, Sharpe 0.258, PF 1.89
+
+### Reference repos cloned (read-only, in `C:\ZachAI\reference\`)
+- `ryanfrigo-kalshi-bot` (toolkit pattern, MIT)
+- `joseph-pm-calibration` (Brier pipeline)
+- `roman-kalshi-btc` (KXBTC15M binary puller pattern)
+
+### Decisions made on Zach's behalf during the build
+- Project name: **OmniAlpha** (parallel to WeatherAlpha — alpha across all sectors). Easy to rename.
+- Working dir: `C:\ZachAI\omnialpha\`
+- Starting capital: $100 (small while paper-validating)
+- Risk caps: $20/trade, $50/day, $150/week
+- First sector: crypto only (KXBTC15M binary up/down)
+- Kelly fraction default: 0.10 (validated via backtest sweep)
+- Dashboard port: 8502 (no conflict with WA :3001 / Jarvis :8765 / ORB :9222 / WA API :5000)
+- Telegram: same Jarvis bot, [OmniAlpha] prefix
+- Live trading: NOT wired tonight. Live path exists but gated behind two flags.
+
+### Open items for next session
+1. **Zach reviews + merges PR #4** — that's the gate before any further work
+2. **Live cutover session** (separate, with explicit approval): populate KALSHI_API_KEY_ID + private key path in omnialpha/.env, flip both flags, restart, observe paper trades on LIVE markets
+3. **Register `OmniAlpha.vbs` in Windows Startup folder** — only after live cutover succeeds
+4. **Phase 3**: second sector (sports likely — KXNBA / KXMLB), CLV grading, hedge-to-lock primitive
+5. The cross-bot `risk_state.json` is wired in OmniAlpha but WA doesn't read it yet — wiring WA to the shared risk_state is a small but real follow-up
+
+### Lessons / surprises
+- The schema's `final_yes_ask_dollars` is post-settlement residual (always 0 or 1). Useless for backtest. The right field is `last_price_dollars` from raw_json. Caught during first calibration run (Brier 0.4780 nonsense). Fixed both `runner.py` and `calibration.py`.
+- Float drift: `7 * (1.0 / 10) = 0.7000000000000001`. Bin boundaries needed `round(..., 10)` to avoid one test failure on the calibration curve.
+- Kelly sweep showed clearly that 0.50 (half-Kelly) blows out drawdown variance. 0.10 is the sweet spot for paper-validation. P&L scales with Kelly but Sharpe doesn't.
+- The two-flag live gate (`PAPER_MODE` in .env AND `assert_paper_mode_off_was_explicit()` in code) is belt-and-suspenders — neither alone permits a live order.
+
+**Commits on branch `kalshi-multi/scaffold` (PR #4 not yet merged):** scaffold + Phase 2.
+
+---
+
+## 2026-05-02 (Saturday — extended session) — OmniAlpha live + dashboard
+
+Picked up where Friday night left off. Massive multi-phase session.
+
+### Phase 1 — Get OmniAlpha actually trading (morning)
+- Code review by 5 parallel agents found 6 critical bugs in the bot:
+  1. main.py had no scheduler job for live polling — bot was a no-op
+  2. _market_already_traded_today blocked re-entry forever (no date filter)
+  3. trade_monitor settlement broken — local markets table never updated to finalized
+  4. Backtest seconds_to_close was total duration, not time remaining
+  5. Backtest's risk engine queried live DB (results not reproducible)
+  6. live_scanner bypassed the order_placer.place() dispatcher
+- Strategy domain review flagged over-confident bands on small samples (n=12-15)
+- ALL fixes shipped in commit 9665065:
+  - Wired live_scanner as scheduled job
+  - Added skip_db_gates flag for backtest cleanliness
+  - Tightened bands to only well-sampled (BTC15M: NO 0.20-0.30, YES 0.75-0.85)
+  - kelly_fraction default 0.10 → 0.05
+  - Entry window restricted to last 3 minutes (calibration was on close prices)
+  - Added Gate 7 aggregate-open-risk to risk engine
+
+### Phase 2 — Multi-sector expansion
+- Pulled KXETH15M (7,393 markets) + KXBTCD (532k+ markets, capped) historical
+- Calibration on both showed real edge:
+  - KXETH15M: same NO 0.15-0.30 + YES 0.65-0.85 pattern
+  - KXBTCD: even larger samples, miscal +27/-23 pts in some bands
+- Refactored CryptoMidBandStrategy to be parameterized (bands, kelly, timing)
+- Three strategies now in registry: btc15m, eth15m, btcd
+- Backtest combined: 937 trades, 95.1% WR, +$2,884 over 7 days (throttled to ~30-50/wk live)
+- MAX_TRADES_PER_SECTOR_PER_DAY: 5 → 20 (3 strategies share crypto sector)
+
+### Phase 3 — Dedicated Telegram channel
+- Zach created @OmniAlphaAlerts_bot via @BotFather
+- Token + chat_id (6592347446) wired into omnialpha/.env (gitignored)
+- Verification ping confirmed; ORB Alerts bot stops getting [OmniAlpha] msgs
+
+### Phase 4 — Dashboard rebuild (evening)
+- Initial Streamlit dashboard "had too much info" per Zach
+- Sent design survey agents — recommended 5-panel max, single accent color, tabular nums, restraint
+- Read WeatherAlpha's React/Tailwind/Recharts stack as reference
+- Built complete React app at omnialpha/dashboard/frontend/ matching WA quality bar
+- Backend Flask at omnialpha/dashboard/backend/serve.py on port 8503
+- Components: Header, HeroTiles, OpenPositions, ActivityRail, EquityChart, StrategyCards, LiveChart
+- LiveChart embeds TradingView free Advanced Chart Widget (real-time BTC/ETH)
+- Auto-picks BTC vs ETH per position's coin; empty state shows last-traded coin
+- Replaced cryptic stat row with plain-English explanation per position:
+  - "We bet BTC will be above $X" / "Need BTC to STAY/RISE/DROP $Y" / "Xm Ys left"
+
+### Bot performance during the session
+- Started day at 0 trades. By session end: 11 trades, 11W/0L, +$6.53 (capital $100→$106.53)
+- Strategies all printing:
+  - crypto_btcd_midband: best earner
+  - crypto_btc15m_midband + crypto_eth15m_midband: real wins on both
+- 100% WR over 11 trades is statistically suspicious BUT mathematically possible
+  (math: ~35-45% chance given the per-strategy true WRs). First loss is coming
+  and is expected.
+
+### Master state at session end
+- HEAD: b9dd6d7 (latest commit: plain-English explanation block)
+- All commits pushed to origin/master
+- 3 OmniAlpha processes running:
+  - main.py (bot itself, paper mode)
+  - serve.py (dashboard backend on :8503)
+  - The bot continues 24/7 polling Kalshi every 60s
+- Other bots (ORB, WeatherAlpha, Jarvis) all untouched throughout
+
+### Open items for next session
+1. **Watch first loss**: when (not if) a trade loses, verify alert fires
+   on @OmniAlphaAlerts_bot and trade settles correctly
+2. **Sports + politics + economics sectors**: Zach explicitly skipped sports
+   (doesn't watch) but might want politics/economics later. Domain-review
+   warned political markets have small sample sizes
+3. **Stocks (KXTSLA, KXSP500)**: Zach mentioned interest. Same daily-range
+   structure as KXBTCD, similar likely edge
+4. **Live cutover**: still locked behind two flags. Needs explicit Zach
+   approval session. Code paths are ready
+5. **Cross-bot risk_state.json coupling**: OmniAlpha writes; WA + ORB don't
+   read yet. One-sided for now
+6. **Kalshi fee model accuracy**: code uses 7% × profit, Kalshi actual is
+   ceil(0.07 × n × p × (1-p)) at entry on every fill. Slightly conservative
+   on wins, under-charges losses. Worth fixing before live
+7. **TOCTOU race on risk_state.json lock**: known issue, not critical with
+   single writer (OmniAlpha) but matters when WA + ORB get wired in
+8. **Dashboard TODOs the user might want**: PNL calendar heatmap, mobile
+   responsive review, custom indicators on TradingView chart
+
+### Session lessons
+- Streamlit IS too cluttered for war-room dashboards. Hummingbot retired
+  theirs. React + Tailwind + Recharts is the right stack — match WA exactly
+- Plain-English explanation > cryptic stat tiles when the user is watching
+  open trades. "Need BTC to RISE +$57" beats "Strike $X / BTC $Y / Stake $Z"
+- TradingView's free embeddable widget is a real cheat code for live charts
+  in any dashboard — drop-in, real-time, full UX, no API key
+- Code reviews catch blocker bugs that tests miss (nothing in 50 unit tests
+  caught the live_scanner-not-wired-into-main-loop issue)
+
+## 2026-05-18 — WeatherAlpha First Live Day + ORB Hardening
+
+### What we built
+- Shipped 7 commits to live trading code (all flagged per auto-merge policy)
+- Made ORB self-monitoring with 5 new watchdog checks
+- Made WeatherAlpha daily-loss cap scale with bankroll
+
+### Key fixes today
+- **B-strike bug (kalshi)**: 4 of 5 first live orders rejected w/ `invalid_parameters`. Root cause: `client_order_id` contained `.` from B-strike tickers (e.g. "B86.5"). Kalshi's validator rejects dots for some market series. Fix: `_safe_ticker = best['ticker'].replace('.', '-')`. Commit `bf8e250`.
+- **ORB phantom silent failure**: position appeared on TV broker, bot blocked all entries for ~8hr while logging "soft drift transient" each minute. NO Telegram alert. Cost a full RTH session. Fix: soft-drift counter escalates to hard phantom after 5 cycles (~5 min) → Telegram + circuit breaker. Commit `ba15a1e`.
+- **Dashboard lying about balance**: ORB showed $5,370 while real TV broker was $4,816 — a $554 untracked loss from the phantom. Fix: `broker_state.json` written every reconcile cycle; dashboard reads real number; surfaces `untracked_pnl_usd` discrepancy. Commit `7e0af58`.
+- **ORB watchdog 5 new checks**: stuck-scan, state-drift, balance-discrepancy, preflight, signal-without-trade. Commit `3c41b88`.
+- **Daily-loss cap scaling**: was fixed $20, would halt bot on one losing trade past ~$500 bankroll. Now `max($20 floor, capital × 10%)`. Commit `84f6126`.
+
+### WeatherAlpha first live day result
+- 5 trades placed, $18.02 at risk on $83.50 bankroll (after audit-fix dot sanitize)
+- Unrealized end-of-day: +$12.03 (4 winners + 1 MIA loser)
+- Expected realized after overnight settlement: ~+$8.98 = ~+10.7% day 1
+- Same trades that initially rejected (MIA, ATL, WDC, HOU, NOL B-strikes) successfully placed after fix
+
+### Lessons / patterns to remember
+- **Read code before claiming behavior** — Zach called me out for guessing about MAX_DAILY_LOSS scaling. CLAUDE.md says no guessing; I violated it twice today. Going forward: grep + read before any "the bot does X" claim.
+- **Silent failures are the worst kind** — every disaster today (B-strike, phantom, dashboard) failed silently. The audit-fix that logs HTTP response bodies (yesterday's commit) was load-bearing for diagnosing the B-strike bug in <30s.
+- **Strike-type-specific Kalshi API behavior** — T-strike (greater-than) markets accept dots in client_order_id; B-strike (between) markets reject them. Bot needs to know which strike types are forgiving and which are strict.
+- **Dashboard math must match broker reality** — computing "starting + journal PnL" silently lies when untracked positions exist. Always read real broker balance, expose discrepancy explicitly.
+- **Soft escalation patterns** — don't log warnings forever; count cycles, escalate after N. "transient" should never be permanent.
+
+### Installed
+- claude-code-setup plugin (read-only automation recommender). Ran it, recommended block-sensitive-files hook + /halt-all slash command. Zach declined both for tonight.
+
+### Status going into tomorrow (5/19)
+- WeatherAlpha PID 21820, halted=false, 5 trades pending overnight settlement
+- ORB PID 5220, scheduler armed for RTH, all 11 watchdog checks live
+- OmniAlpha PID 30756, paper mode, 4 strategies active (btcd paused), no losses today
+- Watchdog PID 32756, 5 new checks active, first cycle correctly flagged $554 hidden loss
+
