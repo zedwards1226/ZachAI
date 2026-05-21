@@ -405,7 +405,11 @@ def scan_and_trade() -> list[dict]:
             implied_prob_yes=best["yes_price_cents"] / 100,
             our_prob_yes=best["our_prob"],
             edge=best["edge"],
-            raw_weather=forecast.get("raw"),
+            # raw_weather intentionally NOT stored: the full ~16KB weather JSON
+            # was written on every forecast row but never read anywhere, and it
+            # bloated the DB to 8.6GB (2026-05-20). Parsed values (hi/lo/edge/
+            # probs) are kept in the columns above — that's all we use.
+            raw_weather=None,
         )
 
         # 9a. Skip duplicates — MUST filter by current mode. A paper trade
