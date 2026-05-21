@@ -81,10 +81,22 @@ def check_capital_at_risk(state: dict, new_stake: float, capital: float) -> tupl
     # Mode-scoped: in live mode we must not count paper open positions as
     # capital-at-risk against the live bankroll (and vice-versa). Audit
     # 2026-05-17 fix.
+    from datetime import datetime, timezone
     from database import get_open_trades
     from config import PAPER_MODE
     open_trades = get_open_trades(paper=int(PAPER_MODE))
-    current_risk = sum(t["stake_usd"] for t in open_trades)
+    # Only positions whose market is still OPEN for trading count as active
+    # risk. Weather daily-high markets close overnight, so trades from prior
+    # days are locked — outcome pending, no new risk possible. Counting them
+    # was choking the 6 AM window: yesterday's not-yet-settled positions ate
+    # the at-risk budget until they settled ~6:30, delaying today's entries
+    # (2026-05-20 fix at Zach's request). Timestamps are stored UTC; the
+    # 6-10 AM CDT trade window is mid-day UTC, so a date compare is safe.
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    current_risk = sum(
+        t["stake_usd"] for t in open_trades
+        if str(t.get("timestamp", ""))[:10] >= today
+    )
     if capital <= 0:
         return False, "No capital"
     ratio = (current_risk + new_stake) / capital

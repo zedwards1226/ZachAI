@@ -2,6 +2,62 @@
 
 ---
 
+## 2026-05-20 (Morning/Eve — ORB pause diagnosis, ALL limits off, WeatherAlpha scale-up + capital-gate fix)
+
+**ORB "why is it paused" — NOT the phantom bug (that fix held):** Verified live
+this morning ORB was armed, flat, no phantom, combiner polling. It was paused on
+the **weekly loss limit** (−$578 vs −$350 cap). Cause: one 2026-05-19 12:10 SHORT
+lost −$624.62 — a ~310pt-risk trade that should've been blocked, but the soft
+per-trade cap is disabled (`RISK_CAP_ENABLED=False`) and the hard ceiling was
+$700 > the daily/weekly caps, so ONE trade blew the week.
+
+**Zach: "erase all fucking limits" (paper money).** Disabled every ORB
+risk/loss limit (commit on master, NOT pushed):
+- config.py: MAX_TRADES_PER_SESSION 1→999999, DAILY_LOSS_LIMIT 200→1e9,
+  WEEKLY_LOSS_LIMIT_PCT 0.07→1e6, MAX_RISK_PER_TRADE 350→1e9,
+  HARD_PER_TRADE_RISK_CEILING 700→1e9, DAILY_PROFIT_TARGET 200→1e9,
+  MAX_CONSECUTIVE_LOSSES 3→999999, VIX_HARD_BLOCK 30→100000.
+- combiner.py `_check_hard_blocks()` short-circuited to return None (VIX +
+  CPI/NFP/FOMC news-day blocks off). Originals preserved in comments.
+- PAPER_MODE=true UNTOUCHED (hard stop). Restarted ORB (PID 17576), verified
+  all values loaded. Trade management (trailing/BE/time exits) left intact.
+
+**WeatherAlpha is LIVE real money** (PAPER_MODE=false, production Kalshi,
+KALSHI_DEMO=false, ~$85 start). Zach confirmed this is intentional. He ran it
+paper for a month (through 5-15), went live 5-18.
+- Balance: $75.90 cash + ~$19 open = ~$95 equity. Live P&L +$10.82 over 15
+  trades (5-18 +$8.37, 5-19 +$2.45, 5-20 5 open). 77.8% WR. Up ~13% in 3 days.
+- Trade history confirms: NEVER traded >5/day, paper or live (cap held).
+- **Scaled MAX_DAILY_TRADES 5→7** in kalshi/.env (LIVE, Zach approved "go").
+  Restarted bot, verified loaded. ~$3.30/trade, edges plentiful (constraint was
+  the cap, not edge supply). Takes effect tomorrow 6 AM CST.
+- **Fixed 6 AM capital stall** (kalshi/bots/guardrails.py
+  `check_capital_at_risk`): it summed ALL open trades incl. yesterday's
+  not-yet-settled positions, eating the 40% at-risk budget until ~6:30
+  settlement → delayed today's entries. Now excludes prior-day (closed-market)
+  positions via UTC date compare; only today's count. Restarted, imports clean.
+- NOL 5-19 trade still "open" = Kalshi hasn't settled it yet (market closed,
+  result blank, expiration 5-26). Actual NOLA high was 86.4°F vs 90-91 band →
+  NO bet should WIN (~+$0.66). Bot auto-books when Kalshi posts result. Normal.
+- Weather settlement lag (>24h) is by design: Kalshi grades off official NWS
+  CLI daily report w/ a multi-day settlement window.
+
+**Cities:** WeatherAlpha expanded from 5 → 20 cities on 2026-05-05; that's why
+trades jumped from 1-4/day to a consistent 5/day (more markets = always 5 edges).
+
+**OPEN ITEMS for next session:**
+- UNPUSHED local commits on master (await Zach "push it"): ORB phantom fix +
+  baseline removal + ORB limits-off + session logs. guardrails.py weather fix
+  also pending commit. kalshi/.env (cap=7) is gitignored — machine only.
+- **weatheralpha.db is 9 GB** — badly bloated (signals/decision_log per-scan
+  rows). Real disk/perf risk. Offered to trim, not yet done.
+- Verify tomorrow 6 AM CST that the capital-gate fix lets all 7 fire at open
+  (not stalling to 6:30). Just check trade timestamps in the DB.
+- Plan-mode flag was stuck "active" all session but edits/commits/restarts all
+  went through (enforcement not holding). Flagged to Zach.
+
+---
+
 ## 2026-05-19 (Evening — recurring false phantom-position bug: ROOT CAUSE + fix)
 
 **Symptom:** After a PC restart, ORB watchdog fired STATE DRIFT — broker_state
