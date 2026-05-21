@@ -702,8 +702,12 @@ def check_orb_preflight() -> bool:
     # 5) Untracked PnL clean
     try:
         data = requests.get(ORB_SUMMARY_URL, timeout=5).json()
+        # Tolerance matches the orb_balance_discrepancy check (ORB_UNTRACKED_PNL_THRESH,
+        # $50). The old $1.00 was unrealistically tight for paper trading — normal
+        # slippage + reconciled/estimated closes drift well past $1 over weeks, so it
+        # red-flagged every morning while the bot was perfectly fine (2026-05-21 fix).
         items.append(("Capital matches journal",
-                      abs(float(data.get("untracked_pnl_usd") or 0)) < 1.0))
+                      abs(float(data.get("untracked_pnl_usd") or 0)) < ORB_UNTRACKED_PNL_THRESH))
     except Exception:
         pass
     all_pass = all(ok for _, ok in items)
