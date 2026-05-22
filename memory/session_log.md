@@ -2,6 +2,25 @@
 
 ---
 
+## 2026-05-21 (Night — OmniAlpha disabled + bot status check)
+
+**Bot health check:** All bots confirmed running at session start (ORB main+watchdog+dashboard, WeatherAlpha app+monitor+watchdog, Telegram bridge, master watchdog). OmniAlpha was running but silent since 23:19 startup.
+
+**OmniAlpha turned OFF (Zach: "not using it"):**
+- Killed main.py (PID 23724) + dashboard serve.py (PID 23116).
+- Removed Startup folder `OmniAlpha.lnk` (auto-boot disabled).
+- Deleted `scripts/OmniAlpha.vbs` + `scripts/OmniAlpha_Dashboard.vbs` (1:1 hygiene).
+- Master watchdog does NOT monitor omnialpha → nothing respawns it.
+- Code retained in `omnialpha\`. CLAUDE.md roster updated. Committed + pushed (a429a26).
+
+**WeatherAlpha verified LIVE (Zach asked to confirm):** Live running process reports
+`paper_mode:false, demo:false, kalshi_connected:true` → **real money on production
+Kalshi.** Watchdog cycling 30s, monitor API serving 200s. Healthy. (Did not touch flags.)
+
+**Flagged, not yet fixed:** `kalshi/bots/monitor.log` is **447 MB** (runaway) — needs rotation/truncation next session.
+
+---
+
 ## 2026-05-21 (Late night — ORB balance-discrepancy alert: root cause + re-baseline)
 
 Zach: "go read the telegram alerts it sent me." The repeating alert was the ORB
