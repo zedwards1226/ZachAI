@@ -19,7 +19,7 @@ import pytz
 from config import (
     TIMEZONE, DEFAULT_SYMBOL, MULTIPLIER, MAX_HOLD_MINUTES, get_hard_close_time,
     VIX_INTERVENTION_PCT,
-    TRAIL_DISTANCE_RATIO,
+    TRAIL_DISTANCE_RATIO, USE_REAL_TV_STOP, TV_STOP_MIN_STEP,
     PRE_T1_BE_PROGRESS, PRE_T1_BE_PULLBACK,
     STALL_MIN_MFE_POINTS, STALL_NO_PROGRESS_MIN, STALL_LOCK_PCT,
     MFE_GIVEBACK_RATIO, MFE_GIVEBACK_ACTIVATE_R,
@@ -1487,6 +1487,14 @@ async def monitor_trades() -> None:
                     logger.info("Trailed stop DOWN for trade %d: %.2f -> %.2f (price %.2f, locked +%.1f pts)",
                                 trade_id, current_vstop, new_vstop, price, entry - new_vstop)
 
+        # Phase 2 (2026-05-22): push the (BE-moved / trailed) virtual stop to the
+        # REAL TV bracket so it's protected server-side even if this 30s monitor
+        # misses a fast wick. Best-effort + deduped (TV_STOP_MIN_STEP); TV's
+        # original bracket is the backstop if the push fails. Runs after all the
+        # BE/pre-T1/stall/trail logic so it reflects this cycle's final stop.
+        if order.get("virtual_stop") is not None:
+            await _push_tv_stop(tv, order, trade_id, order["virtual_stop"])
+
         # Virtual stop — fires when price drifts back through the (possibly trailed)
         # virtual stop. Now also runs when the virtual_stop was set by pre-T1 BE
         # protection or stall detection (added 2026-05-11), not only by t1_hit.
@@ -1645,6 +1653,112 @@ async def read_recent_exit_fill(tv, *, direction: str,
         return None
     candidates.sort(key=lambda c: c.get("closing_time") or "", reverse=True)
     return candidates[0]
+
+
+async def modify_stop_on_tv(tv, *, new_stop_price: float) -> tuple[bool, str]:
+    """Phase 2 (2026-05-22): move the live TV bracket stop to new_stop_price via
+    the account-manager 'Modify Order' panel. Proven recipe:
+      Orders tab → click the working Stop Loss row's 'Modify Order…' → set the
+      SL price input (reset React's _valueTracker so the change registers, else
+      Confirm silently submits the OLD value) → click Confirm.
+
+    Best-effort: returns (ok, msg), NEVER raises. If anything is off it discards
+    the panel and bails — TV's existing bracket stop stays as the backstop, so a
+    failure degrades to exactly the pre-Phase-2 behavior.
+    """
+    try:
+        ns = float(new_stop_price)
+    except Exception:
+        return False, "bad_price"
+    js = r"""
+    (async function(){
+      function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+      function discard(){
+        var d=Array.prototype.slice.call(document.querySelectorAll('button'))
+          .find(function(b){return b.offsetParent!==null && (b.innerText||'').trim()==='Discard';});
+        if(d)d.click();
+      }
+      var am=document.querySelector('[class*="accountManager"]');
+      if(!am){
+        var t=Array.prototype.slice.call(document.querySelectorAll('button,[role="button"],[data-name]'))
+          .find(function(e){return (e.innerText||'').trim()==='Paper Trading';});
+        if(t){t.click(); await sleep(400);}
+        am=document.querySelector('[class*="accountManager"]');
+      }
+      if(!am) return {ok:false, err:'no_panel'};
+      function clickByPrefix(p){
+        var e=Array.prototype.slice.call(am.querySelectorAll('*')).find(function(el){
+          var x=(el.innerText||'').trim(); return x.indexOf(p)===0 && x.length<12 && el.children.length<=1;});
+        if(e){e.click();return true;} return false;
+      }
+      clickByPrefix('Orders'); await sleep(300);
+      // Isolate WORKING orders so we never grab a stale cancelled/filled SL row
+      // (smoke-test bug 2026-05-22). The 'Modify Order…' control is hover-gated
+      // and is NOT a <button>, so reveal it with mouseover and match by title.
+      clickByPrefix('Working'); await sleep(300);
+      var rows=am.querySelectorAll('.ka-row'), slRow=null, oldStop=null, mbtn=null;
+      for(var k=0;k<rows.length;k++){
+        var c=Array.prototype.map.call(rows[k].children,function(x){return (x.innerText||'').trim();});
+        if((c[0]||'').indexOf('MNQ1!')<0 || c[2]!=='Stop Loss') continue;
+        rows[k].dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));
+        rows[k].dispatchEvent(new MouseEvent('mouseenter',{bubbles:true}));
+        await sleep(150);
+        var mb=rows[k].querySelector('[title*="Modify"],[aria-label*="Modify"]');
+        if(mb){ slRow=rows[k]; oldStop=c[5]; mbtn=mb; break; }
+      }
+      if(!slRow || !mbtn) return {ok:false, err:'no_working_sl'};
+      mbtn.click(); await sleep(800);
+      var oldNum=parseFloat(oldStop.replace(/,/g,''));
+      var inp=Array.prototype.slice.call(document.querySelectorAll('input')).find(function(i){
+        return i.offsetParent!==null && /input-gr1VjUfr/.test(i.className) && i.value && Math.abs(parseFloat(i.value)-oldNum)<0.5;});
+      if(!inp){ discard(); return {ok:false, err:'no_sl_input'}; }
+      var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
+      if(inp._valueTracker){ inp._valueTracker.setValue(inp.value); }
+      setter.call(inp, '__NEWSTOP__');
+      inp.dispatchEvent(new Event('input',{bubbles:true}));
+      inp.dispatchEvent(new Event('change',{bubbles:true}));
+      await sleep(300);
+      var cbtn=Array.prototype.slice.call(document.querySelectorAll('button'))
+        .find(function(b){return b.offsetParent!==null && (b.innerText||'').trim()==='Confirm';});
+      if(!cbtn){ discard(); return {ok:false, err:'no_confirm', oldStop:oldStop}; }
+      cbtn.click(); await sleep(500);
+      var stillOpen=Array.prototype.slice.call(document.querySelectorAll('button'))
+        .some(function(b){return b.offsetParent!==null && (b.innerText||'').trim()==='Confirm';});
+      return {ok:!stillOpen, oldStop:oldStop, newStop:'__NEWSTOP__', panelClosed:!stillOpen};
+    })()
+    """.replace("__NEWSTOP__", f"{ns:.2f}")
+    try:
+        r = await tv.evaluate_async(js) or {}
+    except Exception as e:
+        logger.warning("modify_stop_on_tv failed: %s", e)
+        return False, f"exception:{e}"
+    if r.get("ok"):
+        logger.info("modify_stop_on_tv: moved TV stop %s -> %.2f", r.get("oldStop"), ns)
+        return True, "ok"
+    return False, str(r.get("err") or "unknown")
+
+
+async def _push_tv_stop(tv, order: dict, trade_id: int, new_stop: float) -> None:
+    """Best-effort push of the trailed/BE stop to the REAL TV bracket (Phase 2).
+    Deduped: only fires when the stop moved >= TV_STOP_MIN_STEP since the last
+    push, to limit panel churn. Never raises; on failure the virtual stop +
+    TV's original bracket still protect the trade (pre-Phase-2 behavior)."""
+    if not USE_REAL_TV_STOP:
+        return
+    last = order.get("tv_stop_at")
+    if last is not None and abs(new_stop - last) < TV_STOP_MIN_STEP:
+        return
+    try:
+        ok, msg = await modify_stop_on_tv(tv, new_stop_price=new_stop)
+    except Exception as e:
+        logger.debug("_push_tv_stop error (%s) — TV bracket still protects", e)
+        return
+    if ok:
+        order["tv_stop_at"] = new_stop
+        _persist_active_orders()
+    else:
+        logger.info("Phase2: TV stop push to %.2f deferred (%s) — bracket still protects",
+                    new_stop, msg)
 
 
 # ─── Phase 2.2 — Reconciliation Loop ─────────────────────────────────

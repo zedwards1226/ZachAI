@@ -111,6 +111,22 @@ HARD_PER_TRADE_RISK_CEILING_DOLLARS = 1000000000  # 2026-05-20 DISABLED (was 700
 # above is the real ceiling now; this flag controls the soft signal-volume veto.
 RISK_CAP_ENABLED = False
 
+# ── Phase 2 (2026-05-22): real TV trailing stop ───────────────────────────
+# When True, the BE-move and trail PUSH the real TradingView bracket stop via
+# the account-manager "Modify Order" panel (proven recipe), so the stop is
+# server-side and protected even if the 30s monitor misses a fast wick.
+# ADDITIVE + best-effort: the existing virtual-stop logic stays as a backup,
+# and TV's original bracket SL is always there — so if a modify fails, behavior
+# degrades to exactly the pre-Phase-2 path. Flip True to enable.
+# OFF until the live auto-finder is hardened + verified at the open (2026-05-22):
+# the manual recipe is proven, but the "Modify Order" control renders on row
+# ACTIVATION (not just hover), so modify_stop_on_tv needs live tuning against a
+# real position before we trust it. Flip True once verified at 9:30 ET.
+USE_REAL_TV_STOP = False
+# Only push to TV when the stop has moved at least this many points since the
+# last push — limits panel churn from 30s trail steps.
+TV_STOP_MIN_STEP = 5.0
+
 # Mid-trade intervention thresholds (used by tv_trader.monitor_trades)
 VIX_INTERVENTION_PCT = 0.20        # Close trade if VIX rises 20%+ from trade-open VIX
 
