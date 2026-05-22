@@ -3,7 +3,7 @@
 ## OVERVIEW
 Kalshi weather prediction market trading bot. Trades between-markets on daily high/low temperature contracts across 6 US cities using Open-Meteo forecasts as edge signal.
 
-- **Paper mode: ON** (NEVER change without explicit approval — one of the 3 hard stops)
+- **LIVE real-money mode** (PAPER_MODE=false) since 2026-05-21, confirmed intentional by Zach. Flipping the mode either direction is still a hard stop — NEVER change without explicit approval.
 
 ## SERVICES
 - **Bot API:** `http://localhost:5000` — Flask app at `C:\ZachAI\kalshi\bots\app.py`

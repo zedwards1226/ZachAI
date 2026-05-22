@@ -2,6 +2,25 @@
 
 ---
 
+## 2026-05-21 (WeatherAlpha live-status check + MD sync)
+
+Zach asked "how the weather bot do today." WeatherAlpha is **LIVE real money**
+(PAPER_MODE=false) — went live 2026-05-18, confirmed again intentional today.
+
+**Today's performance (live):** +$4.22 realized (3 of 5-20's positions resolved
+as wins: WDC +$2.59, LAX +$0.90, HOU +$0.71). 7 new positions opened, all open,
++$8.52 unrealized. Capital $76.86, at-risk $22.86 (cap $30.74), 7/7 daily trades,
+0 consecutive losses, not halted. Lifetime live ~80% WR, +$15.04.
+
+**Note:** `/api/today` counts by ENTRY date so it showed $0 wins; realized PnL
+from prior-day positions resolving lands in `/api/guardrails` daily_pnl_usd.
+
+**MD sync (per Zach's request to document live status):** auto-memory
+`project_weatheralpha.md` and `kalshi/CLAUDE.md` both still said "paper mode ON"
+— corrected both to LIVE (false-alarmed earlier because of the stale note).
+
+---
+
 ## 2026-05-20 (Morning/Eve — ORB pause diagnosis, ALL limits off, WeatherAlpha scale-up + capital-gate fix)
 
 **ORB "why is it paused" — NOT the phantom bug (that fix held):** Verified live
