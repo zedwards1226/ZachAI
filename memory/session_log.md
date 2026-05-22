@@ -2,6 +2,38 @@
 
 ---
 
+## 2026-05-21 (Late night — ORB balance-discrepancy alert: root cause + re-baseline)
+
+Zach: "go read the telegram alerts it sent me." The repeating alert was the ORB
+**balance-discrepancy** watchdog alert ("ORB HIDDEN GAIN $313.09", real broker
+$4,192.42 vs journal-computed $3,879.33).
+
+**Cause (Zach was right — NOT my dummy testing):** orb_balance_discrep first
+flipped False at **12:22 today**, when trade #34 closed — hours before tonight's
+Phase-2 dummy tests. Root cause is the pre-Phase-1 bug: the journal booked exits
+at theoretical SL/T2 levels (conservative, over-counts losses) instead of real
+fills, so journal-computed capital drifted ~$313 BELOW the real broker balance.
+I initially mis-blamed my testing; corrected after checking the log timeline.
+
+**Fix (commit 2af3a1d, pushed):** verified TV genuinely flat (acct margin 0,
+unrealized 0, no position). Re-baselined via an auditable offset:
+- `trading/state/journal_baseline.json` = {adjustment_usd: 313.09, reason, set_at,
+  real_balance_at_set 4192.42} — gitignored (machine-local state).
+- `serve.py` `_baseline_adjustment()` reads it; `computed_capital = starting +
+  lifetime_pnl + adjustment`. Restarted dashboard.
+- Verified: untracked_pnl $0.00, watchdog orb_balance_discrep back to True
+  (22:49 cycle). Telegram spam stops. Future REAL gaps still trip the $50
+  threshold (offset is fixed). Phase 1 keeps journal/broker in sync going fwd.
+
+**Phase 1/2 status (from earlier this session):** Phase 1 (read real exit fills
+from TV order history) LIVE + tested + pushed. Phase 2 (real TV trailing stop,
+modify_stop_on_tv) PROVEN manually (moved a paper stop 29,440→29,495) + built +
+unit-tested, but staged OFF (`USE_REAL_TV_STOP=False`) — the automated
+working-order finder needs live hardening against a real bot trade at the open
+(Modify control renders on row ACTIVATION, not hover). Finish + verify at 9:30.
+
+---
+
 ## 2026-05-21 (WeatherAlpha live-status check + MD sync)
 
 Zach asked "how the weather bot do today." WeatherAlpha is **LIVE real money**
@@ -18,6 +50,46 @@ from prior-day positions resolving lands in `/api/guardrails` daily_pnl_usd.
 **MD sync (per Zach's request to document live status):** auto-memory
 `project_weatheralpha.md` and `kalshi/CLAUDE.md` both still said "paper mode ON"
 — corrected both to LIVE (false-alarmed earlier because of the stale note).
+
+### ROOT-CAUSE: 3 losses today = LOCATION BUG (not variance). FIXED.
+
+Zach asked why HOU/LAX/DEN lost when "everything lined up." Investigation:
+- Bot fetched Open-Meteo forecasts at **downtown** city coords, but Kalshi
+  settles high-temp markets on a specific **NWS ASOS station** (from each
+  series' `rules_primary`). LAX settles on the cool coastal **airport** —
+  downtown 81° vs airport 70°, a 10°+ gap. Bot bet ">75 YES" at 88% conf on
+  downtown temps; airport settled ≤75 → loss. HOU/DEN similar.
+- Confirmed at portfolio level: every 100%-win city is inland (downtown≈
+  station); every live loss (LAX, MIA, PHX) is a coastal/microclimate city.
+- Live trades settle on Kalshi's real result (`trader.py:792`), so the W/L
+  record + 72%-accuracy/0.22-Brier calibration are ground truth.
+
+**FIX 1 — coords (commit fcc8131, pushed):** repointed all 20 cities'
+lat/lon in `kalshi/bots/config.py` to their Kalshi settlement stations,
+pulled authoritatively from each series' `rules_primary` via Kalshi public
+API (`/trade-api/v2/markets?series_ticker=...`). Stations are NOT uniform:
+NYC=Central Park (not airport), CHI=**Midway** (not O'Hare), LAX/MIA/most=
+airport. Verified bot now reads LAX at airport coords → 72.5° not downtown
+81°. Single source of truth (weather.py + trader.py both read CITIES).
+
+**FIX 2 — calibration floor (commit a288ccb, pushed):** the per-city/side
+shrinkage table was trained on ALL history (paper+live), every trade made
+at the WRONG downtown coords → mis-taught confidence. Added
+`CALIBRATION_DATA_FLOOR=2026-05-22` in config.py + `AND timestamp >= ?` in
+`calibration.py` so it only learns from correctly-located trades. Table now
+falls back to neutral global 0.25 until clean data accumulates (~5-23+).
+
+**Calibration design note (for future):** system already distrusts risky
+YES/directional bets (high shrinkage) and trusts narrow-band NO bets (0.05
+shrink, ~100% base-rate wins). The bot's edge is structural (selling narrow
+NO bands), NOT sharp forecasting. Do NOT tune shrinkage params until clean
+post-fix data accumulates — tuning on buggy-location data bakes error in.
+
+**Verified clean:** 20 unique cities no dupes, no old coords anywhere, no
+override in .env, no on-disk cache, single bot/dashboard/watchdog process
+(no restart zombies). Bot live: paper_mode=false, kalshi_connected=true.
+Note: cloudflared tunnel NOT running (remote dashboard only, pre-existing).
+Today's 7 open positions were placed at OLD coords — left alone, settle 5-22.
 
 ---
 
