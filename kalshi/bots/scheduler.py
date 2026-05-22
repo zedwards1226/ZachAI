@@ -5,6 +5,7 @@ APScheduler jobs for WeatherAlpha.
   - snapshot_job: every hour
 """
 import logging
+from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -20,13 +21,30 @@ from learning_agent import run_review as run_agent_review
 log = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
+_last_scheduled_scan: str | None = None
 
 
 def _scan_job():
+    global _last_scheduled_scan
+    _last_scheduled_scan = datetime.utcnow().isoformat()
     try:
         scan_and_trade()
     except Exception as exc:
         log.error("Scan job failed: %s", exc, exc_info=True)
+
+
+def get_scan_info() -> dict:
+    """Live scan schedule for /api/scan/status — reflects the APScheduler
+    interval job, not just manual scans."""
+    next_run = None
+    if _scheduler and _scheduler.running:
+        job = _scheduler.get_job("scan")
+        if job and job.next_run_time:
+            next_run = job.next_run_time.isoformat()
+    return {
+        "last_scheduled_scan_time": _last_scheduled_scan,
+        "next_scan_time": next_run,
+    }
 
 
 def _resolve_job():

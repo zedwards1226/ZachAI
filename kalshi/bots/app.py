@@ -357,7 +357,14 @@ def decision_log():
 
 @app.route("/api/scan/status")
 def scan_status():
-    return jsonify(_scan_status)
+    from scheduler import get_scan_info
+    info = get_scan_info()
+    out = dict(_scan_status)
+    # Scheduled interval job is the source of truth for next fire; manual
+    # scans only update last_scan_time/last_results.
+    out["next_scan_time"] = info["next_scan_time"]
+    out["last_scan_time"] = _scan_status["last_scan_time"] or info["last_scheduled_scan_time"]
+    return jsonify(out)
 
 
 @app.route("/api/signals")
