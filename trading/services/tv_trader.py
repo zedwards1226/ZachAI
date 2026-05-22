@@ -1187,6 +1187,29 @@ async def close_position(trade_id: int, exit_price: float, reason: str = "",
         except Exception as e:
             logger.warning("Failed to close on chart: %s", e)
 
+    # Phase 1 (2026-05-22): book the REAL fill from TV order history instead of
+    # the theoretical SL/T2 level or a reconcile estimate. Captures real slippage
+    # on every trade and means the bot books what actually happened, not a guess.
+    # Bulletproof fallback: any failure leaves exit_price/outcome untouched.
+    try:
+        _tv = await get_client()
+        _real = await read_recent_exit_fill(
+            _tv, direction=direction, opened_after_iso=order.get("opened_at"))
+        if _real and _real.get("exit_price"):
+            if abs(_real["exit_price"] - exit_price) > 0.01:
+                logger.info(
+                    "close_position(trade %d): real fill %.2f from TV history "
+                    "(was booking %.2f, kind=%s)",
+                    trade_id, _real["exit_price"], exit_price, _real.get("kind"))
+            exit_price = _real["exit_price"]
+            if outcome is None:
+                if _real.get("kind") == "TP":
+                    outcome = "WIN"
+                elif _real.get("kind") == "SL":
+                    outcome = "LOSS"
+    except Exception as e:
+        logger.debug("real-fill lookup failed (%s) — using fallback exit %.2f", e, exit_price)
+
     # Determine outcome
     if outcome is None:
         if direction == "LONG":
@@ -1535,6 +1558,95 @@ def get_active_orders() -> dict:
     return dict(_active_orders)
 
 
+async def read_recent_exit_fill(tv, *, direction: str,
+                                opened_after_iso: Optional[str] = None) -> Optional[dict]:
+    """Read the REAL exit fill for the just-closed MNQ1! position from TV's
+    account-manager Order history — instead of guessing or booking the
+    theoretical SL/T2 level.
+
+    Returns {"exit_price": float, "kind": "TP"|"SL"|"MARKET",
+             "order_id": str, "closing_time": str} or None if unreadable.
+
+    The exit order is on the OPPOSITE side of the trade (LONG closes with a Sell,
+    SHORT with a Buy). The bot is one-position-at-a-time, so the most-recent
+    Filled exit on that side since the trade opened is unambiguous. Order-history
+    rows use the stable `ka-row` class with fixed cell positions:
+      [0]Symbol [1]Side [2]Type [3]Qty [4]Limit [5]Stop [6]Fill [7]Status
+      [8]Commission [9]PlacingTime [10]ClosingTime [11]OrderId
+    """
+    exit_side = "Sell" if str(direction).upper() == "LONG" else "Buy"
+    js = r"""
+    (async function(){
+      function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+      var am=document.querySelector('[class*="accountManager"]');
+      if(!am){
+        var t=Array.from(document.querySelectorAll('button,[role="button"],[data-name]'))
+          .find(function(e){return (e.innerText||'').trim()==='Paper Trading';});
+        if(t){t.click(); await sleep(400);}
+        am=document.querySelector('[class*="accountManager"]');
+      }
+      if(!am) return {panel:false};
+      var tab=Array.from(am.querySelectorAll('button,[role="tab"],[data-name],span,div'))
+        .find(function(e){return (e.innerText||'').trim()==='Order history';});
+      if(tab){tab.click(); await sleep(500);}
+      var rows=am.querySelectorAll('.ka-row');
+      var out=[];
+      for(var i=0;i<rows.length;i++){
+        var cells=Array.prototype.map.call(rows[i].children,function(c){return (c.innerText||'').trim();});
+        if(cells.length<12) continue;
+        if((cells[0]||'').indexOf('MNQ1!')<0) continue;
+        if(cells[7]!=='Filled') continue;
+        out.push({side:cells[1], type:cells[2], fill:cells[6],
+                  closingTime:cells[10], orderId:cells[11]});
+      }
+      return {panel:true, rows:out};
+    })()
+    """
+    try:
+        r = await tv.evaluate_async(js) or {}
+    except Exception as e:
+        logger.debug("read_recent_exit_fill JS failed: %s", e)
+        return None
+    if not r.get("panel"):
+        return None
+
+    def _pf(s):
+        try:
+            return float(str(s).replace(",", "").strip())
+        except Exception:
+            return None
+
+    after = None
+    if opened_after_iso:
+        after = str(opened_after_iso).replace("T", " ")[:19]
+
+    candidates = []
+    for row in (r.get("rows") or []):
+        if row.get("side") != exit_side:
+            continue
+        typ = row.get("type") or ""
+        if "Take Profit" in typ:
+            kind = "TP"
+        elif "Stop Loss" in typ:
+            kind = "SL"
+        elif "Market" in typ:
+            kind = "MARKET"
+        else:
+            continue
+        ct = (row.get("closingTime") or "")[:19]
+        if after and ct and ct < after:
+            continue
+        price = _pf(row.get("fill"))
+        if price is None:
+            continue
+        candidates.append({"exit_price": price, "kind": kind,
+                           "order_id": row.get("orderId"), "closing_time": ct})
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c.get("closing_time") or "", reverse=True)
+    return candidates[0]
+
+
 # ─── Phase 2.2 — Reconciliation Loop ─────────────────────────────────
 # Compares bot's local view (_active_orders) to TV's actual state.
 # Catches phantom positions (TV shows position, local doesn't) and
@@ -1709,6 +1821,19 @@ async def reconcile_with_tv() -> dict:
                 # No quote — assume SL fired (conservative)
                 estimated_exit = stop
                 exit_basis = "no_quote_assume_sl"
+            # Phase 1 (2026-05-22): prefer the REAL fill from TV order history
+            # over the quote-based guess. This is the fix for the 2026-05-21
+            # trade #34 case (TP filled on a fast wick the monitor missed, then
+            # the reconcile *guessed* the exit). Fall back to the estimate above
+            # only when order history can't be read.
+            try:
+                _real = await read_recent_exit_fill(
+                    tv, direction=direction, opened_after_iso=order.get("opened_at"))
+                if _real and _real.get("exit_price"):
+                    estimated_exit = _real["exit_price"]
+                    exit_basis = f"real_fill_{_real.get('kind')}"
+            except Exception as e:
+                logger.debug("reconcile real-fill lookup failed (%s) — using estimate", e)
             try:
                 journal.log_trade_close(
                     trade_id, estimated_exit, "RECONCILED_CLOSED",
