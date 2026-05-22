@@ -134,7 +134,7 @@ Each project owns a nested `CLAUDE.md` with its operational details. Claude Code
 
 - **`trading\`** — ORB NQ/MNQ futures system (live, paper mode); dashboard at http://localhost:8502 → see `trading/CLAUDE.md`
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
-- **`omnialpha\`** — Multi-sector 24/7 Kalshi bot (paper mode, scaffold phase). Sister to WeatherAlpha but completely independent — separate process, DB, capital. NEVER touch `kalshi\` for OmniAlpha work. → see `omnialpha/CLAUDE.md`
+- **`omnialpha\`** — Multi-sector 24/7 Kalshi bot (paper mode). **DISABLED 2026-05-21** — Zach turned it off ("not using it"). Processes killed, Startup `OmniAlpha.lnk` removed, `scripts/OmniAlpha.vbs` + `OmniAlpha_Dashboard.vbs` deleted. Code retained in `omnialpha\`. Do NOT auto-start. Sister to WeatherAlpha but completely independent — separate process, DB, capital. NEVER touch `kalshi\` for OmniAlpha work. → see `omnialpha/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
 - **`companies\tradingagents\`** — FastAPI multi-agent gate (building, paper, not auto-started) → see `companies/tradingagents/CLAUDE.md`
 - **`companies\zacks-work-drawings\`** — Flutter Android app: Google Drive PDF viewer for machine wiring diagrams (built) → see `companies/zacks-work-drawings/CLAUDE.md`
