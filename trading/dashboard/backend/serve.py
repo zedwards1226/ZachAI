@@ -53,6 +53,26 @@ def _starting_capital() -> float:
         return 5000.0
 
 
+def _baseline_adjustment() -> float:
+    """One-time reconciliation offset (USD) added to journal-computed capital.
+
+    The journal historically over-booked losses (exits were recorded at the
+    theoretical SL/T2 level, not the real fill — fixed going forward by Phase 1
+    on 2026-05-22). That left journal-computed capital ~$313 below the real
+    broker balance and spammed the watchdog balance-discrepancy alert. This
+    fixed offset re-baselines computed → real at the moment Phase 1 went live.
+    Future real discrepancies (beyond this offset) still trip the alert.
+    Stored in state/journal_baseline.json so it's auditable, not hidden in code.
+    """
+    try:
+        f = STATE_DIR / "journal_baseline.json"
+        if f.exists():
+            return float(json.loads(f.read_text(encoding="utf-8")).get("adjustment_usd") or 0.0)
+    except Exception:
+        pass
+    return 0.0
+
+
 def _real_broker_balance() -> tuple[float | None, str | None]:
     """Pull the LATEST real TV broker available_funds from broker_state.json.
 
@@ -207,7 +227,7 @@ def api_summary():
         lifetime_wr = round(life_row["w"] / life_row["n"] * 100, 1)
 
     lifetime_pnl = float(life_row["pnl"] or 0)
-    computed_capital = starting_capital + lifetime_pnl
+    computed_capital = starting_capital + lifetime_pnl + _baseline_adjustment()
 
     # Real broker balance (authoritative) vs journal-computed (optimistic).
     # If the bot wrote a fresh broker_state, use the real number; otherwise
