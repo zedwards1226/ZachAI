@@ -55,6 +55,11 @@ CALIBRATION_MIN_SAMPLE = int(os.getenv("CALIBRATION_MIN_SAMPLE", "3"))
 # Bayesian prior trades (per-side) pulling toward 50% WR. Higher = more stable
 # shrinkage when sample is small.
 CALIBRATION_PRIOR_WEIGHT = int(os.getenv("CALIBRATION_PRIOR_WEIGHT", "5"))
+# Only learn calibration from trades placed on/after this date. Everything
+# before 2026-05-22 used downtown coords instead of Kalshi's settlement
+# station (fixed 2026-05-21), so those outcomes mis-teach the shrinkage
+# table. Floor at the first day all trades use correct station coords.
+CALIBRATION_DATA_FLOOR = os.getenv("CALIBRATION_DATA_FLOOR", "2026-05-22")
 
 # Longshot-bias correction via log-odds shrinkage on market prices.
 # 0.0 = off  |  0.05 = conservative liquid market  |  0.10 = illiquid weather contracts

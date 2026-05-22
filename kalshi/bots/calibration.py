@@ -24,6 +24,7 @@ from config import (
     PROB_SHRINK_TO_MARKET,
     CALIBRATION_MIN_SAMPLE,
     CALIBRATION_PRIOR_WEIGHT,
+    CALIBRATION_DATA_FLOOR,
 )
 
 log = logging.getLogger(__name__)
@@ -55,8 +56,10 @@ def _refresh_cache() -> None:
                    SUM(CASE WHEN status='won' THEN 1 ELSE 0 END) AS wins
             FROM trades
             WHERE resolved_at IS NOT NULL
+              AND timestamp >= ?
             GROUP BY city, side
-            """
+            """,
+            (CALIBRATION_DATA_FLOOR,),
         ).fetchall()
         conn.close()
     except Exception as exc:
