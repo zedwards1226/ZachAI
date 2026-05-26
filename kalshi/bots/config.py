@@ -92,31 +92,28 @@ SCAN_INTERVAL_MINUTES = 15
 # Learning agent auto-pauses any city after 3/5 losses, so the lineup
 # self-selects to whichever cities the strategy actually edges on.
 CITIES = {
-    # Coords = Kalshi's official NWS settlement station per series (from each
-    # market's rules_primary), NOT downtown. Kalshi settles on the NWS Daily
-    # Climate Report (CLI) for a specific ASOS station; downtown vs station can
-    # differ 10°+ for coastal cities (LAX), which was costing us live trades.
-    # Repointed 2026-05-21.
-    "NYC": {"name": "New York City",    "lat": 40.7790, "lon": -73.9693,  "kalshi_series": "KXHIGHNY"},    # Central Park (KNYC)
-    "CHI": {"name": "Chicago",          "lat": 41.7860, "lon": -87.7524,  "kalshi_series": "KXHIGHCHI"},   # Chicago Midway (KMDW)
-    "MIA": {"name": "Miami",            "lat": 25.7906, "lon": -80.3164,  "kalshi_series": "KXHIGHMIA"},   # Miami Intl (KMIA)
-    "LAX": {"name": "Los Angeles",      "lat": 33.9382, "lon": -118.3866, "kalshi_series": "KXHIGHLAX"},   # Los Angeles Intl (KLAX)
-    "DEN": {"name": "Denver",           "lat": 39.8466, "lon": -104.6562, "kalshi_series": "KXHIGHDEN"},   # Denver Intl (KDEN)
-    "AUS": {"name": "Austin",           "lat": 30.1975, "lon": -97.6664,  "kalshi_series": "KXHIGHAUS"},   # Austin-Bergstrom (KAUS)
-    "ATL": {"name": "Atlanta",          "lat": 33.6301, "lon": -84.4418,  "kalshi_series": "KXHIGHTATL"},  # Hartsfield-Jackson (KATL)
-    "BOS": {"name": "Boston",           "lat": 42.3606, "lon": -71.0097,  "kalshi_series": "KXHIGHTBOS"},  # Boston Logan (KBOS)
-    "DAL": {"name": "Dallas",           "lat": 32.8998, "lon": -97.0403,  "kalshi_series": "KXHIGHTDAL"},  # Dallas-Fort Worth (KDFW)
-    "WDC": {"name": "Washington DC",    "lat": 38.8512, "lon": -77.0402,  "kalshi_series": "KXHIGHTDC"},   # Reagan National (KDCA)
-    "HOU": {"name": "Houston",          "lat": 29.9902, "lon": -95.3368,  "kalshi_series": "KXHIGHTHOU"},  # Bush Intercontinental (KIAH)
-    "LAS": {"name": "Las Vegas",        "lat": 36.0719, "lon": -115.1633, "kalshi_series": "KXHIGHTLV"},   # Harry Reid Intl (KLAS)
-    "MIN": {"name": "Minneapolis",      "lat": 44.8848, "lon": -93.2223,  "kalshi_series": "KXHIGHTMIN"},  # Minneapolis-St Paul (KMSP)
-    "NOL": {"name": "New Orleans",      "lat": 29.9934, "lon": -90.2580,  "kalshi_series": "KXHIGHTNOLA"}, # Louis Armstrong (KMSY)
-    "OKC": {"name": "Oklahoma City",    "lat": 35.3931, "lon": -97.6007,  "kalshi_series": "KXHIGHTOKC"},  # Will Rogers (KOKC)
-    "PHX": {"name": "Phoenix",          "lat": 33.4373, "lon": -112.0078, "kalshi_series": "KXHIGHTPHX"},  # Sky Harbor (KPHX)
-    "SAT": {"name": "San Antonio",      "lat": 29.5337, "lon": -98.4698,  "kalshi_series": "KXHIGHTSATX"}, # San Antonio Intl (KSAT)
-    "SEA": {"name": "Seattle",          "lat": 47.4502, "lon": -122.3088, "kalshi_series": "KXHIGHTSEA"},  # Seattle-Tacoma (KSEA)
-    "SFO": {"name": "San Francisco",    "lat": 37.6188, "lon": -122.3750, "kalshi_series": "KXHIGHTSFO"},  # San Francisco Intl (KSFO)
-    "PHL": {"name": "Philadelphia",     "lat": 39.8729, "lon": -75.2407,  "kalshi_series": "KXHIGHPHIL"},  # Philadelphia Intl (KPHL)
+    # Original 5 (verified 2026-04)
+    "NYC": {"name": "New York City",    "lat": 40.7128, "lon": -74.0060,  "kalshi_series": "KXHIGHNY"},
+    "CHI": {"name": "Chicago",          "lat": 41.8781, "lon": -87.6298,  "kalshi_series": "KXHIGHCHI"},
+    "MIA": {"name": "Miami",            "lat": 25.7617, "lon": -80.1918,  "kalshi_series": "KXHIGHMIA"},
+    "LAX": {"name": "Los Angeles",      "lat": 34.0522, "lon": -118.2437, "kalshi_series": "KXHIGHLAX"},
+    "DEN": {"name": "Denver",           "lat": 39.7392, "lon": -104.9903, "kalshi_series": "KXHIGHDEN"},
+    # Added 2026-05-05 — verified live with 12 open strikes/day each
+    "AUS": {"name": "Austin",           "lat": 30.2672, "lon": -97.7431,  "kalshi_series": "KXHIGHAUS"},
+    "ATL": {"name": "Atlanta",          "lat": 33.7490, "lon": -84.3880,  "kalshi_series": "KXHIGHTATL"},
+    "BOS": {"name": "Boston",           "lat": 42.3601, "lon": -71.0589,  "kalshi_series": "KXHIGHTBOS"},
+    "DAL": {"name": "Dallas",           "lat": 32.7767, "lon": -96.7970,  "kalshi_series": "KXHIGHTDAL"},
+    "WDC": {"name": "Washington DC",    "lat": 38.9072, "lon": -77.0369,  "kalshi_series": "KXHIGHTDC"},
+    "HOU": {"name": "Houston",          "lat": 29.7604, "lon": -95.3698,  "kalshi_series": "KXHIGHTHOU"},
+    "LAS": {"name": "Las Vegas",        "lat": 36.1716, "lon": -115.1391, "kalshi_series": "KXHIGHTLV"},
+    "MIN": {"name": "Minneapolis",      "lat": 44.9778, "lon": -93.2650,  "kalshi_series": "KXHIGHTMIN"},
+    "NOL": {"name": "New Orleans",      "lat": 29.9511, "lon": -90.0715,  "kalshi_series": "KXHIGHTNOLA"},
+    "OKC": {"name": "Oklahoma City",    "lat": 35.4676, "lon": -97.5164,  "kalshi_series": "KXHIGHTOKC"},
+    "PHX": {"name": "Phoenix",          "lat": 33.4484, "lon": -112.0740, "kalshi_series": "KXHIGHTPHX"},
+    "SAT": {"name": "San Antonio",      "lat": 29.4241, "lon": -98.4936,  "kalshi_series": "KXHIGHTSATX"},
+    "SEA": {"name": "Seattle",          "lat": 47.6062, "lon": -122.3321, "kalshi_series": "KXHIGHTSEA"},
+    "SFO": {"name": "San Francisco",    "lat": 37.7749, "lon": -122.4194, "kalshi_series": "KXHIGHTSFO"},
+    "PHL": {"name": "Philadelphia",     "lat": 39.9526, "lon": -75.1652,  "kalshi_series": "KXHIGHPHIL"},
     # MEM removed 2026-04-24: Kalshi doesn't publish KXHIGHMEM markets.
 }
 
