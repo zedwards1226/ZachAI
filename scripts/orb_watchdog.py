@@ -798,8 +798,13 @@ def run_cycle() -> None:
         "orb_dashboard":       check_orb_dashboard(),
         "cdp":                 check_cdp(),
         "jarvis_bot":          check_jarvis_bot(),
-        "omnialpha_main":      check_omnialpha_main(),
-        "omnialpha_dashboard": check_omnialpha_dashboard(),
+        # 2026-05-26: OmniAlpha permanently disabled — Zach killed it after
+        # 247 paper trades produced -$230 net. Strategy "midband" thesis
+        # doesn't hold; YES side avg entry 76¢ at 68.5% WR is structurally
+        # negative EV. Watchdog will NOT restart it. Re-enable only after
+        # the strategy is rebuilt and re-validated.
+        # "omnialpha_main":      check_omnialpha_main(),
+        # "omnialpha_dashboard": check_omnialpha_dashboard(),
         # ORB bulletproof v1 (2026-05-18)
         "orb_stuck_scan":      check_orb_stuck_scan(),
         "orb_state_drift":     check_orb_state_drift(),
