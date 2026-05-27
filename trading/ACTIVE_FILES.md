@@ -23,6 +23,8 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `agents/journal.py` — journal DB + weekly report + agent_journal audit table
 - `agents/learning_agent.py` — 6:30 PM daily + Sun 7:05 AM weekly; reviews trades, proposes knob changes
 - `agents/config_loader.py` — loads `state/learned_config.json` overrides on top of `config.py` + manual-edit detection
+- `agents/daily_pnl_guard.py` — 2026-05-19 real-time P&L lock; halts new entries when intraday DD trips daily cap
+- `agents/daily_summary.py` — 4:15 PM ET cross-bot P&L Telegram digest (ORB + WeatherAlpha)
 
 ## Services
 - `services/__init__.py`
@@ -43,9 +45,17 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `tests/test_learning_agent.py`
 - `tests/test_telegram_labels.py` — regression guard: skip reasons + score-breakdown keys translate to plain English (no `risk_too_wide:$X>Y`, `htf_bias` codenames in user text)
 - `tests/test_arm_gate.py` — 4 tests covering the 9:25 arm gate: happy path, hard-check failure blocks arming, combiner short-circuits + once-per-day alert, manual override path
+- `tests/test_daily_pnl_guard.py` — daily P&L lock thresholds + halt behavior
+- `tests/test_mfe_giveback.py` — MFE-giveback exit logic
+- `tests/test_tv_exit_fills.py` — tv_trader exit-fill reconciliation
+- `tests/test_tv_modify_stop.py` — tv_trader stop-modify path
+- `tests/test_tv_position_detection.py` — tv_trader position-detect logic
+- `tests/test_tv_trader_recovery.py` — tv_trader crash-recovery flow
 
-## Research
-- `research/production_patterns_2026-04-30.md` — pattern audit from 5 parallel research subagents
+## Dashboard
+- `dashboard/backend/serve.py` — Flask read-only API + static React serve (`:8502`)
+- `dashboard/backend/static/` — built React (gitignored; `npm run build` writes here)
+- `dashboard/frontend/` — Vite + React 18 + Tailwind + Recharts source
 
 ## Runtime (gitignored)
 - `.env` — TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
