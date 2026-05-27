@@ -2,16 +2,56 @@
 
 Mocks the Kalshi /markets HTTP endpoint with realistic payloads. Real
 Kalshi responses verified against live API on 2026-05-02.
+
+Strategy stub (StubBuyNoStrategy) replaces the deleted crypto_midband
+fixture after the 2026-05-27 OmniAlpha cleanup. The stub returns a fixed
+EntryDecision so live_scanner's scan-and-trade plumbing can be exercised
+without depending on a real strategy implementation.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from strategies.base import (
+    EntryDecision, ExitDecision, MarketSnapshot, Strategy, StrategyContext,
+)
+
+
+class StubBuyNoStrategy(Strategy):
+    """Minimal Strategy that always returns a 10-contract NO order at the
+    market's no_ask price. Used in scan-and-trade integration tests to
+    exercise the full flow without a real strategy. Sector-agnostic."""
+    name = "stub_buy_no"
+    sector = "crypto"  # match the live_scanner sector tag for crypto markets
+
+    def decide_entry(
+        self,
+        market: MarketSnapshot,
+        context: StrategyContext,
+    ) -> Optional[EntryDecision]:
+        if market.seconds_to_close <= 0:
+            return None
+        if market.no_ask_cents <= 0 or market.no_ask_cents >= 100:
+            return None
+        return EntryDecision(
+            side="no",
+            contracts=10,
+            price_cents=market.no_ask_cents,
+            edge=0.10,
+            forecast_prob=0.85,
+            kelly_frac=0.05,
+            reason="stub_no",
+        )
+
+    def decide_exit(self, position, market, context) -> Optional[ExitDecision]:
+        return None
 
 
 def _live_market_payload(*, ticker="KXBTC15M-X", last=0.25, vol=5000.0):
@@ -120,7 +160,6 @@ def isolated_db(monkeypatch, tmp_path):
 def test_scan_and_trade_full_flow(isolated_db, monkeypatch):
     """End-to-end: stub HTTP, run scan_and_trade, verify trade persists + market upserted."""
     from bots import live_scanner
-    from strategies.crypto_midband import CryptoMidBandStrategy
     from data_layer.database import get_conn
 
     # Build a market in the NO band, with seconds_to_close inside entry window.
@@ -138,7 +177,7 @@ def test_scan_and_trade_full_flow(isolated_db, monkeypatch):
     )
 
     result = live_scanner.scan_and_trade(
-        strategy=CryptoMidBandStrategy(),
+        strategy=StubBuyNoStrategy(),
         series_ticker="KXBTC15M",
         capital_usd=100.0,
     )
@@ -169,7 +208,6 @@ def test_scan_and_trade_full_flow(isolated_db, monkeypatch):
 def test_scan_and_trade_rejects_already_taken_market(isolated_db, monkeypatch):
     """If we already have a trade against this ticker, scan should not re-enter."""
     from bots import live_scanner
-    from strategies.crypto_midband import CryptoMidBandStrategy
     from data_layer.database import get_conn
 
     # Pre-populate a trade for this ticker
@@ -193,7 +231,7 @@ def test_scan_and_trade_rejects_already_taken_market(isolated_db, monkeypatch):
     )
 
     result = live_scanner.scan_and_trade(
-        strategy=CryptoMidBandStrategy(),
+        strategy=StubBuyNoStrategy(),
         series_ticker="KXBTC15M",
         capital_usd=100.0,
     )
@@ -208,14 +246,13 @@ def test_scan_and_trade_rejects_already_taken_market(isolated_db, monkeypatch):
 def test_scan_and_trade_handles_http_failure(monkeypatch):
     """Network fail returns zero counts, doesn't crash."""
     from bots import live_scanner
-    from strategies.crypto_midband import CryptoMidBandStrategy
 
     def boom(**kw):
         raise RuntimeError("network down")
     monkeypatch.setattr(live_scanner, "fetch_active_markets", boom)
 
     result = live_scanner.scan_and_trade(
-        strategy=CryptoMidBandStrategy(),
+        strategy=StubBuyNoStrategy(),
         series_ticker="KXBTC15M",
         capital_usd=100.0,
     )

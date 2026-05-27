@@ -1,136 +1,70 @@
-# OMNIALPHA — Project Brain
+# `omnialpha/` — Kalshi Shared Infrastructure Library
 
-## OVERVIEW
-24/7 multi-sector Kalshi prediction-market bot. Sister to WeatherAlpha (`C:\ZachAI\kalshi\`) but **completely independent** — separate process, separate SQLite DB, separate Telegram channel suffix, separate capital allocation.
+## What this is now
 
-WA proves the edge thesis: structural mispricing on narrow / long-shot YES contracts where retail overprices the "fun" outcome. OmniAlpha generalizes that thesis across sectors (crypto, sports, politics, economics) and sectors that are 24/7-tradeable (so the bot is always working, not gated to one daily weather cycle).
+`omnialpha/` was the OmniAlpha crypto bot project until 2026-05-27. The bot was deleted that day after the mid-band crypto strategy lost −$230 across 247 paper trades (full postmortem in master `C:\ZachAI\CLAUDE.md`). What survives here is the **reusable Kalshi infrastructure** — auth client, public-data puller, scanner, risk engine, order placer, trade monitor, alerts, DB schema, strategy ABC, CLI. Any new Kalshi bot uses these modules instead of re-deriving them.
 
-**Paper mode: ON** — `PAPER_MODE=true` in `omnialpha/.env`. Going live requires Zach's explicit approval (one of the 3 hard stops in master CLAUDE.md).
+This directory is **not a bot anymore**. There is no `main.py`, no auto-start VBS, no dashboard, no live process. The next bot will live at `omnialpha/strategies/<name>.py` + its own `main_<name>.py` harness in this directory, importing the shared modules below.
 
-## RELATIONSHIP TO WEATHERALPHA — READ FIRST
-- **Never modify `C:\ZachAI\kalshi\`** for OmniAlpha work. WA is profitable and untouchable.
-- Both bots use Zach's same Kalshi credentials but separate state/DB.
-- Cross-bot risk coupling lives in `C:\ZachAI\data\risk_state.json` (read by both, written by neither yet — design TBD).
-- Telegram alerts use the same Jarvis bot but prefix messages `[OmniAlpha]` so WA notifications stay clean.
+## What's inside
 
-## OPEN REVIEW CHECKPOINTS
-- **2026-05-17 (Sunday): `crypto_btcd_midband` widened-band review.** On 2026-05-11 the YES band was tactically widened from `[0.70, 0.85, 0.85]` to `[0.65, 0.88, 0.82]` to restore trade volume after a 3-day no-trade stretch (5/9-5/11) following the 5/6 audit. Decision criteria:
-  - **Keep widened bands** if: >=5 trades fired AND net PnL > -$30 since 5/11
-  - **Revert to tight `[0.70, 0.85, 0.85]`** if: <3 trades OR net loss > $30
-  - Either way: run `omnialpha/backtest/jbecker_recalibrate_2026_05_06.py` against fresh data (re-extract from `reference/jbecker-data/data.tar.zst`) to refresh the entire band set for all 5 strategies.
+### `bots/` — runtime infrastructure
+- **`kalshi_client.py`** — signed REST + WebSocket client. Handles RSA auth, retries, the orderbook_delta channel. The single hardest module in the library (~600 lines). Used by any bot that places orders or subscribes to fills.
+- **`kalshi_public.py`** — unauthenticated `/historical/markets`, `/historical/trades`, `/historical/cutoff`. For backtests, calibration runs, edge-validation pulls. No keys needed.
+- **`live_scanner.py`** — universe scan loop. Pulls active markets, converts JSON to `MarketSnapshot`, builds `StrategyContext`, hands the snapshot to a `Strategy`, applies the risk engine, places paper or live orders. Strategy-agnostic.
+- **`order_placer.py`** — paper/live order placement. `place_paper_order()` writes to the SQLite journal with `paper=1`; `place_live_order()` POSTs to Kalshi. Requires both `PAPER_MODE=false` AND an explicit code-level flag to go live (defense in depth against the hard stop).
+- **`risk_engine.py`** — 5-gate pre-trade check: Kelly, per-trade $, daily $, weekly $, same-series-same-side bucket (correlation gate). All caps are % of live capital with USD floors so they compound up and de-lever down.
+- **`trade_monitor.py`** — periodic fill + settlement reconciliation. Settles paper trades against Kalshi's resolved-market outcome; updates `status` and `pnl_usd`.
+- **`strategy_grader.py`** — CLV/WR-based auto-pause for strategies. Pauses a strategy when WR falls below dynamic break-even after MIN_TRADES settled. Manual resume only.
+- **`strategy_labels.py`** — plain-English translations for strategy/sector codenames in Telegram messages. Add an entry per new bot.
+- **`telegram_alerts.py`** — `[<BotName>]`-prefixed Telegram dispatcher with cooldown dedup.
 
-## CURRENT STATUS
-**Phase 1 — Scaffold (in progress).** Foundation only. NO live strategies, NO order placement, NO authenticated API calls beyond `health` check.
+### `data_layer/`
+- **`database.py`** — SQLite schema. `markets`, `trades`, `strategy_state`, `decision_log`, `cost_ledger`. `init_db()` creates everything idempotently.
+- **`historical_pull.py`** — bulk-pulls settled markets into the local DB. Used by backtests and edge-validation.
 
-What works:
-- Project structure + CLAUDE.md
-- Reference repos cloned (`reference/ryanfrigo-kalshi-bot`, `reference/joseph-pm-calibration`, `reference/roman-kalshi-btc`)
+### `strategies/`
+- **`base.py`** — `Strategy` ABC + `MarketSnapshot`, `StrategyContext`, `EntryDecision`, `ExitDecision` dataclasses. Strategies are pure functions of their inputs (no I/O, no time.sleep, no side effects beyond what the runner provides). This makes backtests deterministic and tests trivial.
 
-What does NOT work yet:
-- No strategies
-- No live trading
-- No backtest engine
-- No dashboard data
-- No auto-start
+### `tests/`
+- **`test_kalshi_public.py`** — historical-data puller, mocks `httpx.Client`
+- **`test_live_scanner.py`** — snapshot conversion + scan-and-trade flow (uses `StubBuyNoStrategy` fixture)
+- **`test_order_placer.py`** — paper/live separation invariants
+- **`test_rate_limit_cooldown.py`** — per-series 429 cooldown
+- **`test_risk_engine.py`** — every gate, contract clamping, cross-bot state, bucket gate
 
-## SERVICES + PORTS (planned)
-| Service | Port | Status |
-|---|---|---|
-| Streamlit dashboard | `:8502` (WA dashboard owns `:3001`, ORB watchdog has none, Jarvis approval is `:8765`, Kalshi WA API is `:5000`) | TBD |
-| Live bot main loop | n/a (background process) | TBD |
-| Auto-start VBS | `scripts/OmniAlpha.vbs` | TBD |
+### Top-level
+- **`config.py`** — paper-mode flag, capital, risk caps, sector enables, paths, Kalshi base URL. Imported by the bot's `main_<name>.py`.
+- **`cli.py`** — operational verbs: `health`, `init-db`, `pull-historical`, `status`. Works against whichever DB `config.DB_PATH` resolves to.
+- **`requirements.txt`** — pinned deps shared across any bot built on this library.
 
-## KEY FILE PATHS (planned)
-```
-omnialpha/
-├── CLAUDE.md                      # this file
-├── ACTIVE_FILES.md                # manifest (every file Zach has)
-├── .env                           # gitignored, has KALSHI keys + Anthropic key
-├── .env.example                   # template
-├── requirements.txt
-├── config.py                      # paper mode flag, capital, risk caps
-├── main.py                        # entry point (APScheduler)
-├── cli.py                         # status/health/scores commands
-├── bots/
-│   ├── kalshi_client.py           # signed REST + WebSocket
-│   └── kalshi_public.py           # unauthenticated /historical/* puller
-├── data_layer/
-│   ├── database.py                # SQLite schema (trades, signals, decisions, costs)
-│   ├── events_scanner.py          # live universe scanner
-│   └── historical_pull.py         # backtest data ingest
-├── strategies/                    # one file per strategy
-├── backtest/
-│   └── runner.py                  # replay historical trades through strategies
-├── dashboard/
-│   └── app.py                     # Streamlit
-├── state/                         # gitignored runtime state
-├── logs/                          # gitignored logs
-└── tests/
-```
+## How to wire a new bot
 
-## DATA SOURCES — ALL FREE
-- **Kalshi REST + WebSocket** (authenticated): live markets, orders, positions
-- **Kalshi `/historical/markets`** (unauthenticated): all settled markets w/ outcomes
-- **Kalshi `/historical/trades`** (unauthenticated): tick-level trade history
-- **Kalshi `/historical/cutoff`** (unauthenticated): data-availability check (currently ~2-month lag)
+1. **Strategy:** create `omnialpha/strategies/<your_strategy>.py` implementing the `Strategy` ABC from `strategies/base.py`.
+2. **Harness:** create `omnialpha/main_<your_bot>.py` — APScheduler job that calls `live_scanner.scan_and_trade(strategy=YourStrategy(), series_ticker=..., capital_usd=...)` on whatever cadence you want.
+3. **Env:** create `omnialpha/.env` with `PAPER_MODE=true`, Kalshi credentials, Telegram credentials, Anthropic key (if needed).
+4. **Sector enable:** add your sector to `config.ENABLED_SECTORS`.
+5. **Label:** add a `STRATEGY_LABELS` entry in `bots/strategy_labels.py` for Telegram readability.
+6. **DB:** override `DB_PATH` in your harness so each bot writes to its own `state/<bot>.db`.
+7. **Auto-start (optional, after paper validation):** add a `scripts/<YourBot>.vbs` launcher.
 
-No paid data feeds. No PMXT relay. No third-party data brokers. Everything Zach needs is on Kalshi's own public endpoints.
+## Paper mode is the hard stop
 
-## STRATEGY STACK (planned, NOT yet implemented)
-1. **Behavioral-bias scanner** — finds NO-side overpricing on long-shots, narrow-range mispricing (WA's thesis generalized)
-2. **Theta harvesting** — far-OTM long-dated NO positions on conditional events
-3. **News reaction** — sentinel-driven (uses `C:\ZachAI\trading\state\sentinel.json` shared with ORB)
-4. **6+1-gate pre-trade filter** — Kelly / Liquidity / Concentration (max parallel) / Same-series-same-side bucket (correlation) / Drawdown / Cross-bot halt (stolen from OctagonAI/kalshi-trading-bot-cli, plus the bucket gate added 2026-05-05 after BTCD stacked T80999+T80899 on the same KXBTCD-26MAY0521 series and lost $49)
-5. **CLV grading** — auto-pause underperforming sectors (mirrors WA's learning-agent city pause)
-6. **Hedge-to-lock** — buy opposite side at favorable price to lock partial profit, free capital faster
+`config.PAPER_MODE` is read from `.env` and defaults to `true`. `order_placer.place_live_order()` refuses to run unless BOTH `PAPER_MODE=false` AND `assert_paper_mode_off_was_explicit()` returns true. Setting `PAPER_MODE=false` is one of the 3 hard stops in master CLAUDE.md and requires Zach's explicit approval.
 
-## RISK CAPS (paper, $500 bankroll, COMPOUNDING + 0.08 Kelly)
-All caps are % of LIVE capital — they scale up as the bot wins, scale down during drawdown. No fixed-dollar ceilings to clip growth.
+## What was removed 2026-05-27
 
-- Starting capital: $500 (paper)
-- Strategy Kelly fraction: 0.08 (bumped from 0.05 on 2026-05-03 to accelerate growth)
-- Per-trade max risk: 8% of live capital (floor $5) — matches Kelly so cap never clips
-- Daily max loss: 16% of live capital (floor $10) — circuit breaker, halts new entries for the day
-- Weekly max loss: 20% of live capital (floor $20) — kill switch
-- Max concurrent positions: 8
-- Max trades per sector per day: 20 (three crypto strategies share the sector)
-- Sectors must be enabled per-sector via config — opt-in, not opt-out
+- `strategies/crypto_midband.py` (the failed strategy)
+- `backtest/` (calibration runs for the failed bands)
+- `dashboard/` (Streamlit + React scaffold, only ever served the failed bot)
+- `bots/band_tuner.py` (crypto-specific band tuner)
+- `main.py` (OmniAlpha entry point with the crypto registry)
+- `state/` runtime artifacts (`omnialpha.db`, `strategy_bands.json`, `band_history.jsonl`)
+- Tests for the deleted modules (`test_calibration.py`, `test_end_to_end.py`, `test_strategy_midband.py`, `test_strategy_labels.py`)
+- All outside callers cleaned: `scripts/orb_watchdog.py`, `trading/agents/daily_summary.py`, `.claude/launch.json`, `trading/dashboard/backend/serve.py` docstring
 
-| Capital | per-trade | daily | weekly |
-|---|---|---|---|
-| $250 (drawdown) | $20 | $40 | $50 |
-| $500 (today) | $40 | $80 | $100 |
-| $1000 | $80 | $160 | $200 |
-| $2000 | $160 | $320 | $400 |
+The kalshi infra in `bots/`, `data_layer/`, `strategies/base.py`, `config.py`, `cli.py`, and the kept tests pass `pytest` clean (40/40).
 
-Mechanics:
-- `capital_usd = STARTING_CAPITAL_USD + realized − open_risk` — recomputed every scan
-- Kelly stake = 0.05 × live capital
-- Per-trade cap = `max(floor, capital × pct)` — `config.per_trade_cap_usd()`
-- Same pattern for daily/weekly caps via `daily_loss_cap_usd()` / `weekly_loss_cap_usd()`
+## Auto-merge
 
-Subject to revision as the bot proves itself in paper.
-
-## PROTECTIONS / AUTO-MERGE EXCEPTIONS
-- **Don't touch `C:\ZachAI\kalshi\`** for OmniAlpha work — period.
-- Once strategies + live order placement are added, that file becomes auto-merge exception list (parallel to ORB's `tv_trader.py` rule). Until then, normal flow.
-- `PAPER_MODE=true` is enforced in `bots/kalshi_client.py` — going live requires explicit approval same as ORB / WA.
-
-## REFERENCE REPOS (read-only, in `C:\ZachAI\reference\`)
-- **`ryanfrigo-kalshi-bot/`** — toolkit pattern, MIT, very recent. Source for kalshi_client, ingest, dashboard scaffold, SQLite schema. Borrow patterns; don't fork wholesale.
-- **`joseph-pm-calibration/`** — Brier score + calibration pipeline, public Kalshi historical endpoints. Source for backtest analysis.
-- **`roman-kalshi-btc/`** — KXBTC15M binary up/down puller. Source for crypto sector v1.
-
-## OUT OF SCOPE (do NOT add without Zach's say-so)
-- Live trading (paper only until 30+ paper trades + Zach's explicit OK)
-- Cross-platform arbitrage (Polymarket integration is heavy + adds risk surface)
-- Market making (capital + latency game; not solo-friendly at this scale)
-- Custom React/Vue dashboard (Streamlit is the call per master brief)
-- MQTT broker / multi-node orchestration (premature at 4 bots; revisit at 8+)
-
-## OPEN ITEMS / NEXT STEPS
-1. Finish Phase 1 scaffold (this branch): config, DB schema, kalshi_public.py historical puller, dashboard skeleton, smoke test
-2. Phase 2: build first sector strategy (likely crypto via KXBTC15M — simplest 24/7 entry point)
-3. Phase 3: paper-mode live with 1 strategy, observe 7+ days
-4. Phase 4: add second sector (sports), CLV grading, hedge primitive
-5. Phase 5: discuss live-mode criteria with Zach (NOT before)
+Until a new bot ships from here, treat `omnialpha/` as a normal library — auto-merge applies, no extra approval gate. Once a strategy ships and goes live, this file gets the same auto-merge exception WeatherAlpha and ORB have (commit + push but notify Zach BEFORE merging anything touching `bots/order_placer.py` or live credentials).

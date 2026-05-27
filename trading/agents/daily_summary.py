@@ -10,7 +10,10 @@ Telegram client. Wired into trading/main.py's APScheduler.
 Bot DBs:
   - ORB:          C:\\ZachAI\\trading\\journal.db          (table: trades)
   - WeatherAlpha: C:\\ZachAI\\kalshi\\bots\\weatheralpha.db (table: trades)
-  - OmniAlpha:    C:\\ZachAI\\omnialpha\\state\\omnialpha.db (table: trades)
+
+OmniAlpha was deleted 2026-05-27 — failed crypto bot, -$230 over 247
+paper trades. A new Kalshi bot will slot in here when shipped; mirror
+the _wa_stats pattern with the new DB path.
 """
 from __future__ import annotations
 
@@ -28,7 +31,6 @@ ET = pytz.timezone("America/New_York")
 
 ORB_DB = Path(r"C:\ZachAI\trading\journal.db")
 WA_DB = Path(r"C:\ZachAI\kalshi\bots\weatheralpha.db")
-OA_DB = Path(r"C:\ZachAI\omnialpha\state\omnialpha.db")
 
 
 def _week_start_iso() -> str:
@@ -94,44 +96,16 @@ def _wa_stats(target_date: str, week_start: str) -> dict:
         }
 
 
-def _oa_stats(target_date: str, week_start: str) -> dict:
-    """OmniAlpha schema mirrors WeatherAlpha — timestamp ISO + status."""
-    if not OA_DB.exists():
-        return {"day_n": 0, "day_w": 0, "day_pnl": 0.0, "wtd_pnl": 0.0}
-    with sqlite3.connect(str(OA_DB)) as db:
-        cur = db.cursor()
-        d = cur.execute(
-            "SELECT COUNT(*), "
-            "SUM(CASE WHEN status='won' THEN 1 ELSE 0 END), "
-            "COALESCE(SUM(pnl_usd), 0) "
-            "FROM trades WHERE substr(timestamp,1,10)=? "
-            "AND status IN ('won','lost')",
-            (target_date,)
-        ).fetchone()
-        w = cur.execute(
-            "SELECT COALESCE(SUM(pnl_usd), 0) "
-            "FROM trades WHERE substr(timestamp,1,10) >= ? "
-            "AND status IN ('won','lost')",
-            (week_start,)
-        ).fetchone()
-        return {
-            "day_n": int(d[0] or 0),
-            "day_w": int(d[1] or 0),
-            "day_pnl": float(d[2] or 0),
-            "wtd_pnl": float(w[0] or 0),
-        }
-
-
 def _fmt_dollars(amt: float) -> str:
     sign = "+" if amt >= 0 else "-"
     return f"{sign}${abs(amt):.2f}"
 
 
-def _build_message(date_str: str, orb: dict, wa: dict, oa: dict) -> str:
+def _build_message(date_str: str, orb: dict, wa: dict) -> str:
     """Markdown-formatted Telegram summary. Mirrors the answer style Claude
     used when Zach asked 'how we do today' on 2026-05-11."""
-    day_total = orb["day_pnl"] + wa["day_pnl"] + oa["day_pnl"]
-    wtd_total = orb["wtd_pnl"] + wa["wtd_pnl"] + oa["wtd_pnl"]
+    day_total = orb["day_pnl"] + wa["day_pnl"]
+    wtd_total = orb["wtd_pnl"] + wa["wtd_pnl"]
 
     # Header
     emoji = "🟢" if day_total >= 0 else "🔴"
@@ -151,7 +125,6 @@ def _build_message(date_str: str, orb: dict, wa: dict, oa: dict) -> str:
 
     lines.append(row("ORB", orb))
     lines.append(row("WeatherAlpha", wa))
-    lines.append(row("OmniAlpha", oa))
     lines.append("")
     lines.append(f"*Today total:* {_fmt_dollars(day_total)}")
     lines.append(f"*WTD total:* {_fmt_dollars(wtd_total)}")
@@ -159,7 +132,7 @@ def _build_message(date_str: str, orb: dict, wa: dict, oa: dict) -> str:
 
 
 async def run() -> None:
-    """Build today's summary across the 3 bots and post to Telegram."""
+    """Build today's summary across the active bots and post to Telegram."""
     try:
         now_et = datetime.now(ET)
         date_str = now_et.strftime("%Y-%m-%d")
@@ -167,12 +140,11 @@ async def run() -> None:
 
         orb = _orb_stats(date_str, week_start)
         wa = _wa_stats(date_str, week_start)
-        oa = _oa_stats(date_str, week_start)
 
-        msg = _build_message(date_str, orb, wa, oa)
+        msg = _build_message(date_str, orb, wa)
         logger.info("Daily summary built: today=%s wtd=%s",
-                    sum(s["day_pnl"] for s in (orb, wa, oa)),
-                    sum(s["wtd_pnl"] for s in (orb, wa, oa)))
+                    sum(s["day_pnl"] for s in (orb, wa)),
+                    sum(s["wtd_pnl"] for s in (orb, wa)))
         await telegram.send(msg)
     except Exception as e:
         logger.error("Daily summary failed: %s", e, exc_info=True)

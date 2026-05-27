@@ -4,7 +4,7 @@ Monitors ORB stack every 60s and auto-recovers:
   - main.py (via state/orb.pid + process liveness)
   - TradingView CDP (http://localhost:9222/json)
   - Jarvis Telegram bot (process scan)
-  - OmniAlpha main + dashboard, ORB dashboard
+  - ORB dashboard
 
 Actions:
   - Restart dead processes via their VBS launchers
@@ -60,14 +60,10 @@ LOG_FILE = LOG_DIR / "orb_watchdog.log"
 ORB_PID_FILE = TRADING_DIR / "state" / "orb.pid"
 ORB_VBS = SCRIPTS_DIR / "ORBAgents.vbs"
 JARVIS_VBS = SCRIPTS_DIR / "Jarvis_Bot.vbs"
-OMNIALPHA_DASHBOARD_VBS = SCRIPTS_DIR / "OmniAlpha_Dashboard.vbs"
-OMNIALPHA_VBS = SCRIPTS_DIR / "OmniAlpha.vbs"
-OMNIALPHA_PID_FILE = Path(r"C:\ZachAI\omnialpha\state\omnialpha.pid")
 ORB_DASHBOARD_VBS = SCRIPTS_DIR / "ORB_Dashboard.vbs"
 
 # ─── Endpoints ────────────────────────────────────────────────────────────
 CDP_URL = "http://localhost:9222/json/version"
-OMNIALPHA_DASHBOARD_URL = "http://localhost:8503/"
 ORB_DASHBOARD_URL = "http://localhost:8502/api/health"
 CHECK_EVERY = 60  # seconds
 
@@ -281,130 +277,13 @@ def check_cdp() -> bool:
     return False
 
 
-def check_omnialpha_main() -> bool:
-    """OmniAlpha main.py alive via PID file. Restart via OmniAlpha.vbs if dead.
-
-    Added 2026-05-12 after discovering PID 2832 (last night's restart) died
-    silently after ~110 minutes. omnialpha.db-wal sat untouched for 22 hours
-    before we noticed. Mirrors check_orb_main() pattern: trust PID file first,
-    fall back to process-name scan, restart via VBS on death.
-    """
-    if not OMNIALPHA_PID_FILE.exists():
-        # PID file missing — try to find a running omnialpha main.py before restarting
-        live_pids = _find_processes("omnialpha")
-        # Filter to actual main.py (exclude dashboard's serve.py)
-        live_main = []
-        for pid in live_pids:
-            try:
-                cmd_check = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command",
-                     f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine"],
-                    capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
-                )
-                if "main.py" in cmd_check.stdout and "serve.py" not in cmd_check.stdout:
-                    live_main.append(pid)
-            except Exception:
-                pass
-        if live_main:
-            pid = live_main[0]
-            try:
-                OMNIALPHA_PID_FILE.write_text(str(pid))
-                log.info("OmniAlpha running as PID %d but PID file missing — restored", pid)
-                resolved("omnialpha_dead", f"✅ <b>OmniAlpha running (PID {pid})</b> — PID file restored")
-            except OSError as e:
-                log.error("Failed to restore OmniAlpha PID file: %s", e)
-            return True
-
-        log.warning("OmniAlpha PID file missing and no main.py process found — starting")
-        alert("omnialpha_dead",
-              f"⚠️ <b>OmniAlpha main.py not running</b>\n🔧 Starting via OmniAlpha.vbs\n"
-              f"⏰ {datetime.now().strftime('%H:%M:%S')}")
-        if _start_vbs(OMNIALPHA_VBS):
-            time.sleep(15)
-            if OMNIALPHA_PID_FILE.exists():
-                resolved("omnialpha_dead", "✅ <b>OmniAlpha main.py started</b>")
-                return True
-        return False
-
-    try:
-        pid = int(OMNIALPHA_PID_FILE.read_text().strip())
-    except (ValueError, OSError):
-        alert("omnialpha_pid_bad", "⚠️ <b>OmniAlpha PID file corrupt</b>")
-        return False
-
-    if _pid_alive(pid):
-        _clear_cooldown("omnialpha_dead")
-        return True
-
-    log.warning("OmniAlpha PID %d is dead — restarting", pid)
-    alert("omnialpha_dead",
-          f"🚨 <b>OmniAlpha main.py crashed (PID {pid})</b>\n"
-          f"🔧 Restarting via OmniAlpha.vbs\n⏰ {datetime.now().strftime('%H:%M:%S')}")
-    try:
-        OMNIALPHA_PID_FILE.unlink()
-    except OSError:
-        pass
-    if _start_vbs(OMNIALPHA_VBS):
-        time.sleep(15)
-        if OMNIALPHA_PID_FILE.exists():
-            resolved("omnialpha_dead", "✅ <b>OmniAlpha main.py recovered</b>")
-            return True
-    alert("omnialpha_fail",
-          "🚨 <b>OmniAlpha RESTART FAILED</b> — manual: "
-          "wscript C:\\ZachAI\\scripts\\OmniAlpha.vbs")
-    return False
-
-
-def check_omnialpha_dashboard() -> bool:
-    """OmniAlpha dashboard on :8503. Auto-restart via VBS if down.
-
-    Added 2026-05-11 after the dashboard silently died sometime overnight
-    and we only caught it during morning-readiness checks. The VBS launcher
-    has anti-double-launch logic so re-firing it when alive is a no-op.
-
-    Streamlit serves /healthz and / both 200 when alive — just check / with
-    a short timeout. 2 attempts (handles transient Streamlit slow-rerender).
-    """
-    for attempt in range(2):
-        try:
-            r = requests.get(OMNIALPHA_DASHBOARD_URL, timeout=5)
-            if r.status_code == 200:
-                _clear_cooldown("omnialpha_dashboard_down")
-                return True
-        except Exception:
-            pass
-        if attempt == 0:
-            time.sleep(2)
-
-    log.warning("OmniAlpha dashboard :8503 not responding — restarting")
-    alert("omnialpha_dashboard_down",
-          f"📊 <b>OmniAlpha dashboard down</b> (:8503)\n"
-          f"🔧 Restarting via OmniAlpha_Dashboard.vbs\n"
-          f"⏰ {datetime.now().strftime('%H:%M:%S')}")
-    if _start_vbs(OMNIALPHA_DASHBOARD_VBS):
-        time.sleep(10)
-        try:
-            r = requests.get(OMNIALPHA_DASHBOARD_URL, timeout=5)
-            if r.status_code == 200:
-                resolved("omnialpha_dashboard_down",
-                         f"✅ <b>OmniAlpha dashboard recovered</b>\n"
-                         f"⏰ {datetime.now().strftime('%H:%M:%S')}")
-                return True
-        except Exception:
-            pass
-    alert("omnialpha_dashboard_fail",
-          "🚨 <b>OmniAlpha dashboard RESTART FAILED</b> — manual: "
-          "wscript C:\\ZachAI\\scripts\\OmniAlpha_Dashboard.vbs")
-    return False
-
-
 def check_orb_dashboard() -> bool:
     """ORB dashboard on :8502. Auto-restart via VBS if down.
 
-    Added 2026-05-13 when the ORB React+Flask dashboard shipped. Mirrors
-    check_omnialpha_dashboard exactly — HTTP GET against /api/health with
-    2 attempts (handles transient Flask slow-startup), VBS relaunch on
-    persistent failure, Telegram alert + auto-recovery message.
+    Added 2026-05-13 when the ORB React+Flask dashboard shipped.
+    HTTP GET against /api/health with 2 attempts (handles transient
+    Flask slow-startup), VBS relaunch on persistent failure, Telegram
+    alert + auto-recovery message.
     """
     for attempt in range(2):
         try:
@@ -798,13 +677,6 @@ def run_cycle() -> None:
         "orb_dashboard":       check_orb_dashboard(),
         "cdp":                 check_cdp(),
         "jarvis_bot":          check_jarvis_bot(),
-        # 2026-05-26: OmniAlpha permanently disabled — Zach killed it after
-        # 247 paper trades produced -$230 net. Strategy "midband" thesis
-        # doesn't hold; YES side avg entry 76¢ at 68.5% WR is structurally
-        # negative EV. Watchdog will NOT restart it. Re-enable only after
-        # the strategy is rebuilt and re-validated.
-        # "omnialpha_main":      check_omnialpha_main(),
-        # "omnialpha_dashboard": check_omnialpha_dashboard(),
         # ORB bulletproof v1 (2026-05-18)
         "orb_stuck_scan":      check_orb_stuck_scan(),
         "orb_state_drift":     check_orb_state_drift(),

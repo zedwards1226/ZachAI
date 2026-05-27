@@ -1,11 +1,4 @@
 {
   "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "omnialpha-dashboard",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["C:/ZachAI/omnialpha/dashboard/backend/serve.py"],
-      "port": 8503
-    }
-  ]
+  "configurations": []
 }

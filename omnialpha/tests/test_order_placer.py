@@ -52,7 +52,7 @@ def test_paper_mode_writes_open_row(_isolate):
         decision=_decision(),
         market_ticker="KXBTC15M-T-1",
         sector="crypto",
-        strategy_name="crypto_midband",
+        strategy_name="stub_buy_no",
     )
     assert result["paper"] is True
     assert result["trade_id"] > 0
@@ -79,7 +79,7 @@ def test_live_mode_refused_when_explicit_flag_off(monkeypatch):
             decision=_decision(),
             market_ticker="KXBTC15M-T-1",
             sector="crypto",
-            strategy_name="crypto_midband",
+            strategy_name="stub_buy_no",
             kalshi_client=None,
         )
     assert "explicit code-level approval" in str(exc.value)
@@ -95,7 +95,7 @@ def test_paper_mode_blocks_live_path_too(monkeypatch):
             decision=_decision(),
             market_ticker="KXBTC15M-T-1",
             sector="crypto",
-            strategy_name="crypto_midband",
+            strategy_name="stub_buy_no",
             kalshi_client=None,
         )
     assert "PAPER_MODE=true" in str(exc.value)

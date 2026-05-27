@@ -1,80 +1,56 @@
-# OmniAlpha — Active Files Manifest
+# `omnialpha/` — Active Files Manifest
 
-Per master CLAUDE.md hygiene rule: every file in this directory MUST appear here.
+Updated 2026-05-27 after surgical OmniAlpha delete. If a file isn't listed here, it shouldn't exist (per master CLAUDE.md FILE HYGIENE rule).
 
-## Project root
-- `CLAUDE.md` — project brain
-- `ACTIVE_FILES.md` — this manifest
-- `.env.example` — env template (the actual `.env` is gitignored)
-- `.gitignore` — ignore patterns
-- `requirements.txt` — Python deps
-- `config.py` — paper-mode flag, capital, compounding risk caps (8% per-trade / 16% daily / 20% weekly), sector enables, helper fns `per_trade_cap_usd`/`daily_loss_cap_usd`/`weekly_loss_cap_usd`
-- `main.py` — APScheduler-driven main loop (paper-only; live cutover is separate). Writes `state/last_scan.json` after each pass for dashboard live-scan tile
-- `cli.py` — health / init-db / pull-historical / status
+This directory is now a **shared Kalshi infrastructure library**, not a bot. See `CLAUDE.md` for what each module does and how to wire a new bot.
+
+## Top-level
+
+- `CLAUDE.md` — project brain (this library, not the dead OmniAlpha bot)
+- `ACTIVE_FILES.md` — this file
+- `config.py` — paper-mode flag, capital, risk caps, sector enables, Kalshi base URL
+- `cli.py` — operational CLI (`health`, `init-db`, `pull-historical`, `status`)
+- `requirements.txt` — pinned deps
+- `.env.example` — env template (no secrets)
+- `.gitignore` — local ignores (state/, logs/)
 
 ## `bots/`
+
 - `__init__.py`
-- `kalshi_public.py` — unauthenticated `/historical/*` + `/markets/{ticker}` puller (no API key needed)
-- `kalshi_client.py` — RSA-PSS authenticated REST client (live only; not yet active)
-- `order_placer.py` — paper-order writer; HARD LOCK via `assert_paper_mode()` at top of `place()` (live cutover requires deleting that line in a separate diff)
-- `live_scanner.py` — live universe scanner — pulls Kalshi public markets, hands snapshots to strategies, places orders. Invalidates ctx_cache after each placement so concentration gate doesn't go stale intra-pass
-- `trade_monitor.py` — settles open paper trades + writes pnl_snapshots. Falls back to live `/markets/{ticker}` when local DB row is stale. Computes Kalshi-correct entry fee on win + loss
-- `telegram_alerts.py` — Jarvis-bot send-only with [OmniAlpha] prefix. Plain-English entry/exit/daily-summary/halt/startup messages with strike + close time, narrative EOD digest with per-strategy breakdown + open positions. Anti-spam: `notify_error` throttled 30 min per (where, exc-type, msg); `notify_startup` rate-limited to 1/hr via sidecar file
-- `strategy_labels.py` — codename → plain-English lookup (`crypto_btc15m_midband` → "BTC 15-minute middle-band") used by every Telegram-bound message in the bot. Single source of truth — new strategies must add an entry here
-- `risk_engine.py` — 7-gate pre-trade filter: paper-mode, per-trade $ cap, liquidity, concentration (max parallel), **same-series-same-side bucket** (blocks stacking neighboring strikes of the same series + side — added 2026-05-05 after BTCD T80999+T80899 stacked into one $48 correlated NO position and lost $49), drawdown/loss caps, cross-bot halt. All caps are % of LIVE capital so they compound
+- `kalshi_client.py` — signed REST + WebSocket client (the hard one)
+- `kalshi_public.py` — unauthenticated `/historical/*` puller
+- `live_scanner.py` — universe scan loop, strategy-agnostic
+- `order_placer.py` — paper/live order placement, paper-mode hard stop
+- `risk_engine.py` — 5-gate pre-trade check (Kelly + caps + bucket)
+- `trade_monitor.py` — fill + settlement reconciliation
+- `strategy_grader.py` — CLV/WR-based auto-pause
+- `strategy_labels.py` — plain-English label map for Telegram (empty after OmniAlpha delete; add per new bot)
+- `telegram_alerts.py` — `[<BotName>]`-prefixed dispatcher
 
 ## `data_layer/`
+
 - `__init__.py`
-- `database.py` — SQLite schema (markets, trades, signals, decisions, llm_calls, pnl_snapshots, sector_state). WAL mode; readonly conn now has `busy_timeout=2000` to survive checkpoints
-- `historical_pull.py` — bulk-pull settled markets via public endpoints
+- `database.py` — SQLite schema + `init_db()`
+- `historical_pull.py` — bulk-pull settled markets into local DB
 
 ## `strategies/`
+
 - `__init__.py`
-- `base.py` — Strategy ABC + MarketSnapshot + StrategyContext + EntryDecision/ExitDecision
-- `crypto_midband.py` — parameterized strategy class (default Kelly 0.08); 3 instances registered in main.py for KXBTC15M / KXETH15M / KXBTCD
+- `base.py` — `Strategy` ABC + `MarketSnapshot`/`StrategyContext`/`EntryDecision`/`ExitDecision` dataclasses
 
-## `backtest/`
+## `tests/`
+
 - `__init__.py`
-- `runner.py` — replays settled markets through a strategy, applies risk engine, returns BacktestResult
-- `calibration.py` — Brier score + log loss + calibration curve from settled markets
+- `test_kalshi_public.py` — historical puller, network mocked
+- `test_live_scanner.py` — snapshot conversion + scan-and-trade (uses `StubBuyNoStrategy` fixture)
+- `test_order_placer.py` — paper/live invariants
+- `test_rate_limit_cooldown.py` — per-series 429 cooldown
+- `test_risk_engine.py` — every gate, contract clamping, bucket
 
-## `dashboard/` (React + Flask, port 8503)
-- `feeds.py` — external HTTP fetchers (CoinGecko prices/history, Kalshi public tape/events/volume, RSS news). Used by backend
-- `backend/serve.py` — Flask server, endpoints:
-  - `/api/health`, `/api/summary`, `/api/positions`, `/api/equity`, `/api/strategies`, `/api/scan`, `/api/activity`
-  - serves the SPA from `static/`
-- `backend/static/` — Vite build output (gitignored, regenerated by `npm run build` in frontend/)
-- `frontend/` — React + Tailwind + Recharts source
-  - `package.json`, `package-lock.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html`
-  - `src/main.jsx`, `src/App.jsx`, `src/index.css`
-  - `src/components/Header.jsx`, `HeroTiles.jsx`, `OpenPositions.jsx`, `ActivityRail.jsx`, `EquityChart.jsx`, `LiveChart.jsx`, `StrategyCards.jsx`, `LiveScan.jsx`
+## Runtime (gitignored, NOT committed)
 
-## `tests/` (51 tests passing)
-- `__init__.py`
-- `test_kalshi_public.py` — 6 tests (sector classification, market row mapping, pagination)
-- `test_calibration.py` — 7 tests (Brier, log loss, bin computation)
-- `test_strategy_midband.py` — 13 tests (band classification, gates, Kelly scaling, dropped-bands, entry-window)
-- `test_risk_engine.py` — 17 tests (every gate, contract clamping, cross-bot state, compounding caps, same-series-same-side bucket: block + opposite-side allow + different-window allow + backwards-compat without strategy_name + backtest skip)
-- `test_order_placer.py` — 4 tests (paper writes correctly, live refused without explicit flag)
-- `test_live_scanner.py` — 9 tests (snapshot conversion, scan-and-trade, already-taken, HTTP failure)
-- `test_end_to_end.py` — 1 test, full lifecycle (strategy → risk → place → settle → P&L)
-- `test_strategy_labels.py` — regression guard: every Telegram-bound message must use plain-English labels (no `crypto_*_midband` codenames in user text)
+- `state/` — per-bot SQLite DB + PID + throttle files
+- `logs/` — per-bot logs
+- `__pycache__/` — bytecode
 
-## `state/` (gitignored)
-- `omnialpha.db` — SQLite store
-- `omnialpha.db-wal`, `omnialpha.db-shm` — WAL artifacts
-- `last_scan.json` — most recent scan-pass summary (consumed by `/api/scan`)
-- `.telegram_startup_throttle` — sidecar timestamp to rate-limit startup pings across restarts
-
-## `logs/` (gitignored)
-- `omnialpha.log` — main process log
-- `stdout.log` — VBS-redirected stdout
-- `git_pull.log` — pre-launch git pull output
-
-## Reference (lives in `C:\ZachAI\reference\`, NOT here)
-- `ryanfrigo-kalshi-bot/` — toolkit pattern source
-- `joseph-pm-calibration/` — calibration pipeline source
-- `roman-kalshi-btc/` — KXBTC15M puller source
-
-## Auto-start
-- `C:\ZachAI\scripts\OmniAlpha.vbs` — git-pull + launch main.py (NOT yet auto-registered in Windows Startup; manual launch only until live cutover)
+When a new bot adds `strategies/<bot>.py` and `main_<bot>.py`, list them here in the same commit.

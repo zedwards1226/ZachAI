@@ -1,7 +1,12 @@
-"""OmniAlpha config — paper mode flag, capital, risk caps, sector enables.
+"""Kalshi shared-library config — paper mode flag, capital, risk caps, sector enables.
 
 Single source of truth for runtime knobs. Read from .env where appropriate;
 fall back to defaults that match the master CLAUDE.md hard caps.
+
+This module was OmniAlpha's config until 2026-05-27. The crypto bot was
+deleted but the risk-cap math, paper-mode guard, Kalshi endpoint, Telegram
+glue, and capital helpers are reused by whichever Kalshi bot lives in
+omnialpha/strategies/ next.
 """
 from __future__ import annotations
 
@@ -14,9 +19,9 @@ BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 # ─── Paper-mode hard stop ─────────────────────────────────────────────
-# OmniAlpha refuses live orders unless PAPER_MODE is exactly "true".
-# Setting to anything else (false, off, 0, "") is one of Zach's 3 hard stops
-# and requires explicit approval per master CLAUDE.md.
+# Bot refuses live orders unless PAPER_MODE is exactly "true". Setting to
+# anything else (false, off, 0, "") is one of Zach's 3 hard stops and
+# requires explicit approval per master CLAUDE.md.
 PAPER_MODE: bool = os.getenv("PAPER_MODE", "true").strip().lower() == "true"
 
 # ─── Kalshi credentials ───────────────────────────────────────────────
@@ -71,13 +76,12 @@ def weekly_loss_cap_usd(capital_usd: float) -> float:
 # Opt-in. Add a sector here only when its strategy module exists AND has
 # been paper-validated.
 #
-# crypto: backtest 89.4% WR, +20.5% return on $100 over 7 days,
-#         $3.43 max DD, Sharpe 0.424, PF 2.91 (verified 2026-05-02 with
-#         tightened bands + 3-min entry window). Live Kelly bumped to
-#         0.08 on 2026-05-03 once 90.9% live WR confirmed the edge held.
+# Crypto was removed 2026-05-27 after OmniAlpha's mid-band strategy lost
+# -$230 across 247 paper trades (per master CLAUDE.md postmortem). Don't
+# re-enable without addressing the structural fee/calibration issues.
 #
-# Future values: "sports" (KXNBA*, KXMLB*, KXNHL*), "politics", "economics".
-ENABLED_SECTORS: list[str] = ["crypto"]
+# Values: "sports", "entertainment", "world", "politics", "economics".
+ENABLED_SECTORS: list[str] = []
 
 # ─── Kalshi API endpoints ─────────────────────────────────────────────
 # /historical/* are PUBLIC and unauthenticated.
@@ -85,18 +89,20 @@ ENABLED_SECTORS: list[str] = ["crypto"]
 KALSHI_API_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 
 # ─── Paths ────────────────────────────────────────────────────────────
-DB_PATH = BASE_DIR / "state" / "omnialpha.db"
+# DB_PATH gets overridden by the bot that imports this module (each bot
+# has its own SQLite file under state/). Default points to a generic name
+# so a fresh import doesn't collide with the legacy omnialpha.db.
+DB_PATH = BASE_DIR / "state" / "kalshi.db"
 LOG_DIR = BASE_DIR / "logs"
-BACKTEST_DATA_DIR = BASE_DIR / "data" / "raw"
 
 # ─── Cross-bot risk coupling ──────────────────────────────────────────
-# Read by all bots before sizing. Daily aggregate loss across WA + ORB +
-# OmniAlpha gates new entries when the account-wide cap is breached.
+# Read by all bots before sizing. Daily aggregate loss across all Kalshi
+# bots gates new entries when the account-wide cap is breached.
 SHARED_RISK_STATE = Path("C:/ZachAI/data/risk_state.json")
 
 # ─── Capital allocation ───────────────────────────────────────────────
-# OmniAlpha starts with a small dedicated bankroll. Separate from WA's
-# $295 capital. Tune as paper-mode results justify.
+# Each bot starts with a small dedicated bankroll. Separate from WA's
+# capital. Tune per-bot as paper-mode results justify.
 STARTING_CAPITAL_USD: float = float(os.getenv("STARTING_CAPITAL_USD", "100"))
 
 
@@ -110,7 +116,7 @@ def assert_paper_mode() -> None:
     that could hit the live order endpoint."""
     if not PAPER_MODE:
         raise RuntimeError(
-            "PAPER_MODE is not enabled. OmniAlpha refuses to place live "
+            "PAPER_MODE is not enabled. The bot refuses to place live "
             "orders without explicit approval. Set PAPER_MODE=true in "
             "omnialpha/.env to proceed in paper mode."
         )

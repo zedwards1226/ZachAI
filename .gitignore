@@ -30,14 +30,14 @@ trading/weather_alpha.db
 trading/journal.db
 trading/state/
 companies/tradingagents/db/*.db
-# Omnialpha runtime state — DB, PID, throttle files. Tuner artifacts
-# (strategy_bands.json, band_history.jsonl) ARE committed.
-omnialpha/state/omnialpha.db
-omnialpha/state/omnialpha.db-shm
-omnialpha/state/omnialpha.db-wal
-omnialpha/state/omnialpha.pid
-omnialpha/state/last_scan.json
-omnialpha/state/.telegram_startup_throttle
+# Kalshi shared-lib runtime state (omnialpha/ became a shared library
+# 2026-05-27; per-bot DB, PID, throttle files live here)
+omnialpha/state/
+omnialpha/logs/
+
+# SQLite WAL/SHM (any DB, any project)
+*.db-shm
+*.db-wal
 
 # Reference repos (cloned for study, not part of project)
 reference/

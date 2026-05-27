@@ -1,9 +1,7 @@
 """ORB dashboard backend.
 
-Read-only Flask API + serves the React build from ./static/. Mirrors the
-OmniAlpha dashboard architecture (omnialpha/dashboard/backend/serve.py)
-but adapted for ORB's schema (trades, signal_history, agent_journal,
-arm_status.json, active_orders.json).
+Read-only Flask API + serves the React build from ./static/. Schema:
+trades, signal_history, agent_journal, arm_status.json, active_orders.json.
 
 API:
   GET /api/health     — healthcheck

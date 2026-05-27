@@ -134,7 +134,7 @@ Each project owns a nested `CLAUDE.md` with its operational details. Claude Code
 
 - **`trading\`** — ORB NQ/MNQ futures system (live, paper mode); dashboard at http://localhost:8502 → see `trading/CLAUDE.md`
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
-- **`omnialpha\`** — Multi-sector 24/7 Kalshi bot (paper mode). **TRULY DISABLED 2026-05-26 05:50 CDT.** Originally turned off 2026-05-21, but a cmd.exe wrapper relaunched `python main.py` 19 min later and ran undetected for 5 days placing 78 paper trades for −$98 in that window (all-time paper PnL: −$230 across 247 trades). Loss postmortem: NO side 82.7% WR near-breakeven (avg entry 77.5¢); YES side 68.5% WR structural loser (avg entry 75.4¢ with ~76% breakeven required). Edge model overconfident — claimed 20%+ edges only hit 63% WR. KXBTCD biggest loser (−$108); only KXETHD profitable (+$16). All processes killed (PIDs 28624 cmd parent / 11604 main.py / 12732 dashboard). No scheduled task, startup entry, registry Run key, or VBS references it. Code retained in `omnialpha\`. Do NOT auto-start. Sister to WeatherAlpha but completely independent — separate process, DB, capital. NEVER touch `kalshi\` for OmniAlpha work. → see `omnialpha/CLAUDE.md`
+- **`omnialpha\`** — **Kalshi shared infrastructure library** (no longer a bot). The OmniAlpha crypto mid-band strategy was surgically deleted 2026-05-27 after losing −$230 across 247 paper trades. Loss postmortem retained for reference: NO side 82.7% WR near-breakeven (avg entry 77.5¢); YES side 68.5% WR structural loser (avg entry 75.4¢ with ~76% breakeven required); edge model overconfident — claimed 20%+ edges only hit 63% WR. KXBTCD biggest loser (−$108); only KXETHD profitable (+$16). What survives is reusable Kalshi infra (signed REST/WS client, public-data puller, scanner, risk engine, order placer, trade monitor, alerts, DB schema, Strategy ABC, CLI). Any new Kalshi bot lives at `omnialpha/strategies/<name>.py` + `omnialpha/main_<name>.py` importing the shared modules. Do NOT re-enable crypto trading without explicit approval. NEVER touch `kalshi\` for new-bot work. → see `omnialpha/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
 - **`companies\tradingagents\`** — FastAPI multi-agent gate (building, paper, not auto-started) → see `companies/tradingagents/CLAUDE.md`
 - **`companies\zacks-work-drawings\`** — Flutter Android app: Google Drive PDF viewer for machine wiring diagrams (built) → see `companies/zacks-work-drawings/CLAUDE.md`
@@ -159,7 +159,7 @@ C:\ZachAI\
 ├── RULES.md / README.md / backup.bat
 ├── trading\ (ORB — has its own CLAUDE.md)
 ├── kalshi\ (WeatherAlpha — has its own CLAUDE.md)
-├── omnialpha\ (multi-sector 24/7 Kalshi — has its own CLAUDE.md)
+├── omnialpha\ (Kalshi shared infrastructure library — no bot, has its own CLAUDE.md)
 ├── telegram-bridge\ (Jarvis bot — has its own CLAUDE.md)
 ├── companies\ (each project has its own CLAUDE.md)
 ├── sandbox\ (experiments workspace — strict isolation, no auto-start)
