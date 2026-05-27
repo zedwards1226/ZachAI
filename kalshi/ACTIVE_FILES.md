@@ -16,6 +16,7 @@ Any file under `C:\ZachAI\kalshi\` that is NOT in this list should be deleted.
 - `bots/calibration.py` — per-(city,side) Bayesian shrinkage from resolved-trade WR
 - `bots/learning_agent.py` — nightly Brier-driven MIN_EDGE adapter + per-city pause
 - `bots/check.py` — ops/smoke-test helper (last-20-trades CLI dump)
+- `bots/fees.py` — Kalshi fee schedule + breakeven probability calc
 - `bots/config.py` — constants, MAX_BET, MIN_EDGE, BLOCK_STRIKE_TYPES, CITIES, TIMEZONE
 
 ## Tests
@@ -37,5 +38,7 @@ Any file under `C:\ZachAI\kalshi\` that is NOT in this list should be deleted.
 - `keys/` — Kalshi RSA private keys
 - `.env` — KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH, TELEGRAM_*, INTERNAL_API_SECRET
 - `bots/weatheralpha.db` — SQLite trade log + signals + agent state
+- `bots/weatheralpha.db.bak*` — manual backups (gitignored via `*.bak`)
 - `bots/monitor.log`, `bots/weatheralpha.log` — runtime logs
-- Tunnel handled by `scripts/WeatherAlpha_Tunnel.vbs` → localhost.run
+- `logs/watchdog.log` — watchdog cycle log
+- Tunnel: cloudflared launched manually (no auto-start VBS exists yet — see audit notes in CLAUDE.md)
