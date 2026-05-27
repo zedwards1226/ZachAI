@@ -20,6 +20,7 @@ venv/
 
 # Logs
 *.log
+*.log.[0-9]*
 logs/
 
 # Bot state
@@ -53,6 +54,7 @@ kalshi/keys/
 *_backup.*
 *_copy.*
 *.bak
+*.bak-*
 *.tmp
 *.pine
 
@@ -62,6 +64,10 @@ cloudflared.exe
 
 # Claude worktrees
 .claude/worktrees/
+
+# Personal / non-project artifacts
+career/
+tradingjournal.db
 
 # External repos (have their own .git — manage separately)
 tradingview-mcp/
