@@ -108,7 +108,11 @@ CALIBRATED_BUCKETS: tuple[tuple[int, int, float], ...] = (
 MIN_VOLUME_FP: float = 1000.0          # liquidity gate
 MIN_SECONDS_TO_CLOSE: int = 1800       # 30 min — maker fill takes time
 MAX_SECONDS_TO_CLOSE: int = 14400      # 4 hr — game already in convergence
-DEFAULT_KELLY_FRACTION: float = 0.05
+# Kelly fraction bumped 0.05 → 0.10 on 2026-05-28 (Zach: trades were only
+# making cents). 2× bigger stakes → 2× bigger wins AND losses. Still clamped
+# by the risk-engine per-trade $ cap ($24 @ $300 capital) and the strategy
+# hard cap below. Reconsider if drawdown gets uncomfortable in paper.
+DEFAULT_KELLY_FRACTION: float = 0.10
 PER_TRADE_HARD_CAP_USD: float = 30.0
 MIN_EV_PER_DOLLAR: float = 0.01        # 1¢ EV per $1 risked AFTER fees
 
