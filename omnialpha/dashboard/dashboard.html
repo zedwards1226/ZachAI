@@ -94,7 +94,7 @@
   /* ─────────────────────── LAYOUT ─────────────────────── */
   .app {
     display: grid;
-    grid-template-rows: 76px 1fr 132px;
+    grid-template-rows: auto 1fr 132px;
     grid-template-columns: 1fr;
     min-height: 100vh;
     position: relative;
@@ -151,19 +151,47 @@
     background: var(--bg-1);
     border-bottom: 1px solid var(--border-1);
     display: grid;
-    grid-template-columns: 320px 220px 1fr 220px 220px 220px;
+    /* All cells use minmax(0, ...) so they shrink before overflowing.
+       The status row gets the most flex room; everything else has a sensible min. */
+    grid-template-columns:
+      minmax(240px, 1.4fr)   /* brand */
+      minmax(200px, 1.1fr)   /* mission time */
+      minmax(360px, 2.4fr)   /* status pills */
+      minmax(180px, 1fr)     /* next scan */
+      minmax(180px, 1fr)     /* open risk */
+      minmax(240px, 1.4fr);  /* daily PnL */
     align-items: stretch;
     position: relative;
+    min-height: 96px;
   }
   .topbar > .cell {
     border-right: 1px solid var(--border-1);
-    padding: 12px 18px;
+    padding: 14px 18px;
     display: flex; flex-direction: column;
     justify-content: center;
-    gap: 4px;
+    gap: 6px;
     min-width: 0;
+    overflow: hidden;
   }
   .topbar > .cell:last-child { border-right: none; }
+
+  /* On narrow screens, drop the secondary status pills so the row never overflows */
+  @media (max-width: 1400px) {
+    .topbar > .cell .pill.optional { display: none; }
+  }
+  @media (max-width: 1180px) {
+    .topbar {
+      grid-template-columns:
+        minmax(200px, 1.2fr)
+        minmax(180px, 1fr)
+        minmax(300px, 2fr)
+        minmax(140px, 0.9fr)
+        minmax(140px, 0.9fr)
+        minmax(200px, 1.2fr);
+    }
+    .clock { font-size: 22px; }
+    .pnl-big { font-size: 22px; }
+  }
 
   .brand {
     display: flex; align-items: center; gap: 12px;
@@ -189,29 +217,35 @@
   }
 
   .clock {
-    font-size: 26px;
+    font-size: 20px;
     font-weight: 600;
     color: var(--text-bright);
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
   }
-  .clock .plus { color: var(--cyan); margin-right: 4px; }
-  .clock .ms { color: var(--text-dim); font-size: 14px; margin-left: 6px; }
+  .clock .plus { color: var(--cyan); margin-right: 2px; font-size: 16px; }
+  .clock .ms { display: none; }  /* removed for space; full second precision is plenty */
 
   .status-row {
-    display: flex; align-items: center; gap: 24px;
+    display: flex; align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
     height: 100%;
   }
   .pill {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 6px 10px;
     border: 1px solid var(--border-2);
-    font-size: 10px;
-    letter-spacing: 0.2em;
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--text);
     background: rgba(0,0,0,0.25);
     line-height: 1;
+    white-space: nowrap;
   }
   .pill.live {
     border-color: rgba(0, 255, 163, 0.5);
@@ -276,31 +310,33 @@
   }
 
   .pnl-cell {
-    display: grid;
-    grid-template-rows: auto auto;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     gap: 4px;
   }
   .pnl-big {
-    font-size: 26px;
+    font-size: 22px;
     color: var(--mint);
     font-weight: 700;
     letter-spacing: 0.04em;
     font-variant-numeric: tabular-nums;
-    display: flex; align-items: baseline; gap: 8px;
+    display: flex; align-items: baseline; gap: 6px;
+    line-height: 1.05;
   }
   .pnl-big .arrow {
-    font-size: 14px;
+    font-size: 12px;
     color: var(--mint);
   }
   .pnl-big.neg { color: var(--red); }
   .pnl-big.neg .arrow { color: var(--red); }
   .pnl-sub {
-    font-size: 10px;
-    letter-spacing: 0.16em;
+    font-size: 9.5px;
+    letter-spacing: 0.10em;
     color: var(--text-dim);
     text-transform: uppercase;
-    display: flex; gap: 14px;
+    display: flex; flex-wrap: wrap; gap: 4px 10px;
+    line-height: 1.4;
   }
   .pnl-sub .sep { color: var(--border-2); }
   .pnl-sub b { color: var(--text-mid); font-weight: 500; }
@@ -363,11 +399,14 @@
   }
   .donut .center {
     position: absolute; inset: 0;
-    display: grid; place-items: center;
-    font-size: 8px;
-    letter-spacing: 0.18em;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 7.5px;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--text-dim);
+    line-height: 1.1;
+    text-align: center;
   }
 
   .feed-wrap {
@@ -397,8 +436,8 @@
 
   .row {
     display: grid;
-    grid-template-columns: 80px 76px 1fr 280px;
-    gap: 16px;
+    grid-template-columns: 64px 72px minmax(0, 1.5fr) minmax(0, 1fr);
+    gap: 12px;
     padding: 8px 20px;
     border-bottom: 1px dashed rgba(30,46,64,0.4);
     align-items: center;
@@ -487,11 +526,13 @@
   }
 
   .panel-head {
-    display: grid; grid-template-columns: 1fr auto;
+    display: flex;
+    justify-content: space-between;
     align-items: center;
     padding: 14px 20px;
     border-bottom: 1px solid var(--border-1);
     gap: 12px;
+    overflow: hidden;
   }
   .panel-head h2 {
     font-size: 11px;
@@ -499,12 +540,21 @@
     text-transform: uppercase;
     color: var(--text-bright);
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   .panel-head .meta {
-    font-size: 10px;
+    font-size: 9.5px;
     color: var(--text-dim);
-    letter-spacing: 0.18em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+    min-width: 0;
   }
 
   .think-body {
@@ -839,8 +889,8 @@
       <div class="status-row">
         <span class="pill live"><span class="dot"></span>Paper Mode</span>
         <span class="pill live"><span class="dot"></span>Kalshi API</span>
-        <span class="pill"><span class="dot" style="background:var(--cyan);color:var(--cyan)"></span>Watchdog</span>
-        <span class="pill warn"><span class="dot"></span>Rate Budget 73%</span>
+        <span class="pill optional"><span class="dot" style="background:var(--cyan);color:var(--cyan)"></span>Watchdog</span>
+        <span class="pill warn optional"><span class="dot"></span>Rate Budget 73%</span>
       </div>
     </div>
 
@@ -1114,7 +1164,7 @@
       <section class="thinking">
         <header class="panel-head">
           <h2>Decision Telemetry</h2>
-          <span class="meta">latched · 14:23:41 UTC · uplink stable</span>
+          <span class="meta" data-bind="thinking-meta">awaiting first signal</span>
         </header>
 
         <div class="think-body">
@@ -1169,7 +1219,7 @@
         <div class="pos-block">
           <header class="panel-head">
             <h2>Open Positions</h2>
-            <span class="meta">5 active · MTM live</span>
+            <span class="meta" data-bind="open-meta">— open</span>
           </header>
           <table class="posit">
             <thead>
@@ -1236,7 +1286,7 @@
         <div class="pos-block">
           <header class="panel-head">
             <h2>Recent Settlements</h2>
-            <span class="meta">last 5 closed · realized</span>
+            <span class="meta" data-bind="settled-meta">— closed</span>
           </header>
           <table class="posit">
             <thead>
@@ -1517,6 +1567,8 @@
       const sinceMs = Date.now() - new Date(h.last_scan_ts).getTime();
       nextScanIn = Math.max(0, 60 - Math.floor(sinceMs / 1000));
       lastScanIso = h.last_scan_ts;
+    } else {
+      nextScanIn = null;  // no scans yet — display em-dash
     }
     updateCountdown();
 
@@ -1556,19 +1608,27 @@
   }
 
   function updateCountdown() {
-    nextScanIn = Math.max(0, nextScanIn - 1);
     const cells = document.querySelectorAll(".topbar > .cell");
     const cdCell = cells[3];
     if (!cdCell) return;
     const stat = cdCell.querySelector(".stat");
-    if (stat) stat.textContent = `00:${pad(nextScanIn, 2)}s`;
     const ring = cdCell.querySelector(".countdown .ring-fg");
+    const ringBg = cdCell.querySelector(".countdown .ring-bg");
+    const val = cdCell.querySelector(".countdown .val");
+
+    if (nextScanIn == null) {
+      if (stat) stat.textContent = "—";
+      if (ring) ring.setAttribute("stroke-dashoffset", "150.7");
+      if (val) val.textContent = "—";
+      return;
+    }
+    nextScanIn = Math.max(0, nextScanIn - 1);
+    if (stat) stat.textContent = `00:${pad(nextScanIn, 2)}s`;
     if (ring) {
       // dasharray 150.7 ≈ 2πr where r=24. offset 0 = full, 150.7 = empty
       const frac = nextScanIn / 60;
       ring.setAttribute("stroke-dashoffset", String(150.7 * (1 - frac)));
     }
-    const val = cdCell.querySelector(".countdown .val");
     if (val) val.textContent = nextScanIn;
   }
   setInterval(updateCountdown, 1000);
@@ -1651,6 +1711,11 @@
       if (mathTable) mathTable.innerHTML =
         '<span class="k" style="grid-column:1/3;color:var(--text-dim);text-align:center;padding:20px 0;">no data yet</span>';
       if (verdict) verdict.textContent = "STANDBY";
+      const meta = document.querySelector('[data-bind="thinking-meta"]');
+      if (meta) meta.textContent = "awaiting first signal";
+      // Reset bucket label
+      const mh = document.querySelector(".think-math-head .lbl:last-child");
+      if (mh) mh.textContent = "bucket —";
       return;
     }
 
@@ -1703,6 +1768,10 @@
     if (verdict) {
       verdict.textContent = `ENGAGE — ${(t.side || "no").toUpperCase()} @ ${noPx}¢ × ${t.contracts ?? 0}`;
     }
+
+    // Update panel-head meta — "latched · HH:MM:SS UTC"
+    const meta = document.querySelector('[data-bind="thinking-meta"]');
+    if (meta) meta.textContent = `latched · ${tsShort(t.timestamp)} UTC`;
   }
 
   // ───────────────────────────────────────────────────────────────────
@@ -1718,6 +1787,12 @@
   async function pollPositions() {
     const p = await jget("/api/positions");
     if (!p) return;
+
+    // Update meta counts
+    const openMeta = document.querySelector('[data-bind="open-meta"]');
+    if (openMeta) openMeta.textContent = `${(p.open || []).length} open · MTM`;
+    const settledMeta = document.querySelector('[data-bind="settled-meta"]');
+    if (settledMeta) settledMeta.textContent = `last ${(p.settled || []).length} · realized`;
 
     // OPEN positions
     const openTable = document.querySelectorAll("table.posit")[0];

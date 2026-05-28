@@ -78,3 +78,7 @@ telegram-bridge/uploads/
 # ORB dashboard build artifacts
 trading/dashboard/frontend/node_modules/
 trading/dashboard/backend/static/
+
+# Playwright debug artifacts
+.playwright-mcp/
+dash_*.png

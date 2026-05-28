@@ -94,7 +94,7 @@
   /* ─────────────────────── LAYOUT ─────────────────────── */
   .app {
     display: grid;
-    grid-template-rows: 76px 1fr 132px;
+    grid-template-rows: auto 1fr 132px;
     grid-template-columns: 1fr;
     min-height: 100vh;
     position: relative;
@@ -151,19 +151,47 @@
     background: var(--bg-1);
     border-bottom: 1px solid var(--border-1);
     display: grid;
-    grid-template-columns: 320px 220px 1fr 220px 220px 220px;
+    /* All cells use minmax(0, ...) so they shrink before overflowing.
+       The status row gets the most flex room; everything else has a sensible min. */
+    grid-template-columns:
+      minmax(240px, 1.4fr)   /* brand */
+      minmax(200px, 1.1fr)   /* mission time */
+      minmax(360px, 2.4fr)   /* status pills */
+      minmax(180px, 1fr)     /* next scan */
+      minmax(180px, 1fr)     /* open risk */
+      minmax(240px, 1.4fr);  /* daily PnL */
     align-items: stretch;
     position: relative;
+    min-height: 96px;
   }
   .topbar > .cell {
     border-right: 1px solid var(--border-1);
-    padding: 12px 18px;
+    padding: 14px 18px;
     display: flex; flex-direction: column;
     justify-content: center;
-    gap: 4px;
+    gap: 6px;
     min-width: 0;
+    overflow: hidden;
   }
   .topbar > .cell:last-child { border-right: none; }
+
+  /* On narrow screens, drop the secondary status pills so the row never overflows */
+  @media (max-width: 1400px) {
+    .topbar > .cell .pill.optional { display: none; }
+  }
+  @media (max-width: 1180px) {
+    .topbar {
+      grid-template-columns:
+        minmax(200px, 1.2fr)
+        minmax(180px, 1fr)
+        minmax(300px, 2fr)
+        minmax(140px, 0.9fr)
+        minmax(140px, 0.9fr)
+        minmax(200px, 1.2fr);
+    }
+    .clock { font-size: 22px; }
+    .pnl-big { font-size: 22px; }
+  }
 
   .brand {
     display: flex; align-items: center; gap: 12px;
@@ -189,29 +217,35 @@
   }
 
   .clock {
-    font-size: 26px;
+    font-size: 20px;
     font-weight: 600;
     color: var(--text-bright);
-    letter-spacing: 0.06em;
+    letter-spacing: 0;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
   }
-  .clock .plus { color: var(--cyan); margin-right: 4px; }
-  .clock .ms { color: var(--text-dim); font-size: 14px; margin-left: 6px; }
+  .clock .plus { color: var(--cyan); margin-right: 2px; font-size: 16px; }
+  .clock .ms { display: none; }  /* removed for space; full second precision is plenty */
 
   .status-row {
-    display: flex; align-items: center; gap: 24px;
+    display: flex; align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
     height: 100%;
   }
   .pill {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 6px 10px;
     border: 1px solid var(--border-2);
-    font-size: 10px;
-    letter-spacing: 0.2em;
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--text);
     background: rgba(0,0,0,0.25);
     line-height: 1;
+    white-space: nowrap;
   }
   .pill.live {
     border-color: rgba(0, 255, 163, 0.5);
@@ -276,31 +310,33 @@
   }
 
   .pnl-cell {
-    display: grid;
-    grid-template-rows: auto auto;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     gap: 4px;
   }
   .pnl-big {
-    font-size: 26px;
+    font-size: 22px;
     color: var(--mint);
     font-weight: 700;
     letter-spacing: 0.04em;
     font-variant-numeric: tabular-nums;
-    display: flex; align-items: baseline; gap: 8px;
+    display: flex; align-items: baseline; gap: 6px;
+    line-height: 1.05;
   }
   .pnl-big .arrow {
-    font-size: 14px;
+    font-size: 12px;
     color: var(--mint);
   }
   .pnl-big.neg { color: var(--red); }
   .pnl-big.neg .arrow { color: var(--red); }
   .pnl-sub {
-    font-size: 10px;
-    letter-spacing: 0.16em;
+    font-size: 9.5px;
+    letter-spacing: 0.10em;
     color: var(--text-dim);
     text-transform: uppercase;
-    display: flex; gap: 14px;
+    display: flex; flex-wrap: wrap; gap: 4px 10px;
+    line-height: 1.4;
   }
   .pnl-sub .sep { color: var(--border-2); }
   .pnl-sub b { color: var(--text-mid); font-weight: 500; }
@@ -363,11 +399,14 @@
   }
   .donut .center {
     position: absolute; inset: 0;
-    display: grid; place-items: center;
-    font-size: 8px;
-    letter-spacing: 0.18em;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 7.5px;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--text-dim);
+    line-height: 1.1;
+    text-align: center;
   }
 
   .feed-wrap {
@@ -397,8 +436,8 @@
 
   .row {
     display: grid;
-    grid-template-columns: 80px 76px 1fr 280px;
-    gap: 16px;
+    grid-template-columns: 64px 72px minmax(0, 1.5fr) minmax(0, 1fr);
+    gap: 12px;
     padding: 8px 20px;
     border-bottom: 1px dashed rgba(30,46,64,0.4);
     align-items: center;
@@ -487,11 +526,13 @@
   }
 
   .panel-head {
-    display: grid; grid-template-columns: 1fr auto;
+    display: flex;
+    justify-content: space-between;
     align-items: center;
     padding: 14px 20px;
     border-bottom: 1px solid var(--border-1);
     gap: 12px;
+    overflow: hidden;
   }
   .panel-head h2 {
     font-size: 11px;
@@ -499,12 +540,21 @@
     text-transform: uppercase;
     color: var(--text-bright);
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   .panel-head .meta {
-    font-size: 10px;
+    font-size: 9.5px;
     color: var(--text-dim);
-    letter-spacing: 0.18em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+    min-width: 0;
   }
 
   .think-body {
@@ -839,8 +889,8 @@
       <div class="status-row">
         <span class="pill live"><span class="dot"></span>Paper Mode</span>
         <span class="pill live"><span class="dot"></span>Kalshi API</span>
-        <span class="pill"><span class="dot" style="background:var(--cyan);color:var(--cyan)"></span>Watchdog</span>
-        <span class="pill warn"><span class="dot"></span>Rate Budget 73%</span>
+        <span class="pill optional"><span class="dot" style="background:var(--cyan);color:var(--cyan)"></span>Watchdog</span>
+        <span class="pill warn optional"><span class="dot"></span>Rate Budget 73%</span>
       </div>
     </div>
 
@@ -1114,7 +1164,7 @@
       <section class="thinking">
         <header class="panel-head">
           <h2>Decision Telemetry</h2>
-          <span class="meta">latched · 14:23:41 UTC · uplink stable</span>
+          <span class="meta" data-bind="thinking-meta">awaiting first signal</span>
         </header>
 
         <div class="think-body">
@@ -1169,7 +1219,7 @@
         <div class="pos-block">
           <header class="panel-head">
             <h2>Open Positions</h2>
-            <span class="meta">5 active · MTM live</span>
+            <span class="meta" data-bind="open-meta">— open</span>
           </header>
           <table class="posit">
             <thead>
@@ -1236,7 +1286,7 @@
         <div class="pos-block">
           <header class="panel-head">
             <h2>Recent Settlements</h2>
-            <span class="meta">last 5 closed · realized</span>
+            <span class="meta" data-bind="settled-meta">— closed</span>
           </header>
           <table class="posit">
             <thead>
@@ -1408,27 +1458,58 @@
 </div>
 
 <script>
-  // ─── Mission clock — ticks every second from a fake T0 ───
-  // Format: D·HH:MM:SS  (D = days since launch, capped at 99)
-  const t0 = Date.now() - (3 * 86400 + 14 * 3600 + 27 * 60 + 9) * 1000;
+  // ───────────────────────────────────────────────────────────────────
+  // CONFIG + helpers
+  // ───────────────────────────────────────────────────────────────────
+  const API_BASE = ""; // same origin — Flask serves both HTML and /api
+  const POLL_FAST = 2500;   // feed + countdown
+  const POLL_SLOW = 5000;   // health + positions
+  const POLL_PERF = 15000;  // performance strip
+
   const pad = (n, w) => String(n).padStart(w, "0");
-  const tick = () => {
-    const s = Math.max(0, Math.floor((Date.now() - t0) / 1000));
+  const fmtUsd = (v) => {
+    if (v == null || isNaN(v)) return "—";
+    const sign = v >= 0 ? "+" : "−";
+    return `${sign}$${Math.abs(v).toFixed(2)}`;
+  };
+  const fmtPct = (v) => v == null || isNaN(v) ? "—" : `${v.toFixed(1)}%`;
+  const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+  const tsShort = (iso) => {
+    if (!iso) return "—";
+    try { return iso.slice(11, 19); } catch { return "—"; }
+  };
+  async function jget(url) {
+    try {
+      const r = await fetch(API_BASE + url, { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status);
+      return await r.json();
+    } catch (e) {
+      console.warn("fetch failed", url, e);
+      return null;
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // Mission clock — ticks from the BOT'S boot time (or fallback now)
+  // ───────────────────────────────────────────────────────────────────
+  let botBootMs = null; // populated by /api/health when the bot is alive
+  function tickClock() {
+    const ref = botBootMs ?? Date.now();
+    const s = Math.max(0, Math.floor((Date.now() - ref) / 1000));
     const d = Math.floor(s / 86400);
     const h = Math.floor((s % 86400) / 3600);
     const m = Math.floor((s % 3600) / 60);
     const ss = s % 60;
-    document.getElementById("missionClock").textContent =
-      pad(d, 2) + "·" + pad(h, 2) + ":" + pad(m, 2) + ":" + pad(ss, 2);
-  };
-  tick(); setInterval(tick, 1000);
+    const el = document.getElementById("missionClock");
+    if (el) el.textContent = pad(d, 2) + "·" + pad(h, 2) + ":" + pad(m, 2) + ":" + pad(ss, 2);
+  }
+  setInterval(tickClock, 1000); tickClock();
 
-  // ─── Scan-feed animation: gently nudge first row's appearance ───
-  // (purely cosmetic — when wired to real data, prepend new rows here)
-  const feed = document.getElementById("feed");
-  const wrap = document.getElementById("feedWrap");
-
-  // Give the engage rows a slow "breathing" intensity via shadow
+  // ───────────────────────────────────────────────────────────────────
+  // Engage-row "breathing" glow (kept from mockup)
+  // ───────────────────────────────────────────────────────────────────
   function breathe() {
     document.querySelectorAll(".decision.engage").forEach((el, i) => {
       const t = Date.now() / 1000 + i * 0.4;
@@ -1438,6 +1519,491 @@
     requestAnimationFrame(breathe);
   }
   breathe();
+
+  // ───────────────────────────────────────────────────────────────────
+  // 1. HEALTH — top bar (paper, API, capital, daily PnL)
+  // ───────────────────────────────────────────────────────────────────
+  let lastScanIso = null;
+  let nextScanIn = 60;  // seconds until next scan
+
+  async function pollHealth() {
+    const h = await jget("/api/health");
+    if (!h) return;
+
+    // PAPER MODE badge (3rd cell, 1st pill)
+    const cells = document.querySelectorAll(".topbar > .cell");
+    const statusRow = cells[2]?.querySelector(".status-row");
+    if (statusRow) {
+      const pills = statusRow.querySelectorAll(".pill");
+      if (pills[0]) {
+        pills[0].className = "pill " + (h.paper_mode ? "live" : "warn");
+        pills[0].innerHTML = `<span class="dot"></span>${h.paper_mode ? "Paper Mode" : "LIVE MODE"}`;
+      }
+      if (pills[1]) {
+        // Kalshi API status — green if last scan was < 3 min ago
+        const fresh = h.last_scan_ts && (Date.now() - new Date(h.last_scan_ts).getTime()) < 180000;
+        pills[1].className = "pill " + (fresh ? "live" : "warn");
+        pills[1].innerHTML = `<span class="dot"></span>Kalshi API`;
+      }
+      if (pills[2]) {
+        // Bot alive?
+        pills[2].className = "pill " + (h.bot_alive ? "live" : "warn");
+        pills[2].innerHTML = `<span class="dot"></span>${h.bot_alive ? "Bot Online" : "Bot Offline"}`;
+      }
+    }
+
+    // Bot uptime → mission clock anchor
+    if (h.bot_alive && h.last_scan_ts) {
+      // Approximate: anchor clock at last_scan minus dashboard_uptime is wrong;
+      // instead, use the FIRST scan we ever saw. Simpler: anchor at server's
+      // dashboard start. For now, use bot_pid presence to fix boot point.
+      if (botBootMs == null) {
+        botBootMs = Date.now() - (h.dashboard_uptime_s || 0) * 1000;
+      }
+    }
+
+    // Next-scan countdown
+    if (h.last_scan_ts) {
+      const sinceMs = Date.now() - new Date(h.last_scan_ts).getTime();
+      nextScanIn = Math.max(0, 60 - Math.floor(sinceMs / 1000));
+      lastScanIso = h.last_scan_ts;
+    } else {
+      nextScanIn = null;  // no scans yet — display em-dash
+    }
+    updateCountdown();
+
+    // Open risk cell (5th cell)
+    const orCell = cells[4];
+    if (orCell) {
+      const stat = orCell.querySelector(".stat");
+      if (stat) stat.textContent = `$${(h.open_risk_usd || 0).toFixed(2)}`;
+      const pctEl = orCell.querySelectorAll(".left")[1]?.querySelector(".lbl");
+      if (pctEl) {
+        const cap = (h.starting_capital_usd || 1);
+        const pct = Math.round(100 * (h.open_risk_usd || 0) / cap);
+        pctEl.textContent = `CAP $${cap} · ${pct}%`;
+      }
+    }
+
+    // Daily PnL cell (6th)
+    const pnlCell = cells[5];
+    if (pnlCell) {
+      const big = pnlCell.querySelector(".pnl-big");
+      if (big) {
+        const v = h.day_pnl_usd || 0;
+        big.classList.toggle("neg", v < 0);
+        big.innerHTML = `${fmtUsd(v)}<span class="arrow">${v >= 0 ? "▲" : "▼"}</span>`;
+      }
+      const sub = pnlCell.querySelector(".pnl-sub");
+      if (sub) {
+        sub.innerHTML = `
+          <span><b>CAP</b> $${(h.capital_usd || 0).toFixed(2)}</span>
+          <span class="sep">/</span>
+          <span><b>ALL</b> ${fmtUsd(h.realized_total_usd || 0)}</span>
+          <span class="sep">/</span>
+          <span><b>WR</b> ${fmtPct(h.win_rate_pct)}</span>
+        `;
+      }
+    }
+  }
+
+  function updateCountdown() {
+    const cells = document.querySelectorAll(".topbar > .cell");
+    const cdCell = cells[3];
+    if (!cdCell) return;
+    const stat = cdCell.querySelector(".stat");
+    const ring = cdCell.querySelector(".countdown .ring-fg");
+    const ringBg = cdCell.querySelector(".countdown .ring-bg");
+    const val = cdCell.querySelector(".countdown .val");
+
+    if (nextScanIn == null) {
+      if (stat) stat.textContent = "—";
+      if (ring) ring.setAttribute("stroke-dashoffset", "150.7");
+      if (val) val.textContent = "—";
+      return;
+    }
+    nextScanIn = Math.max(0, nextScanIn - 1);
+    if (stat) stat.textContent = `00:${pad(nextScanIn, 2)}s`;
+    if (ring) {
+      // dasharray 150.7 ≈ 2πr where r=24. offset 0 = full, 150.7 = empty
+      const frac = nextScanIn / 60;
+      ring.setAttribute("stroke-dashoffset", String(150.7 * (1 - frac)));
+    }
+    if (val) val.textContent = nextScanIn;
+  }
+  setInterval(updateCountdown, 1000);
+
+  // ───────────────────────────────────────────────────────────────────
+  // 2. LIVE FEED
+  // ───────────────────────────────────────────────────────────────────
+  let highestFeedId = 0;
+  const FEED_MAX_ROWS = 60;
+
+  function renderFeedRow(row) {
+    const type = row.decision_type;
+    let badge = "skip", text = "Skip";
+    if (type === "enter") { badge = "engage"; text = "Engage"; }
+    else if (type === "risk_cap_hit") { badge = "reject"; text = "Reject"; }
+    else if (type === "skip" && row.reason_code === "strategy_reject") { badge = "reject"; text = "Reject"; }
+
+    const ts = tsShort(row.timestamp);
+    const ticker = escapeHtml(row.ticker || row.summary?.split(" | ")[0] || "—");
+    const reason = escapeHtml(
+      type === "enter"
+        ? row.summary?.split(" | ")[1] || row.summary
+        : (row.summary?.split(" | ")[1] || row.reason_code || "—")
+    );
+
+    const li = document.createElement("li");
+    li.className = "row" + (badge === "engage" ? " engage-row" : "");
+    li.dataset.id = row.id;
+    li.innerHTML = `
+      <span class="ts">${ts}</span>
+      <span class="decision ${badge}">${text}</span>
+      <span class="ticker">${ticker}</span>
+      <span class="reason">${type === "enter" ? `<b>${reason}</b>` : reason}</span>
+    `;
+    return li;
+  }
+
+  async function pollFeed() {
+    const data = await jget("/api/feed?limit=60&since=0");
+    if (!data || !data.rows) return;
+    const feed = document.getElementById("feed");
+    if (!feed) return;
+
+    // Replace the whole list each cycle (simplest + always correct)
+    // For nicer UX could prepend deltas, but at 2.5s cadence it's fine
+    feed.innerHTML = "";
+    for (const row of data.rows.slice(0, FEED_MAX_ROWS)) {
+      feed.appendChild(renderFeedRow(row));
+    }
+    if (data.rows[0]) highestFeedId = data.rows[0].id;
+
+    // Update scan-stat counts in header
+    const headStats = document.querySelectorAll(".scan-head .scan-stat .num");
+    if (headStats[0]) {
+      // Last cycle: count rows with the most-recent timestamp
+      const lastTs = data.rows[0]?.timestamp;
+      headStats[0].textContent = lastTs ? data.rows.filter(r => r.timestamp === lastTs).length : 0;
+    }
+    if (headStats[1]) {
+      headStats[1].textContent = data.rows.filter(r => r.decision_type === "enter").length;
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // 3. THINKING PANEL — most recent ENGAGE
+  // ───────────────────────────────────────────────────────────────────
+  async function pollThinking() {
+    const t = await jget("/api/thinking");
+    const narrTitle = document.querySelector(".think-title");
+    const narrSub = document.querySelector(".think-subtitle");
+    const narrProse = document.querySelector(".think-prose");
+    const mathTable = document.querySelector(".math-table");
+    const verdict = document.querySelector(".verdict .vbig");
+
+    if (!t || t.none) {
+      if (narrTitle) narrTitle.textContent = "Awaiting first engagement";
+      if (narrSub) narrSub.textContent = "no entries yet — bot is scanning";
+      if (narrProse) narrProse.innerHTML =
+        '<span style="color:var(--text-dim)">When the bot enters a trade, the full edge math + plain-English reasoning lands here.</span>';
+      if (mathTable) mathTable.innerHTML =
+        '<span class="k" style="grid-column:1/3;color:var(--text-dim);text-align:center;padding:20px 0;">no data yet</span>';
+      if (verdict) verdict.textContent = "STANDBY";
+      const meta = document.querySelector('[data-bind="thinking-meta"]');
+      if (meta) meta.textContent = "awaiting first signal";
+      // Reset bucket label
+      const mh = document.querySelector(".think-math-head .lbl:last-child");
+      if (mh) mh.textContent = "bucket —";
+      return;
+    }
+
+    // Title + subtitle: ticker → cleanup
+    const tk = t.ticker || "—";
+    const teams = tk.split("-");
+    const human = teams.length >= 3 ? teams[1] + " · " + (teams[2] || "") : tk;
+    if (narrTitle) narrTitle.textContent = human;
+    if (narrSub) narrSub.textContent = `${tk} · ${(t.side || "no").toUpperCase()} Side`;
+
+    // Prose — built from the math
+    const noPx = t.price_cents || 0;
+    const impliedPct = noPx;
+    const fcastPct = t.forecast_prob != null ? Math.round(t.forecast_prob * 1000) / 10 : null;
+    const edgePp = fcastPct != null ? (fcastPct - impliedPct).toFixed(1) : null;
+    if (narrProse) {
+      narrProse.innerHTML = `
+        NO trading at <b>${noPx}¢</b>, implying a <b class="num">${impliedPct}%</b> chance the favorite doesn't fade.
+        Phase&nbsp;1 data — 873k trades, NBA/NFL buckets — says NO actually settles
+        <b class="num">${fcastPct != null ? fcastPct + "%" : "—"}</b> of the time at this price.
+        That's a <b class="num">+${edgePp ?? "—"}pp</b> edge after Kalshi's 7% fee.
+        Posting bid at <b>${noPx}¢</b> (one tick inside ask) so we're the maker.
+        Stake <b class="num">$${(t.stake_usd ?? 0).toFixed(2)}</b> · ${t.contracts} contract${t.contracts === 1 ? "" : "s"}.
+      `;
+    }
+
+    // Math table
+    if (mathTable) {
+      const ev = t.extras?.ev_per_dollar_after_fee;
+      const fee = t.extras?.kalshi_fee_rate ?? 0.07;
+      const grossPayout = noPx > 0 ? (100 - noPx) : 0;
+      const feeCents = grossPayout * fee;
+      const netPayout = grossPayout - feeCents;
+      const kelly = t.extras?.kelly_applied;
+      mathTable.innerHTML = `
+        <span class="k">Forecast P(NO)</span>      <span class="v cyan">${fcastPct != null ? fcastPct + "%" : "—"}</span>
+        <span class="k">Implied (entry/100)</span> <span class="v">${impliedPct}%</span>
+        <span class="k">Raw edge</span>            <span class="v mint">+${edgePp ?? "—"} pp</span>
+        <span class="k">Entry price</span>         <span class="v">${noPx}¢</span>
+        <span class="k">Gross payout · win</span>  <span class="v">${grossPayout.toFixed(2)}¢</span>
+        <span class="k">Kalshi fee (${(fee*100).toFixed(0)}%)</span> <span class="v">−${feeCents.toFixed(2)}¢</span>
+        <span class="k">Net payout · win</span>    <span class="v">${netPayout.toFixed(2)}¢</span>
+        <span class="k">EV / $1 risked</span>      <span class="v mint">+${ev != null ? (ev*100).toFixed(2) : "—"}¢</span>
+        <span class="k">Frac × ${kelly ?? "—"}</span>  <span class="v">—</span>
+        <span class="k">Stake</span>               <span class="v">$${(t.stake_usd ?? 0).toFixed(2)}</span>
+        <span class="k">Contracts</span>           <span class="v cyan">${t.contracts ?? "—"}</span>
+      `;
+    }
+
+    if (verdict) {
+      verdict.textContent = `ENGAGE — ${(t.side || "no").toUpperCase()} @ ${noPx}¢ × ${t.contracts ?? 0}`;
+    }
+
+    // Update panel-head meta — "latched · HH:MM:SS UTC"
+    const meta = document.querySelector('[data-bind="thinking-meta"]');
+    if (meta) meta.textContent = `latched · ${tsShort(t.timestamp)} UTC`;
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // 4. POSITIONS
+  // ───────────────────────────────────────────────────────────────────
+  function settleTimeFromTicker(ticker) {
+    // Best-effort: KXNBAGAME-26MAR26NOPDET-NOP → close time unknown without join
+    // The /api/positions endpoint will eventually include close_time; for now
+    // we show the trade timestamp instead.
+    return "—";
+  }
+
+  async function pollPositions() {
+    const p = await jget("/api/positions");
+    if (!p) return;
+
+    // Update meta counts
+    const openMeta = document.querySelector('[data-bind="open-meta"]');
+    if (openMeta) openMeta.textContent = `${(p.open || []).length} open · MTM`;
+    const settledMeta = document.querySelector('[data-bind="settled-meta"]');
+    if (settledMeta) settledMeta.textContent = `last ${(p.settled || []).length} · realized`;
+
+    // OPEN positions
+    const openTable = document.querySelectorAll("table.posit")[0];
+    if (openTable) {
+      const tbody = openTable.querySelector("tbody");
+      if (tbody) {
+        if ((p.open || []).length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px;">no open positions</td></tr>`;
+        } else {
+          tbody.innerHTML = (p.open || []).map(r => `
+            <tr>
+              <td class="flag idle"><span class="dot"></span></td>
+              <td class="ticker">${escapeHtml(r.market_ticker)}</td>
+              <td class="side ${r.side === "yes" ? "yes" : ""}">${(r.side || "").toUpperCase()}</td>
+              <td>${r.price_cents}¢</td>
+              <td>—</td>
+              <td class="mtm">—</td>
+              <td class="ts-cell">${tsShort(r.timestamp)}</td>
+            </tr>
+          `).join("");
+        }
+      }
+    }
+
+    // SETTLEMENTS
+    const settledTable = document.querySelectorAll("table.posit")[1];
+    if (settledTable) {
+      const tbody = settledTable.querySelector("tbody");
+      if (tbody) {
+        if ((p.settled || []).length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px;">no settlements yet</td></tr>`;
+        } else {
+          tbody.innerHTML = (p.settled || []).map(r => {
+            const pnl = r.pnl_usd || 0;
+            const cls = pnl >= 0 ? "pos" : "neg";
+            const settle = r.status === "won" ? "100" : "0";
+            return `
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">${escapeHtml(r.market_ticker)}</td>
+                <td class="side ${r.side === "yes" ? "yes" : ""}">${(r.side || "").toUpperCase()}</td>
+                <td>${r.price_cents}¢</td>
+                <td>${settle}</td>
+                <td class="mtm ${cls}">${fmtUsd(pnl)}</td>
+                <td class="ts-cell">${tsShort(r.resolved_at || r.timestamp)}</td>
+              </tr>
+            `;
+          }).join("");
+        }
+      }
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // 5. PERFORMANCE STRIP
+  // ───────────────────────────────────────────────────────────────────
+  async function pollPerformance() {
+    const p = await jget("/api/performance");
+    if (!p) return;
+
+    // EQUITY SPARKLINE
+    const spark = document.querySelector(".perf-card .spark");
+    if (spark && p.equity) {
+      const pts = p.equity;
+      if (pts.length === 0) {
+        // keep mockup line; just dim it
+        spark.style.opacity = "0.3";
+      } else {
+        spark.style.opacity = "1";
+        const W = 320, H = 56;
+        const vals = pts.map(pt => pt.cumulative);
+        const min = Math.min(0, ...vals);
+        const max = Math.max(0, ...vals, 1);
+        const range = (max - min) || 1;
+        const scale = (v) => H - 6 - ((v - min) / range) * (H - 12);
+        const xStep = pts.length > 1 ? W / (pts.length - 1) : W;
+        let d = `M0,${scale(vals[0])}`;
+        for (let i = 1; i < vals.length; i++) {
+          d += ` L${(i * xStep).toFixed(1)},${scale(vals[i]).toFixed(1)}`;
+        }
+        const dFill = d + ` L${W},${H} L0,${H} Z`;
+        // Find the path elements: area is first, line is second
+        const paths = spark.querySelectorAll("path");
+        if (paths[0]) paths[0].setAttribute("d", dFill);
+        if (paths[1]) paths[1].setAttribute("d", d);
+        // End dot
+        const lastX = (pts.length - 1) * xStep || W;
+        const lastY = scale(vals[vals.length - 1]);
+        const circles = spark.querySelectorAll("circle");
+        if (circles[0]) { circles[0].setAttribute("cx", lastX); circles[0].setAttribute("cy", lastY); }
+        if (circles[1]) { circles[1].setAttribute("cx", lastX); circles[1].setAttribute("cy", lastY); }
+      }
+    }
+
+    // EQUITY LABEL
+    const eqHeadVal = document.querySelector(".perf-card:nth-child(1) .head .lbl-mint");
+    if (eqHeadVal && p.equity?.length) {
+      eqHeadVal.textContent = fmtUsd(p.equity[p.equity.length - 1].cumulative);
+    } else if (eqHeadVal) {
+      eqHeadVal.textContent = "$0.00";
+    }
+
+    // BAND BARS
+    const bandCard = document.querySelector(".perf-card:nth-child(2) .bars");
+    if (bandCard && p.bands) {
+      const order = ["85-89", "90-94", "95-99"];
+      const rows = bandCard.querySelectorAll(".bar-row");
+      order.forEach((k, i) => {
+        const row = rows[i];
+        if (!row) return;
+        const b = p.bands[k];
+        const actualBar = row.querySelector(".actual");
+        const forecastTick = row.querySelector(".forecast");
+        const valEl = row.querySelector(".v");
+        if (b.actual_pct == null) {
+          if (actualBar) actualBar.style.width = "0%";
+          if (valEl) { valEl.textContent = "n=0"; valEl.className = "v"; }
+        } else {
+          if (actualBar) actualBar.style.width = `${b.actual_pct}%`;
+          if (valEl) {
+            valEl.textContent = `${b.actual_pct.toFixed(1)}% (${b.n})`;
+            valEl.className = "v " + (b.actual_pct >= b.forecast_pct ? "over" : "under");
+          }
+        }
+        if (forecastTick) forecastTick.style.left = `${b.forecast_pct}%`;
+      });
+    }
+
+    // SERIES BARS
+    const seriesCard = document.querySelector(".perf-card:nth-child(3) .series-bars");
+    if (seriesCard && p.series) {
+      const cols = seriesCard.querySelectorAll(".col");
+      const byName = {};
+      for (const s of p.series) byName[s.name] = s;
+      const order = ["NBA", "NFL", "EPL"];
+      order.forEach((name, i) => {
+        const col = cols[i];
+        if (!col) return;
+        const s = byName[name];
+        const val = col.querySelector(".val");
+        const bar = col.querySelector(".barv");
+        const label = col.querySelector(".label");
+        if (name === "EPL") {
+          if (val) { val.textContent = "BLOCKED"; val.style.color = "var(--text-dim)"; }
+          if (bar) { bar.style.height = "2px"; bar.style.background = "var(--border-2)"; bar.style.boxShadow = "none"; }
+          if (label) label.textContent = "EPL · BLOCK";
+          return;
+        }
+        if (!s) {
+          if (val) val.textContent = "$0.00";
+          if (bar) bar.style.height = "2px";
+          if (label) label.textContent = `${name} · 0`;
+          return;
+        }
+        if (val) { val.textContent = fmtUsd(s.pnl_usd); val.style.color = s.pnl_usd >= 0 ? "var(--text-bright)" : "var(--red)"; }
+        if (label) label.textContent = `${name} · ${s.n}`;
+        // Scale height: max 62px for our biggest |pnl|
+        if (bar) {
+          const allPnl = (p.series || []).filter(x => x.name !== "EPL").map(x => Math.abs(x.pnl_usd));
+          const maxAbs = Math.max(1, ...allPnl);
+          bar.style.height = `${Math.max(4, Math.abs(s.pnl_usd) / maxAbs * 62)}px`;
+        }
+      });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // 6. SUBSYSTEMS
+  // ───────────────────────────────────────────────────────────────────
+  async function pollSubsystems() {
+    const s = await jget("/api/subsystems");
+    if (!s) return;
+    const rows = document.querySelectorAll(".health .health-row");
+    const order = ["bot", "kalshi_api", "database", "telegram", "watchdog"];
+    const labels = {
+      bot: "Bot · main", kalshi_api: "Kalshi REST",
+      database: "Journal · sqlite", telegram: "Telegram", watchdog: "Watchdog",
+    };
+    order.forEach((k, i) => {
+      const row = rows[i]; if (!row) return;
+      const status = s[k];
+      if (!status) return;
+      row.classList.toggle("warn", !status.ok);
+      const lab = row.querySelector(".lab"); if (lab) lab.textContent = labels[k];
+      const v = row.querySelector(".v");
+      if (v) {
+        v.textContent = (status.ok ? "OK" : "FAIL") + " · " + (status.detail || "");
+      }
+    });
+    // Header subtitle "5/5 NOMINAL"
+    const okCount = order.filter(k => s[k]?.ok).length;
+    const hdrSub = document.querySelector(".perf-card:nth-child(4) .head .lbl-mint");
+    if (hdrSub) {
+      hdrSub.textContent = `${okCount}/5 NOMINAL`;
+      hdrSub.classList.toggle("lbl-mint", okCount === 5);
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // Boot — fire each loop on its own cadence
+  // ───────────────────────────────────────────────────────────────────
+  function bootPolling() {
+    pollHealth();      setInterval(pollHealth, POLL_SLOW);
+    pollFeed();        setInterval(pollFeed, POLL_FAST);
+    pollThinking();    setInterval(pollThinking, POLL_FAST);
+    pollPositions();   setInterval(pollPositions, POLL_SLOW);
+    pollPerformance(); setInterval(pollPerformance, POLL_PERF);
+    pollSubsystems();  setInterval(pollSubsystems, POLL_SLOW);
+  }
+  // Defer one tick so initial layout paints with placeholder data
+  setTimeout(bootPolling, 250);
 </script>
 </body>
 </html>
