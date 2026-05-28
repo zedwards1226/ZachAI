@@ -62,9 +62,18 @@ ORB_VBS = SCRIPTS_DIR / "ORBAgents.vbs"
 JARVIS_VBS = SCRIPTS_DIR / "Jarvis_Bot.vbs"
 ORB_DASHBOARD_VBS = SCRIPTS_DIR / "ORB_Dashboard.vbs"
 
+# LongshotFade bot + dashboard (paper mode, Phase 3). PID file written by
+# main_longshot.py. These checks are OPT-IN — only fire if the PID file
+# exists (i.e. the bot has been started at least once). That way the
+# watchdog doesn't nag about a bot Zach intentionally stopped.
+LONGSHOT_PID_FILE = Path(r"C:\ZachAI\omnialpha\state\longshot.pid")
+LONGSHOT_VBS = SCRIPTS_DIR / "LongshotFade.vbs"
+LONGSHOT_DASHBOARD_VBS = SCRIPTS_DIR / "LongshotFade_Dashboard.vbs"
+
 # ─── Endpoints ────────────────────────────────────────────────────────────
 CDP_URL = "http://localhost:9222/json/version"
 ORB_DASHBOARD_URL = "http://localhost:8502/api/health"
+LONGSHOT_DASHBOARD_URL = "http://localhost:8503/api/health"
 CHECK_EVERY = 60  # seconds
 
 # ─── Load Telegram from trading/.env ──────────────────────────────────────
@@ -315,6 +324,79 @@ def check_orb_dashboard() -> bool:
     alert("orb_dashboard_fail",
           "🚨 <b>ORB dashboard RESTART FAILED</b> — manual: "
           "wscript C:\\ZachAI\\scripts\\ORB_Dashboard.vbs")
+    return False
+
+
+def check_longshot_main() -> bool:
+    """LongshotFade bot (paper). OPT-IN: only supervises if the PID file
+    exists — i.e. the bot has been started at least once. If Zach stopped
+    it intentionally (no PID file), the watchdog leaves it alone.
+
+    Restart via LongshotFade.vbs (anti-double-launch) if the PID is dead.
+    """
+    if not LONGSHOT_PID_FILE.exists():
+        return True  # not opted-in; nothing to supervise
+    try:
+        pid = int(LONGSHOT_PID_FILE.read_text().strip())
+    except (ValueError, OSError):
+        return True
+    if _pid_alive(pid):
+        _clear_cooldown("longshot_dead")
+        return True
+
+    log.warning("LongshotFade bot PID %d dead — restarting", pid)
+    alert("longshot_dead",
+          f"🚨 <b>LongshotFade bot crashed (PID {pid})</b>\n"
+          f"🔧 Restarting via LongshotFade.vbs\n⏰ {datetime.now().strftime('%H:%M:%S')}")
+    try:
+        LONGSHOT_PID_FILE.unlink()
+    except OSError:
+        pass
+    if _start_vbs(LONGSHOT_VBS):
+        time.sleep(15)
+        if LONGSHOT_PID_FILE.exists():
+            resolved("longshot_dead", "✅ <b>LongshotFade bot recovered</b>")
+            return True
+    alert("longshot_fail",
+          "🚨 <b>LongshotFade RESTART FAILED</b> — manual: "
+          "wscript C:\\ZachAI\\scripts\\LongshotFade.vbs")
+    return False
+
+
+def check_longshot_dashboard() -> bool:
+    """LongshotFade dashboard on :8503. OPT-IN: only checks if the bot PID
+    file exists (dashboard is paired with the bot). Auto-restart via VBS.
+    """
+    if not LONGSHOT_PID_FILE.exists():
+        return True  # bot not running → don't nag about the dashboard
+    for attempt in range(2):
+        try:
+            r = requests.get(LONGSHOT_DASHBOARD_URL, timeout=5)
+            if r.status_code == 200:
+                _clear_cooldown("longshot_dash_down")
+                return True
+        except Exception:
+            pass
+        if attempt == 0:
+            time.sleep(2)
+
+    log.warning("LongshotFade dashboard :8503 not responding — restarting")
+    alert("longshot_dash_down",
+          f"📊 <b>LongshotFade dashboard down</b> (:8503)\n"
+          f"🔧 Restarting via LongshotFade_Dashboard.vbs\n"
+          f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+    if _start_vbs(LONGSHOT_DASHBOARD_VBS):
+        time.sleep(10)
+        try:
+            r = requests.get(LONGSHOT_DASHBOARD_URL, timeout=5)
+            if r.status_code == 200:
+                resolved("longshot_dash_down", "✅ <b>LongshotFade dashboard recovered</b>")
+                return True
+        except Exception:
+            pass
+    alert("longshot_dash_fail",
+          "🚨 <b>LongshotFade dashboard RESTART FAILED</b> — manual: "
+          "wscript C:\\ZachAI\\scripts\\LongshotFade_Dashboard.vbs")
     return False
 
 
@@ -677,6 +759,9 @@ def run_cycle() -> None:
         "orb_dashboard":       check_orb_dashboard(),
         "cdp":                 check_cdp(),
         "jarvis_bot":          check_jarvis_bot(),
+        # LongshotFade (paper, Phase 3) — opt-in: no-op unless PID file exists
+        "longshot_main":       check_longshot_main(),
+        "longshot_dashboard":  check_longshot_dashboard(),
         # ORB bulletproof v1 (2026-05-18)
         "orb_stuck_scan":      check_orb_stuck_scan(),
         "orb_state_drift":     check_orb_state_drift(),

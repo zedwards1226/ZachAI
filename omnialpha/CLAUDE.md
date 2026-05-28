@@ -59,7 +59,7 @@ The first bot built on this library. Single-strategy harness at `main_longshot.p
 - **Universe:** KXNBAGAME + KXNFLGAME only. EPL/UCL/LIGA blocked at code level (Phase 1 found negative edge on soccer)
 - **Capital:** $300 default. Recomputed every scan (start + realized − open_risk) so Kelly auto-scales.
 - **Paper-mode enforcement:** harness refuses to start unless `PAPER_MODE=true` in `omnialpha/.env`. `order_placer.place_live_order()` adds a second hard stop (refuses unless an explicit code flag is also set).
-- **No auto-start VBS yet** — paper window is manual-launch only. After Zach approves live promotion at Day 18, add `scripts/LongshotFade.vbs` + `scripts/LongshotFade_Dashboard.vbs` + extend `scripts/orb_watchdog.py` with health checks.
+- **Watchdog (2026-05-27):** `scripts/LongshotFade.vbs` + `scripts/LongshotFade_Dashboard.vbs` launchers exist, supervised by `scripts/orb_watchdog.py::check_longshot_main/check_longshot_dashboard`. OPT-IN — the checks no-op unless `state/longshot.pid` exists, so a deliberately-stopped bot isn't nagged. ORB watchdog runs every 5 min via Task Scheduler → bot + dashboard auto-restart on crash and survive reboot (stale PID file triggers relaunch). NOT in the Windows Startup folder — to fully auto-start on boot independent of the watchdog cadence, add the VBS to Startup at Day-18 live promotion.
 
 ### Dashboard endpoints (`dashboard/serve.py`, port 8503)
 | Path | Purpose |

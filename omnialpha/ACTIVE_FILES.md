@@ -57,6 +57,16 @@ This directory is now a **shared Kalshi infrastructure library**, not a bot. See
 - `test_risk_engine.py` — every gate, contract clamping, bucket
 - `test_longshot_fade.py` — sector/series/price/liquidity/time gates, Kelly sizing, EV math, bucket calibration
 
+## Watchdog / auto-restart (in `C:\ZachAI\scripts\`)
+
+- `LongshotFade.vbs` — launches the bot (anti-double-launch, full Python path)
+- `LongshotFade_Dashboard.vbs` — launches the dashboard
+- Supervised by `scripts/orb_watchdog.py::check_longshot_main()` +
+  `check_longshot_dashboard()` — OPT-IN (only fires when `state/longshot.pid`
+  exists). The ORB watchdog runs every 5 min via Task Scheduler, so the bot
+  + dashboard auto-restart on crash AND survive reboot (stale PID file →
+  watchdog relaunches). No Startup-folder entry needed.
+
 ## Runtime (gitignored, NOT committed)
 
 - `state/` — per-bot SQLite DB + PID + throttle files

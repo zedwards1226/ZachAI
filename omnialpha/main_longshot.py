@@ -154,12 +154,15 @@ def job_settle() -> None:
     try:
         result = trade_monitor.settle_resolved_trades()
         if result.get("settled", 0):
-            log.info("settled %d trades · realized=$%+.2f",
-                     result["settled"], result.get("realized_pnl_usd", 0.0))
+            pnl = result.get("total_pnl_usd", 0.0)
+            log.info("settled %d trades (%dW/%dL) · realized=$%+.2f",
+                     result["settled"], result.get("wins", 0),
+                     result.get("losses", 0), pnl)
             try:
                 telegram_alerts.send(
-                    f"[LongshotFade] Settled {result['settled']} trades · "
-                    f"realized ${result.get('realized_pnl_usd', 0.0):+.2f}"
+                    f"[LongshotFade] Settled {result['settled']} trades "
+                    f"({result.get('wins', 0)}W/{result.get('losses', 0)}L) · "
+                    f"realized ${pnl:+.2f}"
                 )
             except Exception as e:
                 log.warning("settle telegram failed: %s", e)
@@ -168,30 +171,16 @@ def job_settle() -> None:
 
 
 def job_pnl_snapshot() -> None:
-    """Write one equity curve point to pnl_snapshots."""
+    """Write one equity-curve point to pnl_snapshots. Delegates to the
+    shared trade_monitor.write_pnl_snapshot() which owns the correct schema
+    (timestamp, capital_usd, open_risk_usd, realized_today, realized_total,
+    open_positions, total_trades, total_wins, total_losses)."""
     try:
-        cap = live_capital_usd()
-        now = datetime.now(timezone.utc).isoformat()
-        with get_conn() as conn:
-            realized = float(conn.execute(
-                "SELECT COALESCE(SUM(pnl_usd), 0) FROM trades WHERE status IN ('won','lost')"
-            ).fetchone()[0])
-            open_risk = float(conn.execute(
-                "SELECT COALESCE(SUM(stake_usd), 0) FROM trades WHERE status = 'open'"
-            ).fetchone()[0])
-            open_n = int(conn.execute(
-                "SELECT COUNT(*) FROM trades WHERE status = 'open'"
-            ).fetchone()[0])
-            conn.execute(
-                "INSERT INTO pnl_snapshots (timestamp, strategy, capital_usd, realized_pnl_usd, "
-                "open_risk_usd, open_positions, day_pnl_usd, week_pnl_usd) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (now, "longshot_fade", cap, realized, open_risk, open_n, 0.0, 0.0),
-            )
+        snap = trade_monitor.write_pnl_snapshot(STARTING_CAPITAL_USD)
+        log.debug("pnl snapshot: capital=$%.2f open=%d realized=$%.2f",
+                  snap["capital_usd"], snap["open_positions"], snap["realized_total"])
     except Exception as e:
-        # pnl_snapshots may have a different schema than I assumed — log + skip,
-        # don't kill the scheduler. Dashboard reads equity from `trades` anyway.
-        log.warning("pnl_snapshot job skipped: %s", e)
+        log.warning("pnl_snapshot job failed: %s", e)
 
 
 def _todays_summary_msg() -> str:
