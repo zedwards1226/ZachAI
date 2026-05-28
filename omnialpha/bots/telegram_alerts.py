@@ -66,7 +66,7 @@ def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
     return TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 
-PREFIX = "<b>[OmniAlpha]</b> "
+PREFIX = "<b>[LongshotFade]</b> "
 
 
 def send(text: str, *, parse_mode: str = "HTML") -> bool:
@@ -304,7 +304,7 @@ def notify_daily_summary(
         )
 
     lines = [
-        "🌙 <b>End of day — OmniAlpha</b>",
+        "🌙 <b>End of day — LongshotFade</b>",
         "<i>Here's how today landed.</i>",
         "",
         f"<b>Trading mode:</b> {mode_text}",
@@ -388,8 +388,8 @@ def notify_startup() -> None:
         logger.warning("startup throttle file write failed: %s", e)
     mode_text = "paper trading" if PAPER_MODE else "LIVE trading"
     send(
-        f"🟢 <b>OmniAlpha is online</b>\n"
-        f"The multi-sector Kalshi bot just started up "
+        f"🟢 <b>LongshotFade is online</b>\n"
+        f"The Kalshi sports NO-maker just started up "
         f"({mode_text}). I'll watch the markets and let you know when "
         f"trades fire."
     )
@@ -397,7 +397,7 @@ def notify_startup() -> None:
 
 def notify_halt(reason: str) -> None:
     send(
-        f"🛑 <b>OmniAlpha halted</b>\n"
+        f"🛑 <b>LongshotFade halted</b>\n"
         f"I've stopped placing new trades. Reason: {reason}\n"
         f"<i>Existing positions are still open and being tracked. "
         f"Trading resumes once the issue is fixed.</i>"

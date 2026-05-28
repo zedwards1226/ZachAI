@@ -60,7 +60,7 @@ SERIES_TO_SCAN: tuple[str, ...] = (
     "KXATPMATCH",
     "KXWTAMATCH",
     "KXBOXING",
-    "KXF1",
+    # KXF1 removed — championship futures, not head-to-head binaries
 )
 
 

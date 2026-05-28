@@ -71,7 +71,9 @@ ALLOWED_SERIES_PREFIXES: tuple[str, ...] = (
     "KXATP",      # men's tennis (French Open active) — NOT validated
     "KXWTA",      # women's tennis (French Open active) — NOT validated
     "KXBOXING",   # active card schedule — NOT validated
-    "KXF1",       # Monaco GP soon — NOT validated
+    # KXF1 removed 2026-05-27 — F1 markets are season-championship futures,
+    # not head-to-head binaries. The longshot-fade thesis (fade a favorite
+    # mid-game) doesn't apply to "who wins the championship" markets.
 )
 
 # Explicit deny list. Soccer leagues are blocked because the long-tail draw
