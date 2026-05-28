@@ -190,21 +190,47 @@ def iter_historical_trades(
 # Kalshi's series_ticker prefixes are stable enough to classify by string.
 # Add new patterns as new sectors come online.
 _SECTOR_PREFIXES: list[tuple[str, str]] = [
+    # Crypto
     ("KXBTC", "crypto"),
     ("KXETH", "crypto"),
     ("KXSOL", "crypto"),
+    # Sports — team leagues
     ("KXNBA", "sports"),
     ("KXMLB", "sports"),
     ("KXNHL", "sports"),
     ("KXNFL", "sports"),
+    ("KXWNBA", "sports"),
     ("KXEPL", "sports"),
     ("KXLALIGA", "sports"),
+    ("KXSERIE", "sports"),
+    ("KXBUNDES", "sports"),
+    ("KXLIGUE1", "sports"),
+    ("KXMLS", "sports"),
+    ("KXALEAGUE", "sports"),
+    ("KXALLSVENSKAN", "sports"),
+    ("KXAHL", "sports"),
+    ("KXAFL", "sports"),
+    ("KXUCL", "sports"),
+    ("KXNCAA", "sports"),
+    # Sports — individual / combat / motor / racquet
+    ("KXUFC", "sports"),
+    ("KXBOXING", "sports"),
+    ("KXATP", "sports"),
+    ("KXWTA", "sports"),
+    ("KXF1", "sports"),
+    ("KXNASCAR", "sports"),
+    ("KXINDYCAR", "sports"),
+    ("KXPGA", "sports"),
+    ("KXLPGA", "sports"),
+    # Weather
     ("KXHIGH", "weather"),
     ("KXTEMP", "weather"),
+    # Economics
     ("KXCPI", "economics"),
     ("KXNFP", "economics"),
     ("KXFED", "economics"),
     ("KXFOMC", "economics"),
+    # Politics
     ("KXPRES", "politics"),
     ("KXSEN", "politics"),
     ("KXHOUSE", "politics"),
