@@ -210,3 +210,36 @@ def init_db(db_path: Path = DB_PATH) -> None:
     """Create the schema if it doesn't exist. Idempotent — safe to call on every startup."""
     with get_conn(db_path) as conn:
         conn.executescript(SCHEMA_SQL)
+
+
+def log_decision(
+    conn: sqlite3.Connection,
+    *,
+    decision_type: str,
+    sector: str | None,
+    summary: str,
+    payload: str | None = None,
+    timestamp: str | None = None,
+) -> int:
+    """Append one row to `decisions`. Used by the live scanner to log every
+    market evaluation (enter / skip / risk_cap_hit) so the dashboard can
+    stream a live decision feed and the post-mortem has a complete audit.
+
+    `decision_type` ∈ {'enter', 'skip', 'risk_cap_hit', 'exit', 'pause_sector',
+                       'resume_sector', 'manual'}.
+
+    Returns the new row id so the caller can stash it on the trade row
+    (trades.decision_id FK) when a decision actually became a placement.
+
+    Caller owns the connection (and transaction) — this is deliberately a
+    plain INSERT so the scanner can batch many decisions in one write.
+    """
+    from datetime import datetime, timezone
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO decisions (timestamp, sector, decision_type, summary, payload) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (timestamp, sector, decision_type, summary, payload),
+    )
+    return int(cur.lastrowid or 0)

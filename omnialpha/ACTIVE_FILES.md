@@ -10,6 +10,9 @@ This directory is now a **shared Kalshi infrastructure library**, not a bot. See
 - `ACTIVE_FILES.md` — this file
 - `config.py` — paper-mode flag, capital, risk caps, sector enables, Kalshi base URL
 - `cli.py` — operational CLI (`health`, `init-db`, `pull-historical`, `status`)
+- `main_longshot.py` — LongshotFade bot harness (APScheduler + scan/settle/digest jobs)
+- `run_longshot.bat` — manual launcher for the bot
+- `run_dashboard.bat` — manual launcher for the dashboard
 - `requirements.txt` — pinned deps
 - `.env.example` — env template (no secrets)
 - `.gitignore` — local ignores (state/, logs/)
@@ -38,6 +41,11 @@ This directory is now a **shared Kalshi infrastructure library**, not a bot. See
 - `__init__.py`
 - `base.py` — `Strategy` ABC + `MarketSnapshot`/`StrategyContext`/`EntryDecision`/`ExitDecision` dataclasses
 - `longshot_fade.py` — NO-side maker on KXNBAGAME + KXNFLGAME at 85-99¢ band (Phase 2, paper-mode only until live promotion gate)
+
+## `dashboard/`
+
+- `serve.py` — Flask read-only API + serves `dashboard.html` on `:8503`
+- `dashboard.html` — single-file mission-control dashboard (SpaceX telemetry vibe), polls `/api/*` endpoints
 
 ## `tests/`
 

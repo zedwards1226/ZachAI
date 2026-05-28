@@ -21,11 +21,13 @@ from typing import Iterator
 
 import httpx
 
+import json
+
 from bots import order_placer, telegram_alerts
 from bots.kalshi_public import classify_sector, market_row_from_api
 from bots.risk_engine import check_entry
 from config import KALSHI_API_BASE
-from data_layer.database import get_conn
+from data_layer.database import get_conn, log_decision
 from data_layer.historical_pull import upsert_market
 from strategies.base import MarketSnapshot, Strategy, StrategyContext
 
@@ -290,8 +292,19 @@ def scan_and_trade(
             snaps.append((raw, snap))
     # Write lock released. Now run strategy + place orders.
 
+    # Collect decisions in a list, flush in one write transaction at the end
+    # of the pass — same pattern as the upsert above. Avoids one DB round-trip
+    # per market, which matters at 100+ markets/cycle.
+    decision_rows: list[tuple] = []
+    now_iso_factory = lambda: datetime.now(timezone.utc).isoformat()
+
     for raw, snap in snaps:
         if _market_already_taken(snap.ticker):
+            decision_rows.append((
+                "skip", snap.sector,
+                f"{snap.ticker} | already holding open position",
+                json.dumps({"ticker": snap.ticker, "reason_code": "already_taken"}),
+            ))
             continue
 
         if snap.sector not in ctx_cache:
@@ -302,12 +315,35 @@ def scan_and_trade(
 
         decision = strategy.decide_entry(snap, ctx)
         if decision is None:
+            decision_rows.append((
+                "skip", snap.sector,
+                f"{snap.ticker} | strategy rejected (gates)",
+                json.dumps({
+                    "ticker": snap.ticker,
+                    "reason_code": "strategy_reject",
+                    "no_ask": snap.no_ask_cents,
+                    "yes_ask": snap.yes_ask_cents,
+                    "volume_fp": snap.volume_fp,
+                    "secs_to_close": snap.seconds_to_close,
+                }),
+            ))
             continue
         n_decisions += 1
 
         verdict = check_entry(decision, snap, ctx, strategy_name=strategy.name)
         if not verdict.approved:
             n_blocked[verdict.reason] = n_blocked.get(verdict.reason, 0) + 1
+            decision_rows.append((
+                "risk_cap_hit", snap.sector,
+                f"{snap.ticker} | risk gate: {verdict.reason}",
+                json.dumps({
+                    "ticker": snap.ticker,
+                    "reason_code": verdict.reason,
+                    "side": decision.side,
+                    "contracts": decision.contracts,
+                    "price_cents": decision.price_cents,
+                }),
+            ))
             continue
         n_approved += 1
 
@@ -323,6 +359,22 @@ def scan_and_trade(
                 kalshi_client=None,
             )
             n_placed += 1
+            decision_rows.append((
+                "enter", snap.sector,
+                f"{snap.ticker} | {decision.side.upper()} @ {decision.price_cents}¢ × {decision.contracts} = ${placement['stake_usd']:.2f}",
+                json.dumps({
+                    "ticker": snap.ticker,
+                    "reason_code": "engaged",
+                    "side": decision.side,
+                    "contracts": decision.contracts,
+                    "price_cents": decision.price_cents,
+                    "stake_usd": placement["stake_usd"],
+                    "edge": decision.edge,
+                    "forecast_prob": decision.forecast_prob,
+                    "strategy_reason": decision.reason,
+                    "extras": decision.extras,
+                }),
+            ))
             # Invalidate sector context so the next iteration in the same
             # pass rebuilds open_positions_count from the DB and sees the
             # fresh placement. Without this, the concentration gate +
@@ -346,6 +398,23 @@ def scan_and_trade(
                 logger.warning("entry telegram failed: %s", e)
         except Exception as e:
             logger.exception("place order failed: %s", e)
+
+    # Flush all decisions for this scan pass in one write transaction.
+    if decision_rows:
+        try:
+            ts = now_iso_factory()
+            with get_conn() as conn:
+                for d_type, d_sector, d_summary, d_payload in decision_rows:
+                    log_decision(
+                        conn,
+                        decision_type=d_type,
+                        sector=d_sector,
+                        summary=d_summary,
+                        payload=d_payload,
+                        timestamp=ts,
+                    )
+        except Exception as e:
+            logger.warning("decision-log flush failed: %s", e)
 
     return {
         "scanned": len(markets),

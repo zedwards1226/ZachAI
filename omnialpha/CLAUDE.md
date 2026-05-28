@@ -49,6 +49,31 @@ This directory is **not a bot anymore**. There is no `main.py`, no auto-start VB
 6. **DB:** override `DB_PATH` in your harness so each bot writes to its own `state/<bot>.db`.
 7. **Auto-start (optional, after paper validation):** add a `scripts/<YourBot>.vbs` launcher.
 
+## LongshotFade harness (Phase 3 — paper mode, manual launch)
+
+The first bot built on this library. Single-strategy harness at `main_longshot.py` with the SpaceX-style mission-control dashboard at `dashboard/`.
+
+- **Launch the bot:** `omnialpha\run_longshot.bat` (or `python main_longshot.py`)
+- **Launch the dashboard:** `omnialpha\run_dashboard.bat` (or `cd dashboard && python serve.py`) → http://localhost:8503
+- **Scheduler:** scan every 60s, settle every 5min, equity snapshot every 15min, AM/PM Telegram digest at 13/23 UTC
+- **Universe:** KXNBAGAME + KXNFLGAME only. EPL/UCL/LIGA blocked at code level (Phase 1 found negative edge on soccer)
+- **Capital:** $300 default. Recomputed every scan (start + realized − open_risk) so Kelly auto-scales.
+- **Paper-mode enforcement:** harness refuses to start unless `PAPER_MODE=true` in `omnialpha/.env`. `order_placer.place_live_order()` adds a second hard stop (refuses unless an explicit code flag is also set).
+- **No auto-start VBS yet** — paper window is manual-launch only. After Zach approves live promotion at Day 18, add `scripts/LongshotFade.vbs` + `scripts/LongshotFade_Dashboard.vbs` + extend `scripts/orb_watchdog.py` with health checks.
+
+### Dashboard endpoints (`dashboard/serve.py`, port 8503)
+| Path | Purpose |
+|---|---|
+| `GET /` | serves `dashboard.html` |
+| `GET /api/health` | paper mode, bot pid, capital, day PnL, scan stats |
+| `GET /api/feed?limit=&since=` | last N decisions for the live feed |
+| `GET /api/thinking` | most recent ENGAGE decision + full math |
+| `GET /api/positions` | open trades + recent settlements |
+| `GET /api/performance` | equity curve, band WR vs forecast, series PnL |
+| `GET /api/subsystems` | health dots for Bot/API/DB/Telegram/Watchdog |
+
+Dashboard reads the journal via `file:...?mode=ro` SQLite URI — dashboard bugs can never lock or corrupt the live bot's DB.
+
 ## Paper mode is the hard stop
 
 `config.PAPER_MODE` is read from `.env` and defaults to `true`. `order_placer.place_live_order()` refuses to run unless BOTH `PAPER_MODE=false` AND `assert_paper_mode_off_was_explicit()` returns true. Setting `PAPER_MODE=false` is one of the 3 hard stops in master CLAUDE.md and requires Zach's explicit approval.

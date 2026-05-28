@@ -1,0 +1,1443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1600, initial-scale=1" />
+<title>LongshotFade — Mission Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Background system */
+    --bg-0:  #04060A;          /* deepest page bg */
+    --bg-1:  #0A0E14;          /* panel bg */
+    --bg-2:  #0E141C;          /* raised */
+    --bg-3:  #131A24;          /* hover row */
+    --grid:  rgba(0, 229, 255, 0.04);
+
+    /* Borders */
+    --border-1: #15202E;
+    --border-2: #1E2E40;
+    --border-glow: rgba(0, 229, 255, 0.35);
+
+    /* Text */
+    --text-dim:    #4D5C70;
+    --text-mid:    #8696A8;
+    --text:        #C2D0DE;
+    --text-bright: #E8F1FA;
+
+    /* Accents */
+    --cyan:    #00E5FF;
+    --mint:    #00FFA3;
+    --amber:   #FFB000;
+    --red:     #FF3B5C;
+    --magenta: #FF2EC7;
+
+    /* Functional */
+    --pos: var(--mint);
+    --neg: var(--red);
+    --neutral: var(--text-mid);
+
+    --pad: 14px;
+    --rad: 0px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg-0);
+    color: var(--text);
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+    line-height: 1.35;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+    overflow-x: hidden;
+  }
+
+  body {
+    background-image:
+      radial-gradient(ellipse 1400px 700px at 20% -10%, rgba(0, 229, 255, 0.045) 0%, transparent 60%),
+      radial-gradient(ellipse 1200px 600px at 90% 110%, rgba(0, 255, 163, 0.030) 0%, transparent 65%),
+      linear-gradient(to right, var(--grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+    background-size: auto, auto, 56px 56px, 56px 56px;
+    background-position: center top;
+    min-height: 100vh;
+  }
+
+  /* CRT-ish vignette */
+  body::after {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 240px rgba(0, 0, 0, 0.85);
+    z-index: 200;
+  }
+
+  /* Faint scanline grain */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(255,255,255,0.012) 0,
+      rgba(255,255,255,0.012) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    z-index: 199;
+    mix-blend-mode: overlay;
+  }
+
+  /* ─────────────────────── LAYOUT ─────────────────────── */
+  .app {
+    display: grid;
+    grid-template-rows: 76px 1fr 132px;
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+    position: relative;
+    z-index: 1;
+  }
+
+  .main {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 9fr);
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .main > .scan { border-right: 1px solid var(--border-1); }
+  .main > .right {
+    display: grid;
+    grid-template-rows: minmax(0, 5fr) minmax(0, 5fr);
+  }
+  .main > .right > .thinking { border-bottom: 1px solid var(--border-1); }
+
+  /* ─────────────────────── COMPONENTS ─────────────────────── */
+
+  /* Subtle ALL-CAPS label */
+  .lbl {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .lbl-on { color: var(--cyan); }
+  .lbl-bright { color: var(--text-mid); }
+  .lbl-mint { color: var(--mint); }
+  .lbl-red { color: var(--red); }
+  .lbl-amber { color: var(--amber); }
+
+  /* Bracket — corner tick marks */
+  .bracket {
+    position: relative;
+    padding: var(--pad);
+  }
+  .bracket::before, .bracket::after {
+    content: "";
+    position: absolute;
+    width: 10px; height: 10px;
+    border: 1px solid var(--cyan);
+    opacity: 0.55;
+  }
+  .bracket::before { top: 4px; left: 4px; border-right: none; border-bottom: none; }
+  .bracket::after { bottom: 4px; right: 4px; border-left: none; border-top: none; }
+
+  /* ─────────────────────── TOP BAR ─────────────────────── */
+  .topbar {
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border-1);
+    display: grid;
+    grid-template-columns: 320px 220px 1fr 220px 220px 220px;
+    align-items: stretch;
+    position: relative;
+  }
+  .topbar > .cell {
+    border-right: 1px solid var(--border-1);
+    padding: 12px 18px;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .topbar > .cell:last-child { border-right: none; }
+
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .brand-mark {
+    width: 30px; height: 30px;
+    position: relative;
+    flex: 0 0 30px;
+  }
+  .brand-mark svg { display: block; }
+  .brand-name {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--text-bright);
+  }
+  .brand-sub {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .clock {
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+  }
+  .clock .plus { color: var(--cyan); margin-right: 4px; }
+  .clock .ms { color: var(--text-dim); font-size: 14px; margin-left: 6px; }
+
+  .status-row {
+    display: flex; align-items: center; gap: 24px;
+    height: 100%;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-2);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text);
+    background: rgba(0,0,0,0.25);
+    line-height: 1;
+  }
+  .pill.live {
+    border-color: rgba(0, 255, 163, 0.5);
+    color: var(--mint);
+    background: rgba(0, 255, 163, 0.06);
+    box-shadow:
+      inset 0 0 0 1px rgba(0,255,163,0.12),
+      0 0 16px rgba(0, 255, 163, 0.18);
+  }
+  .pill.warn {
+    border-color: rgba(255,176,0,0.5);
+    color: var(--amber);
+  }
+  .pill .dot {
+    width: 7px; height: 7px;
+    background: currentColor;
+    border-radius: 50%;
+    box-shadow: 0 0 6px currentColor;
+    animation: pulse 2.0s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.85); }
+  }
+
+  .api-grid {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center;
+    height: 100%;
+  }
+  .api-grid .left { display: flex; flex-direction: column; gap: 4px; }
+  .api-grid .stat {
+    font-size: 14px; color: var(--text-bright); font-weight: 600;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .api-grid .stat.green { color: var(--mint); }
+  .api-grid .stat.red { color: var(--red); }
+
+  .countdown {
+    width: 56px; height: 56px;
+    position: relative;
+    flex: 0 0 56px;
+  }
+  .countdown svg { transform: rotate(-90deg); display: block; }
+  .countdown .ring-bg {
+    fill: none; stroke: var(--border-2); stroke-width: 2;
+  }
+  .countdown .ring-fg {
+    fill: none;
+    stroke: var(--cyan);
+    stroke-width: 2;
+    stroke-linecap: square;
+    filter: drop-shadow(0 0 4px rgba(0,229,255,0.6));
+  }
+  .countdown .val {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    font-size: 13px; font-weight: 600;
+    color: var(--text-bright);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pnl-cell {
+    display: grid;
+    grid-template-rows: auto auto;
+    align-items: center;
+    gap: 4px;
+  }
+  .pnl-big {
+    font-size: 26px;
+    color: var(--mint);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .pnl-big .arrow {
+    font-size: 14px;
+    color: var(--mint);
+  }
+  .pnl-big.neg { color: var(--red); }
+  .pnl-big.neg .arrow { color: var(--red); }
+  .pnl-sub {
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    display: flex; gap: 14px;
+  }
+  .pnl-sub .sep { color: var(--border-2); }
+  .pnl-sub b { color: var(--text-mid); font-weight: 500; }
+
+  /* ─────────────────────── SCAN PANEL ─────────────────────── */
+  .scan { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+
+  .scan-head {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-1);
+    background: linear-gradient(180deg, var(--bg-1), transparent);
+  }
+  .scan-head .title {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .scan-head h2 {
+    font-size: 11px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--text-bright);
+    font-weight: 600;
+  }
+  .badge-acq {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 9px; letter-spacing: 0.24em;
+    color: var(--cyan);
+    text-transform: uppercase;
+  }
+  .badge-acq::before {
+    content: ""; width: 6px; height: 6px;
+    background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan);
+    animation: blink 1.4s steps(1, end) infinite;
+  }
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    50.01%, 100% { opacity: 0.15; }
+  }
+
+  .scan-stat {
+    display: flex; flex-direction: column; gap: 3px;
+    text-align: right;
+    min-width: 70px;
+  }
+  .scan-stat .num {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-bright);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
+
+  .donut {
+    width: 56px; height: 56px;
+    position: relative; flex: 0 0 56px;
+  }
+  .donut .center {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    font-size: 8px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .feed-wrap {
+    overflow: hidden;
+    position: relative;
+  }
+  .feed-wrap::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0;
+    height: 32px; pointer-events: none;
+    background: linear-gradient(180deg, var(--bg-0), transparent);
+    z-index: 3;
+  }
+  .feed-wrap::after {
+    content: "";
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 64px; pointer-events: none;
+    background: linear-gradient(0deg, var(--bg-0), transparent);
+    z-index: 3;
+  }
+
+  .feed {
+    display: flex; flex-direction: column;
+    padding: 6px 0;
+    list-style: none;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 80px 76px 1fr 280px;
+    gap: 16px;
+    padding: 8px 20px;
+    border-bottom: 1px dashed rgba(30,46,64,0.4);
+    align-items: center;
+    font-size: 11.5px;
+    color: var(--text);
+    position: relative;
+  }
+  .row .ts {
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    font-size: 10.5px;
+  }
+  .row .ticker {
+    color: var(--text);
+    font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .reason {
+    color: var(--text-mid);
+    text-align: right;
+    font-size: 10.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .reason b { color: var(--text); font-weight: 500; }
+
+  .decision {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 9.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 600;
+    padding: 4px 8px;
+    border: 1px solid;
+    line-height: 1;
+    min-width: 76px;
+    justify-content: center;
+  }
+  .decision.reject {
+    color: #B5536A;
+    border-color: rgba(255, 59, 92, 0.25);
+    background: rgba(255, 59, 92, 0.04);
+  }
+  .decision.skip {
+    color: #5E6E83;
+    border-color: rgba(94, 110, 131, 0.3);
+    background: transparent;
+  }
+  .decision.engage {
+    color: var(--mint);
+    border-color: rgba(0, 255, 163, 0.5);
+    background: rgba(0, 255, 163, 0.07);
+    box-shadow: 0 0 12px rgba(0, 255, 163, 0.18), inset 0 0 0 1px rgba(0,255,163,0.08);
+    position: relative;
+  }
+  .decision.engage::before {
+    content: ""; width: 6px; height: 6px;
+    background: var(--mint);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--mint);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+
+  .row.engage-row {
+    background: linear-gradient(90deg, rgba(0,255,163,0.07), transparent 60%);
+    border-bottom-color: rgba(0, 255, 163, 0.15);
+  }
+  .row.engage-row .ticker,
+  .row.engage-row .reason { color: var(--text-bright); }
+  .row.engage-row .reason b { color: var(--mint); }
+  .row.engage-row::before {
+    content: "";
+    position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+    background: var(--mint);
+    box-shadow: 0 0 10px var(--mint);
+  }
+
+  /* ─────────────────────── THINKING PANEL ─────────────────────── */
+  .thinking {
+    padding: 0;
+    display: grid; grid-template-rows: auto 1fr;
+    background:
+      radial-gradient(ellipse 600px 300px at 100% 0%, rgba(0, 229, 255, 0.06), transparent 60%),
+      var(--bg-0);
+    min-height: 0;
+    position: relative;
+  }
+
+  .panel-head {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-1);
+    gap: 12px;
+  }
+  .panel-head h2 {
+    font-size: 11px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--text-bright);
+    font-weight: 600;
+  }
+  .panel-head .meta {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .think-body {
+    padding: 20px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 24px;
+    overflow: hidden;
+  }
+
+  .think-narrative {
+    border-left: 2px solid var(--cyan);
+    padding: 6px 0 6px 18px;
+    box-shadow: -8px 0 24px -10px rgba(0, 229, 255, 0.4);
+  }
+  .think-tag {
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .think-tag::before {
+    content: "▸"; color: var(--cyan); font-size: 10px;
+  }
+  .think-title {
+    font-size: 18px;
+    color: var(--text-bright);
+    font-weight: 600;
+    margin-bottom: 4px;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
+  }
+  .think-subtitle {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .think-prose {
+    font-size: 12.5px;
+    color: var(--text);
+    line-height: 1.65;
+    letter-spacing: 0.005em;
+  }
+  .think-prose b { color: var(--text-bright); font-weight: 600; }
+  .think-prose .num { color: var(--mint); font-weight: 600; }
+  .think-prose .neg { color: var(--red); font-weight: 600; }
+
+  .think-math {
+    border: 1px solid var(--border-1);
+    background: var(--bg-1);
+    padding: 14px 16px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 12px;
+    position: relative;
+  }
+  .think-math::before {
+    content: ""; position: absolute; left: -1px; right: -1px; top: -1px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    opacity: 0.6;
+  }
+  .think-math-head {
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .math-table {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 14px;
+    font-size: 11px;
+    align-self: center;
+  }
+  .math-table .k {
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+  }
+  .math-table .v {
+    color: var(--text-bright);
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  .math-table .v.cyan { color: var(--cyan); }
+  .math-table .v.mint { color: var(--mint); }
+
+  .verdict {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(0, 255, 163, 0.06);
+    border: 1px solid rgba(0, 255, 163, 0.3);
+  }
+  .verdict .vlbl {
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--mint);
+  }
+  .verdict .vbig {
+    font-size: 13px;
+    color: var(--text-bright);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─────────────────────── POSITIONS ─────────────────────── */
+  .positions {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .pos-block {
+    display: grid; grid-template-rows: auto 1fr;
+    min-height: 0;
+  }
+  .pos-block + .pos-block { border-top: 1px solid var(--border-1); }
+
+  table.posit {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  table.posit th, table.posit td {
+    text-align: left;
+    padding: 9px 16px;
+    border-bottom: 1px dashed rgba(30,46,64,0.4);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+  table.posit thead th {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 500;
+    padding-top: 12px;
+    padding-bottom: 6px;
+    background: linear-gradient(180deg, var(--bg-1), transparent);
+    border-bottom: 1px solid var(--border-1);
+  }
+  table.posit td.ticker { color: var(--text); }
+  table.posit td.side {
+    color: var(--red);
+    letter-spacing: 0.18em;
+    font-size: 9.5px;
+    font-weight: 600;
+  }
+  table.posit td.side.yes { color: var(--mint); }
+  table.posit td.mtm.pos { color: var(--mint); }
+  table.posit td.mtm.neg { color: var(--red); }
+  table.posit td.ts-cell { color: var(--text-mid); font-size: 10.5px; }
+  table.posit td.flag {
+    width: 10px; padding-left: 16px; padding-right: 0;
+  }
+  table.posit td.flag .dot {
+    width: 6px; height: 6px; background: var(--cyan);
+    border-radius: 50%;
+    box-shadow: 0 0 6px var(--cyan);
+    animation: pulse 1.6s ease-in-out infinite;
+    display: inline-block;
+  }
+  table.posit td.flag.idle .dot {
+    background: var(--text-dim); box-shadow: none; animation: none;
+  }
+  table.posit tr:hover td { background: var(--bg-3); }
+
+  /* ─────────────────────── PERFORMANCE STRIP ─────────────────────── */
+  .perf {
+    background: var(--bg-1);
+    border-top: 1px solid var(--border-1);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .perf-card {
+    padding: 14px 20px;
+    border-right: 1px solid var(--border-1);
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 8px;
+    min-width: 0;
+  }
+  .perf-card:last-child { border-right: none; }
+  .perf-card .head {
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .perf-card .big {
+    font-size: 18px;
+    color: var(--text-bright);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
+  .perf-card .big.pos { color: var(--mint); }
+  .perf-card .footnote {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .spark {
+    width: 100%; height: 56px; display: block;
+  }
+
+  .bars { display: flex; flex-direction: column; gap: 6px; padding-top: 4px;}
+  .bar-row { display: grid; grid-template-columns: 60px 1fr 60px; gap: 8px; align-items: center; }
+  .bar-row .k { color: var(--text-dim); font-size: 10px; letter-spacing: 0.08em; }
+  .bar-row .bar {
+    position: relative; height: 8px;
+    background: var(--bg-2);
+    border: 1px solid var(--border-1);
+  }
+  .bar-row .bar .actual {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--cyan), var(--mint));
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+  }
+  .bar-row .bar .forecast {
+    position: absolute; top: -2px; bottom: -2px; width: 2px;
+    background: var(--amber);
+    box-shadow: 0 0 4px var(--amber);
+  }
+  .bar-row .v {
+    text-align: right;
+    color: var(--text-bright);
+    font-size: 10.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .bar-row .v.over { color: var(--mint); }
+  .bar-row .v.under { color: var(--red); }
+
+  .series-bars { display: flex; gap: 10px; padding-top: 4px; height: 100%; align-items: flex-end; }
+  .series-bars .col {
+    flex: 1; display: flex; flex-direction: column; gap: 4px;
+    align-items: center;
+  }
+  .series-bars .col .barv {
+    width: 100%; background: linear-gradient(180deg, var(--mint), rgba(0, 255, 163, 0.2));
+    box-shadow: 0 0 12px rgba(0, 255, 163, 0.25);
+    border-top: 1px solid var(--mint);
+    position: relative;
+  }
+  .series-bars .col .barv.cyan {
+    background: linear-gradient(180deg, var(--cyan), rgba(0, 229, 255, 0.2));
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.25);
+    border-top-color: var(--cyan);
+  }
+  .series-bars .col .label {
+    font-size: 9px; letter-spacing: 0.16em; color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .series-bars .col .val {
+    font-size: 12px; color: var(--text-bright); font-weight: 600;
+  }
+
+  .health { display: grid; gap: 6px; padding-top: 4px; }
+  .health-row {
+    display: grid; grid-template-columns: 110px auto 1fr auto; gap: 10px;
+    align-items: center; font-size: 10.5px;
+  }
+  .health-row .lab { color: var(--text-mid); letter-spacing: 0.12em; }
+  .health-row .ldot {
+    width: 7px; height: 7px; background: var(--mint);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--mint);
+    animation: pulse 2.2s ease-in-out infinite;
+  }
+  .health-row.warn .ldot { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .health-row.warn .v { color: var(--amber); }
+  .health-row .line {
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-2), transparent);
+  }
+  .health-row .v {
+    color: var(--mint); font-weight: 600; font-size: 10px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+  }
+
+  /* Tiny diagonal hatched corner watermark */
+  .topbar::after {
+    content: "MISSION CTRL / v0.1.0 / CMD ZACH";
+    position: absolute;
+    right: 14px; bottom: -16px;
+    font-size: 8px;
+    letter-spacing: 0.32em;
+    color: var(--border-2);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ─────────────────────── TOP STATUS BAR ─────────────────────── -->
+  <header class="topbar">
+    <div class="cell brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 30 30" width="30" height="30">
+          <defs>
+            <linearGradient id="lg1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#00E5FF"/>
+              <stop offset="100%" stop-color="#00FFA3"/>
+            </linearGradient>
+          </defs>
+          <rect x="0.5" y="0.5" width="29" height="29" fill="none" stroke="url(#lg1)"/>
+          <path d="M5 22 L15 6 L25 22 Z" fill="none" stroke="url(#lg1)" stroke-width="1.5"/>
+          <circle cx="15" cy="17" r="2" fill="#00FFA3"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">LONGSHOT&nbsp;FADE</div>
+        <div class="brand-sub">Kalshi · Sports · NO maker</div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="lbl">Mission Time</div>
+      <div class="clock"><span class="plus">T+</span><span id="missionClock">03·14:27:09</span><span class="ms">.42</span></div>
+    </div>
+
+    <div class="cell">
+      <div class="status-row">
+        <span class="pill live"><span class="dot"></span>Paper Mode</span>
+        <span class="pill live"><span class="dot"></span>Kalshi API</span>
+        <span class="pill"><span class="dot" style="background:var(--cyan);color:var(--cyan)"></span>Watchdog</span>
+        <span class="pill warn"><span class="dot"></span>Rate Budget 73%</span>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="api-grid">
+        <div class="left">
+          <div class="lbl">Next Scan</div>
+          <div class="stat green">00:18s</div>
+        </div>
+        <div class="countdown" aria-label="next scan countdown">
+          <svg viewBox="0 0 56 56" width="56" height="56">
+            <circle class="ring-bg" cx="28" cy="28" r="24"/>
+            <circle class="ring-fg" cx="28" cy="28" r="24"
+                    stroke-dasharray="150.7" stroke-dashoffset="40"/>
+          </svg>
+          <div class="val">60</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <div class="lbl">Open Risk</div>
+      <div class="api-grid">
+        <div class="left">
+          <div class="stat">$32.40</div>
+        </div>
+        <div class="left" style="text-align:right">
+          <div class="lbl lbl-bright">CAP $90 · 36%</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cell pnl-cell">
+      <div class="lbl">Daily P&amp;L · 24H</div>
+      <div class="pnl-big">
+        +$8.20
+        <span class="arrow">▲</span>
+      </div>
+      <div class="pnl-sub">
+        <span><b>WTD</b> +$24.55</span>
+        <span class="sep">/</span>
+        <span><b>ALL</b> +$24.55</span>
+        <span class="sep">/</span>
+        <span><b>WR</b> 91.5%</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─────────────────────── MAIN GRID ─────────────────────── -->
+  <main class="main">
+
+    <!-- ───── LEFT: SCAN FEED ───── -->
+    <section class="scan">
+      <header class="scan-head">
+        <div class="title">
+          <h2>Live Scan Feed</h2>
+          <span class="badge-acq">Acquiring</span>
+        </div>
+        <div class="scan-stat">
+          <div class="lbl">Last Cycle</div>
+          <div class="num">142</div>
+        </div>
+        <div class="scan-stat">
+          <div class="lbl">Engaged · 1h</div>
+          <div class="num" style="color:var(--mint)">3</div>
+        </div>
+        <div class="donut" aria-label="rejection mix">
+          <svg viewBox="0 0 56 56" width="56" height="56">
+            <!-- donut total circumference (r=22) = 138.23 -->
+            <!-- segments: price 44%, time 22%, vol 18%, series 12%, other 4% -->
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--border-2)" stroke-width="6"/>
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--cyan)" stroke-width="6"
+                    stroke-dasharray="60.8 138.2" stroke-dashoffset="0" transform="rotate(-90 28 28)"/>
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--mint)" stroke-width="6"
+                    stroke-dasharray="30.4 138.2" stroke-dashoffset="-60.8" transform="rotate(-90 28 28)"/>
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--amber)" stroke-width="6"
+                    stroke-dasharray="24.9 138.2" stroke-dashoffset="-91.2" transform="rotate(-90 28 28)"/>
+            <circle cx="28" cy="28" r="22" fill="none" stroke="var(--red)" stroke-width="6"
+                    stroke-dasharray="16.6 138.2" stroke-dashoffset="-116.1" transform="rotate(-90 28 28)"/>
+          </svg>
+          <div class="center">Reject<br>Mix</div>
+        </div>
+      </header>
+
+      <div class="feed-wrap" id="feedWrap">
+        <ul class="feed" id="feed">
+
+          <li class="row engage-row">
+            <span class="ts">14:23:41</span>
+            <span class="decision engage">Engage</span>
+            <span class="ticker">KXNBAGAME-26MAY28HOUMIN-HOU</span>
+            <span class="reason"><b>NO @ 91¢</b> · 1 ctr · $0.91 · EV +2.1¢/$</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:23:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXNBAGAME-26MAY28GSWBOS-GSW</span>
+            <span class="reason">secs_to_close 120 — too late to fill</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:23:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXEPLGAME-26MAY28MUNARS-MUN</span>
+            <span class="reason">series blocked (EPL) — neg edge structurally</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:23:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXNFLGAME-26MAY28KCLA-LA</span>
+            <span class="reason">vol $420 below liquidity floor $1k</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:23:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28LALPHX-LAL</span>
+            <span class="reason">no_ask 73¢ — outside 85-99¢ band</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:23:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28DENMIL-MIL</span>
+            <span class="reason">no_ask 78¢ — outside band</span>
+          </li>
+
+          <li class="row engage-row">
+            <span class="ts">14:22:41</span>
+            <span class="decision engage">Engage</span>
+            <span class="ticker">KXNFLGAME-26MAY28DENBUF-DEN</span>
+            <span class="reason"><b>NO @ 96¢</b> · 2 ctr · $1.92 · EV +1.3¢/$</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:22:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXNFLGAME-26MAY28SEAARI-ARI</span>
+            <span class="reason">stake $0.34 below dust floor $0.50</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:22:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28CLEMIA-MIA</span>
+            <span class="reason">forecast 89.3% — EV under fee floor</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:22:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXLIGAGAME-26MAY28RMABCN-RMA</span>
+            <span class="reason">series blocked (LIGA)</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:22:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXNFLGAME-26MAY28NORATL-NOR</span>
+            <span class="reason">secs_to_close 25min — under min 30min</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:21:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28POROKC-OKC</span>
+            <span class="reason">no_ask 81¢ — outside band</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:21:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28UTANYK-UTA</span>
+            <span class="reason">no_ask 64¢ — outside band</span>
+          </li>
+
+          <li class="row engage-row">
+            <span class="ts">14:21:41</span>
+            <span class="decision engage">Engage</span>
+            <span class="ticker">KXNBAGAME-26MAY28PHIDAL-PHI</span>
+            <span class="reason"><b>NO @ 87¢</b> · 1 ctr · $0.87 · EV +3.1¢/$</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:21:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXNBAGAME-26MAY28DETMEM-DET</span>
+            <span class="reason">vol $740 below floor</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:21:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXBUNDESLIGA-26MAY28BAYDOR-BAY</span>
+            <span class="reason">series blocked (BUNDES)</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:21:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNFLGAME-26MAY28NYJATL-ATL</span>
+            <span class="reason">no_ask 56¢ — outside band</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:20:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28SACBKN-BKN</span>
+            <span class="reason">no_ask 71¢ — outside band</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:20:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXNBAGAME-26MAY28WSHIND-WSH</span>
+            <span class="reason">already holding open position</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:20:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXEPLGAME-26MAY28TOTCHE-CHE</span>
+            <span class="reason">series blocked (EPL)</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:20:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNFLGAME-26MAY28MIATEN-TEN</span>
+            <span class="reason">no_ask 99¢ — gate margin too thin</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:20:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28CHALAC-CHA</span>
+            <span class="reason">forecast 89.3% — fee exceeds spread</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:20:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXNFLGAME-26MAY28CARNYG-NYG</span>
+            <span class="reason">secs_to_close 18min — under min 30min</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:19:41</span>
+            <span class="decision reject">Reject</span>
+            <span class="ticker">KXNBAGAME-26MAY28ORLTOR-TOR</span>
+            <span class="reason">no_ask 68¢ — outside band</span>
+          </li>
+
+          <li class="row">
+            <span class="ts">14:19:41</span>
+            <span class="decision skip">Skip</span>
+            <span class="ticker">KXSERIEA-26MAY28INTMIL-INT</span>
+            <span class="reason">series blocked (SERIE A)</span>
+          </li>
+
+        </ul>
+      </div>
+    </section>
+
+    <!-- ───── RIGHT: THINKING + POSITIONS ───── -->
+    <section class="right">
+
+      <!-- THINKING -->
+      <section class="thinking">
+        <header class="panel-head">
+          <h2>Decision Telemetry</h2>
+          <span class="meta">latched · 14:23:41 UTC · uplink stable</span>
+        </header>
+
+        <div class="think-body">
+          <div class="think-narrative">
+            <div class="think-tag">Why We Engaged</div>
+            <div class="think-title">Houston at Minnesota — Houston losing badly</div>
+            <div class="think-subtitle">KXNBAGAME-26MAY28HOUMIN-HOU · NO Side</div>
+
+            <p class="think-prose">
+              NO trading at <b>92¢</b>, implying a <b class="num">92%</b> chance Houston doesn't come back.
+              Phase&nbsp;1 data — 873k trades, NBA buckets — says NO actually settles
+              <b class="num">94%</b> of the time at this price.
+              That's a <b class="num">+2pp</b> edge after Kalshi's 7% fee.
+              Posting bid at <b>91¢</b> (one tick inside ask) so we're the maker.
+              Stake <b class="num">$0.96</b>, expected return <b class="num">+2.1¢ per $1 risked</b>.
+            </p>
+          </div>
+
+          <div class="think-math">
+            <div class="think-math-head">
+              <span class="lbl lbl-on">Edge Math</span>
+              <span class="lbl">Bucket 90 – 94¢</span>
+            </div>
+
+            <div class="math-table">
+              <span class="k">Forecast P(NO)</span>          <span class="v cyan">93.9%</span>
+              <span class="k">Implied (entry/100)</span>     <span class="v">91.0%</span>
+              <span class="k">Raw edge</span>                <span class="v mint">+2.9 pp</span>
+              <span class="k">Entry price</span>             <span class="v">91¢</span>
+              <span class="k">Gross payout · win</span>      <span class="v">9.00¢</span>
+              <span class="k">Kalshi fee (7%)</span>         <span class="v">−0.63¢</span>
+              <span class="k">Net payout · win</span>        <span class="v">8.37¢</span>
+              <span class="k">EV / $1 risked</span>          <span class="v mint">+2.1¢</span>
+              <span class="k">Full Kelly</span>              <span class="v">0.064</span>
+              <span class="k">Frac × 0.05</span>             <span class="v">0.0032</span>
+              <span class="k">Stake</span>                   <span class="v">$0.96</span>
+              <span class="k">Contracts</span>               <span class="v cyan">1</span>
+            </div>
+
+            <div class="verdict">
+              <span class="vlbl">Verdict</span>
+              <span></span>
+              <span class="vbig">ENGAGE — NO @ 91¢ × 1</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- POSITIONS -->
+      <section class="positions">
+
+        <div class="pos-block">
+          <header class="panel-head">
+            <h2>Open Positions</h2>
+            <span class="meta">5 active · MTM live</span>
+          </header>
+          <table class="posit">
+            <thead>
+              <tr>
+                <th style="width:14px"></th>
+                <th>Ticker</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>Mark</th>
+                <th>MTM</th>
+                <th>Settles in</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="flag"><span class="dot"></span></td>
+                <td class="ticker">KXNBAGAME-26MAY28HOUMIN-HOU</td>
+                <td class="side">NO</td>
+                <td>91¢</td>
+                <td>93¢</td>
+                <td class="mtm pos">+$0.02</td>
+                <td class="ts-cell">02:18:41</td>
+              </tr>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNFLGAME-26MAY28DENBUF-DEN</td>
+                <td class="side">NO</td>
+                <td>96¢</td>
+                <td>97¢</td>
+                <td class="mtm pos">+$0.02</td>
+                <td class="ts-cell">01:42:09</td>
+              </tr>
+              <tr>
+                <td class="flag"><span class="dot"></span></td>
+                <td class="ticker">KXNBAGAME-26MAY28PHIDAL-PHI</td>
+                <td class="side">NO</td>
+                <td>87¢</td>
+                <td>85¢</td>
+                <td class="mtm neg">−$0.02</td>
+                <td class="ts-cell">03:09:55</td>
+              </tr>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNBAGAME-26MAY28WSHIND-WSH</td>
+                <td class="side">NO</td>
+                <td>93¢</td>
+                <td>94¢</td>
+                <td class="mtm pos">+$0.01</td>
+                <td class="ts-cell">00:48:12</td>
+              </tr>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNFLGAME-26MAY28PITBAL-PIT</td>
+                <td class="side">NO</td>
+                <td>89¢</td>
+                <td>91¢</td>
+                <td class="mtm pos">+$0.02</td>
+                <td class="ts-cell">02:55:32</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pos-block">
+          <header class="panel-head">
+            <h2>Recent Settlements</h2>
+            <span class="meta">last 5 closed · realized</span>
+          </header>
+          <table class="posit">
+            <thead>
+              <tr>
+                <th style="width:14px"></th>
+                <th>Ticker</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>Settle</th>
+                <th>Realized</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNFLGAME-26MAY27CINJAX-JAX</td>
+                <td class="side">NO</td>
+                <td>92¢</td>
+                <td>100</td>
+                <td class="mtm pos">+$0.74</td>
+                <td class="ts-cell">−02:14:08</td>
+              </tr>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNBAGAME-26MAY27LACMIN-MIN</td>
+                <td class="side">NO</td>
+                <td>88¢</td>
+                <td>100</td>
+                <td class="mtm pos">+$1.12</td>
+                <td class="ts-cell">−05:31:21</td>
+              </tr>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNBAGAME-26MAY27ATLBOS-ATL</td>
+                <td class="side">NO</td>
+                <td>96¢</td>
+                <td>0</td>
+                <td class="mtm neg">−$3.84</td>
+                <td class="ts-cell">−07:18:46</td>
+              </tr>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNFLGAME-26MAY27TBHOU-HOU</td>
+                <td class="side">NO</td>
+                <td>91¢</td>
+                <td>100</td>
+                <td class="mtm pos">+$0.84</td>
+                <td class="ts-cell">−09:02:11</td>
+              </tr>
+              <tr>
+                <td class="flag idle"><span class="dot"></span></td>
+                <td class="ticker">KXNBAGAME-26MAY27SACGSW-GSW</td>
+                <td class="side">NO</td>
+                <td>94¢</td>
+                <td>100</td>
+                <td class="mtm pos">+$0.56</td>
+                <td class="ts-cell">−12:44:30</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <!-- ─────────────────────── PERFORMANCE STRIP ─────────────────────── -->
+  <footer class="perf">
+    <!-- EQUITY -->
+    <div class="perf-card">
+      <div class="head">
+        <span class="lbl">Equity · 30D</span>
+        <span class="lbl lbl-mint">+$24.55</span>
+      </div>
+      <svg class="spark" viewBox="0 0 320 56" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#00FFA3" stop-opacity="0.45"/>
+            <stop offset="100%" stop-color="#00FFA3" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="eqline" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#00E5FF"/>
+            <stop offset="100%" stop-color="#00FFA3"/>
+          </linearGradient>
+        </defs>
+        <!-- grid line -->
+        <line x1="0" y1="42" x2="320" y2="42" stroke="#1E2E40" stroke-dasharray="2 4"/>
+        <!-- area -->
+        <path d="M0,46 L10,44 L24,45 L38,42 L52,43 L66,40 L80,38 L96,36 L110,38 L124,33 L138,30 L152,28 L168,25 L182,28 L196,22 L210,20 L224,18 L238,21 L252,17 L266,14 L280,11 L294,12 L308,8 L320,6 L320,56 L0,56 Z"
+              fill="url(#eqfill)"/>
+        <!-- line -->
+        <path d="M0,46 L10,44 L24,45 L38,42 L52,43 L66,40 L80,38 L96,36 L110,38 L124,33 L138,30 L152,28 L168,25 L182,28 L196,22 L210,20 L224,18 L238,21 L252,17 L266,14 L280,11 L294,12 L308,8 L320,6"
+              fill="none" stroke="url(#eqline)" stroke-width="1.6" stroke-linecap="square"/>
+        <!-- end dot -->
+        <circle cx="320" cy="6" r="2.5" fill="#00FFA3"/>
+        <circle cx="320" cy="6" r="5" fill="none" stroke="#00FFA3" stroke-opacity="0.4"/>
+      </svg>
+      <div class="footnote">PAPER · 47 RES · WR 91.5%</div>
+    </div>
+
+    <!-- BAND WR vs FORECAST -->
+    <div class="perf-card">
+      <div class="head">
+        <span class="lbl">WR vs Forecast · Band</span>
+        <span class="lbl lbl-on">live · 47 res</span>
+      </div>
+      <div class="bars">
+        <div class="bar-row">
+          <span class="k">85 – 89¢</span>
+          <span class="bar"><span class="actual" style="width:89%"></span><span class="forecast" style="left:89.3%"></span></span>
+          <span class="v over">89.0%</span>
+        </div>
+        <div class="bar-row">
+          <span class="k">90 – 94¢</span>
+          <span class="bar"><span class="actual" style="width:95%"></span><span class="forecast" style="left:93.9%"></span></span>
+          <span class="v over">95.0%</span>
+        </div>
+        <div class="bar-row">
+          <span class="k">95 – 99¢</span>
+          <span class="bar"><span class="actual" style="width:97%"></span><span class="forecast" style="left:97.3%"></span></span>
+          <span class="v over">97.0%</span>
+        </div>
+      </div>
+      <div class="footnote">amber tick = phase 1 forecast</div>
+    </div>
+
+    <!-- SERIES PERF -->
+    <div class="perf-card">
+      <div class="head">
+        <span class="lbl">Series Performance</span>
+        <span class="lbl lbl-bright">PnL · 30D</span>
+      </div>
+      <div class="series-bars">
+        <div class="col">
+          <span class="val">+$15.20</span>
+          <span class="barv" style="height:62px"></span>
+          <span class="label">NBA · 28</span>
+        </div>
+        <div class="col">
+          <span class="val">+$9.35</span>
+          <span class="barv cyan" style="height:42px"></span>
+          <span class="label">NFL · 19</span>
+        </div>
+        <div class="col">
+          <span class="val" style="color:var(--text-dim)">$0.00</span>
+          <span class="barv" style="height:2px;background:var(--border-2);box-shadow:none"></span>
+          <span class="label">EPL · BLOCK</span>
+        </div>
+      </div>
+      <div class="footnote">WR NBA 92.9 · WR NFL 89.5</div>
+    </div>
+
+    <!-- HEALTH -->
+    <div class="perf-card">
+      <div class="head">
+        <span class="lbl">Subsystem Status</span>
+        <span class="lbl lbl-mint">5/5 NOMINAL</span>
+      </div>
+      <div class="health">
+        <div class="health-row"><span class="lab">Bot · main</span><span class="ldot"></span><span class="line"></span><span class="v">OK · 312s</span></div>
+        <div class="health-row"><span class="lab">Kalshi REST</span><span class="ldot"></span><span class="line"></span><span class="v">OK · 84ms</span></div>
+        <div class="health-row"><span class="lab">Journal · sqlite</span><span class="ldot"></span><span class="line"></span><span class="v">OK · 38MB</span></div>
+        <div class="health-row"><span class="lab">Telegram</span><span class="ldot"></span><span class="line"></span><span class="v">OK · LIVE</span></div>
+        <div class="health-row warn"><span class="lab">Watchdog</span><span class="ldot"></span><span class="line"></span><span class="v">CYCLING</span></div>
+      </div>
+      <div class="footnote">last full sweep · 4s ago</div>
+    </div>
+  </footer>
+</div>
+
+<script>
+  // ─── Mission clock — ticks every second from a fake T0 ───
+  // Format: D·HH:MM:SS  (D = days since launch, capped at 99)
+  const t0 = Date.now() - (3 * 86400 + 14 * 3600 + 27 * 60 + 9) * 1000;
+  const pad = (n, w) => String(n).padStart(w, "0");
+  const tick = () => {
+    const s = Math.max(0, Math.floor((Date.now() - t0) / 1000));
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const ss = s % 60;
+    document.getElementById("missionClock").textContent =
+      pad(d, 2) + "·" + pad(h, 2) + ":" + pad(m, 2) + ":" + pad(ss, 2);
+  };
+  tick(); setInterval(tick, 1000);
+
+  // ─── Scan-feed animation: gently nudge first row's appearance ───
+  // (purely cosmetic — when wired to real data, prepend new rows here)
+  const feed = document.getElementById("feed");
+  const wrap = document.getElementById("feedWrap");
+
+  // Give the engage rows a slow "breathing" intensity via shadow
+  function breathe() {
+    document.querySelectorAll(".decision.engage").forEach((el, i) => {
+      const t = Date.now() / 1000 + i * 0.4;
+      const a = 0.18 + 0.10 * Math.sin(t * 1.6);
+      el.style.boxShadow = `0 0 ${10 + 4 * Math.sin(t * 1.6)}px rgba(0,255,163,${a}), inset 0 0 0 1px rgba(0,255,163,0.08)`;
+    });
+    requestAnimationFrame(breathe);
+  }
+  breathe();
+</script>
+</body>
+</html>
