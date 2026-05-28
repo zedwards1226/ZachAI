@@ -2,6 +2,48 @@
 
 ---
 
+## 2026-05-27 (LongshotFade bot — full build, paper running overnight)
+
+**Big session. Cleaned house, then built a whole new Kalshi bot from research → live paper.**
+
+**Phase 0 — Cleanup (committed b4b735c, 0b8e91a, cd40171, b41c334):**
+- Surgically deleted OmniAlpha crypto bot. KEPT the reusable Kalshi infra (kalshi_client, kalshi_public, live_scanner, order_placer, risk_engine, trade_monitor, strategy_grader, telegram_alerts, database, Strategy ABC). `omnialpha/` is now a SHARED LIBRARY, not a bot. CLAUDE.md rewritten.
+- ORB audit: refreshed ACTIVE_FILES (22 days stale). Flagged 12 pre-existing test failures (cascade/combiner/pnl_guard) — NOT mine, deferred.
+- WA audit: dashboard was DEAD, recovered. **3 WA monitoring gaps flagged in kalshi/CLAUDE.md AUDIT NOTES** (no tunnel VBS, watchdog doesn't restart dashboard, no tunnel check) — STILL OPEN.
+- Cleanup: deleted tradingjournal.db orphan, untracked dashboard build artifact, widened .gitignore, reset risk_state.json. Deleted abandoned sandbox/indicator_research_2026-05-17.
+- Flagged but NOT touched: 9.2GB `kalshi/bots/weatheralpha.db.bak` (2026-05-20) — worth investigating.
+
+**New bot: LongshotFade (NO-side maker on Kalshi sports).**
+- Phase 1 (sandbox/longshot_fade_validation_2026-05-27): pulled 873k real Kalshi trades. Becker edge REPRODUCES — NO 85-89c +3.3pp, 90-94c +2.9pp, 95-99c +1.3pp. **NFL strongest, NBA clean, EPL NEGATIVE (-8.4pp — soccer draw rate inverts it → all soccer BLOCKED).**
+- Phase 2 (cde8ab4): strategies/longshot_fade.py. Sector+series+price+liquidity+time gates, Kelly 0.05, $30 cap, EV gate after 7% fee. Buckets 89.3/93.9/97.3 (NBA-derived, shrunk 1pp).
+- Phase 3 (573e1bc + many): main_longshot.py harness (APScheduler: scan 60s, settle 5min, snapshot 15min, digest 13/23 UTC, grade 06:00 UTC). SpaceX-style dashboard at :8503 (Flask + dashboard.html).
+
+**Critical bugs found & fixed THIS session:**
+1. Wrong Kalshi time field — used `close_time` (settlement boundary, days out) instead of `expected_expiration_time` (game end). Strategy never engaged until fixed (3cce3aa). FIRST TRADE fired immediately after.
+2. Sector classifier missing F1/ATP/WTA/BOXING/WNBA/UFC → fell through to "other", rejected pre-strategy. Fixed (96ab516). WNBA traded immediately after.
+3. job_pnl_snapshot wrote wrong columns (silently failing); job_settle read wrong key. Fixed (e8003df).
+4. Dashboard showed stale $500 capital (started before .env→$300 change) + 2 duplicate dashboard procs. Killed, restarted clean.
+
+**Decisions made:**
+- Capital: $300 (not $500). PAPER_MODE=true.
+- Universe: 9 sports — NBA, NFL, MLB, NHL, WNBA, UFC, ATP, WTA, BOXING. F1 REMOVED (championship futures, not head-to-heads). All soccer BLOCKED.
+- Telegram: keep dedicated @OmniAlphaAlerts_bot (Zach to open/pin it). Prefix fixed to [LongshotFade].
+- Watchdog: piggyback ORB watchdog (Zach's choice) — opt-in checks, survives crash+reboot via persistent PID file. LongshotFade.vbs + LongshotFade_Dashboard.vbs launchers built.
+
+**Learning (bee7604):** per-SPORT auto-pause grader. Pauses a sport if WR<break-even AND PnL<0 over 20+ settled trades. Other sports keep trading. Composite key longshot_fade@SERIES in strategy_state. This is the AUTO-PAUSE half. RECALIBRATION half (update forecasts from results) still TODO — needs 30+ settled trades/sport.
+
+**Risk profile @ $300:** per-trade $1-6 typical / $24 hard cap, 8 max concurrent, 20 new trades/day, $150 max open risk, daily halt -$48, weekly -$60. Tests 66/66.
+
+**Overnight state:** bot PID 2280 ALIVE, dashboard :8503 up, 4 open paper positions (~$15.58 risk: MLB COL, WNBA ATL/WSH/CONN). First settlements ~1hr after session end as tonight's games end.
+
+**NEXT SESSION:**
+- Check overnight settlements + first PnL on dashboard
+- If 30+ settled trades/sport: build RECALIBRATION loop (replace borrowed NBA buckets with per-sport measured rates)
+- Consider per-sport Phase 1 validation (MLB/tennis/etc historical pull)
+- Still open from Phase 0c: 3 WA watchdog gaps, 9.2GB WA .bak file
+
+---
+
 ## 2026-05-21 (Night — OmniAlpha disabled + bot status check)
 
 **Bot health check:** All bots confirmed running at session start (ORB main+watchdog+dashboard, WeatherAlpha app+monitor+watchdog, Telegram bridge, master watchdog). OmniAlpha was running but silent since 23:19 startup.
