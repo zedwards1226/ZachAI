@@ -47,6 +47,19 @@ def _load_starting_capital() -> float:
 
 STARTING_CAPITAL = _load_starting_capital()
 
+def _load_paper_mode() -> bool:
+    """Current trading mode from kalshi/.env. The dupe checks MUST filter by this
+    so a paper-mode test trade never gets counted alongside a live trade (and
+    vice versa) — that cross-contamination fired bogus hourly NYC dupe alerts."""
+    env_path = Path(r"C:\ZachAI\kalshi\.env")
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("PAPER_MODE="):
+                return line.split("=", 1)[1].strip().lower() != "false"
+    return True  # default to paper (safe)
+
+PAPER_MODE = _load_paper_mode()
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BOT_SCRIPT = r"C:\ZachAI\kalshi\bots\app.py"
 MONITOR_SCRIPT = r"C:\ZachAI\kalshi\bots\monitor.py"
@@ -166,10 +179,14 @@ def _db_conn():
 
 
 def _db_get_open_trades() -> list[dict]:
+    """Open trades in the CURRENT mode only. Filtering by paper flag prevents
+    paper test trades and live trades from being counted together (which
+    produced false 'DUPLICATE: N open trades for city' alerts)."""
     conn = _db_conn()
     try:
         rows = conn.execute(
-            "SELECT * FROM trades WHERE status='open' ORDER BY timestamp DESC"
+            "SELECT * FROM trades WHERE status='open' AND paper=? ORDER BY timestamp DESC",
+            (0 if not PAPER_MODE else 1,),
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
