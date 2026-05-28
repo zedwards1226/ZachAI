@@ -152,7 +152,7 @@ def check_api_health():
 def check_duplicate_trades():
     """Look for duplicate open trades on the same market."""
     try:
-        r = requests.get(f"{API_BASE}/api/positions", timeout=10)
+        r = requests.get(f"{API_BASE}/api/positions", timeout=30)
         if r.status_code != 200:
             return
         data = r.json()
@@ -178,7 +178,11 @@ def check_duplicate_trades():
             else:
                 clear_alert(f"dupe_city_{city}")
     except Exception as e:
-        alert("dupe_check_error", f"Couldn't run the duplicate-trade check: {e}")
+        # NOTE: key intentionally NOT prefixed `dupe_` — this is a positions-fetch
+        # failure (timeout / API down), NOT a real duplicate trade. Reusing the
+        # dupe_ prefix made it inherit the 12h cooldown and read like a duplicate
+        # alert in Telegram. Real dupe alerts still fire above as dupe_<market_id>.
+        alert("positions_fetch_error", f"Couldn't fetch open positions to check for issues — bot API didn't respond in time: {e}")
 
 
 def check_guardrails():

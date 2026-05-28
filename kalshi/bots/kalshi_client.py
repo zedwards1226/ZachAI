@@ -139,6 +139,21 @@ class KalshiClient:
                 return None
             raise
 
+    def get_markets(self, tickers: list[str]) -> dict[str, dict]:
+        """Batch fetch markets by ticker in a single HTTP call.
+
+        Returns {ticker: market_dict}. Unknown tickers are omitted.
+        Kalshi's /markets endpoint accepts comma-separated `tickers=`.
+        """
+        if not tickers:
+            return {}
+        try:
+            data = self._get("/markets", params={"tickers": ",".join(tickers), "limit": len(tickers)})
+            return {m["ticker"]: m for m in data.get("markets", []) if m.get("ticker")}
+        except Exception as exc:
+            log.warning("Batch market fetch failed for %d tickers: %s", len(tickers), exc)
+            return {}
+
     def search_kxhigh_markets(self, city_code: str, target_date: str | None = None) -> list[dict]:
         series = CITIES[city_code]["kalshi_series"]
         dt     = (target_date or date.today().isoformat()).replace("-", "")

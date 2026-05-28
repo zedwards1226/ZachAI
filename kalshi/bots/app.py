@@ -428,31 +428,34 @@ def positions():
     client = get_client()
     open_trades = get_open_trades(paper=1 if PAPER_MODE else 0)
     positions = []
-    # Deduplicate market tickers for batch price fetch
-    price_cache = {}
-    for t in open_trades:
-        mid = t["market_id"]
-        if mid not in price_cache:
-            try:
-                m = client.get_market(mid)
-                if m:
-                    # Kalshi API v2 returns prices as dollar strings: "0.0200" = 2 cents
-                    yes_bid = m.get("yes_bid_dollars") or m.get("yes_bid")
-                    no_bid = m.get("no_bid_dollars") or m.get("no_bid")
-                    yes_ask = m.get("yes_ask_dollars") or m.get("yes_ask")
-                    no_ask = m.get("no_ask_dollars") or m.get("no_ask")
-                    price_cache[mid] = {
-                        "yes_bid": round(float(yes_bid) * 100) if yes_bid else None,
-                        "no_bid": round(float(no_bid) * 100) if no_bid else None,
-                        "yes_ask": round(float(yes_ask) * 100) if yes_ask else None,
-                        "no_ask": round(float(no_ask) * 100) if no_ask else None,
-                        "title": m.get("title", ""),
-                        "volume": m.get("volume_24h_fp"),
-                    }
-                else:
-                    price_cache[mid] = None
-            except Exception:
-                price_cache[mid] = None
+    # Batch-fetch all open-market prices in a single Kalshi call. The old code
+    # serialized N HTTP calls inside the request handler, which routinely blew
+    # past the monitor's 10s timeout and fired a misleading "duplicate-trade
+    # check" alert.
+    unique_tickers = list({t["market_id"] for t in open_trades})
+    try:
+        markets = client.get_markets(unique_tickers)
+    except Exception:
+        markets = {}
+    price_cache: dict = {}
+    for mid in unique_tickers:
+        m = markets.get(mid)
+        if m:
+            # Kalshi API v2 returns prices as dollar strings: "0.0200" = 2 cents
+            yes_bid = m.get("yes_bid_dollars") or m.get("yes_bid")
+            no_bid = m.get("no_bid_dollars") or m.get("no_bid")
+            yes_ask = m.get("yes_ask_dollars") or m.get("yes_ask")
+            no_ask = m.get("no_ask_dollars") or m.get("no_ask")
+            price_cache[mid] = {
+                "yes_bid": round(float(yes_bid) * 100) if yes_bid else None,
+                "no_bid": round(float(no_bid) * 100) if no_bid else None,
+                "yes_ask": round(float(yes_ask) * 100) if yes_ask else None,
+                "no_ask": round(float(no_ask) * 100) if no_ask else None,
+                "title": m.get("title", ""),
+                "volume": m.get("volume_24h_fp"),
+            }
+        else:
+            price_cache[mid] = None
 
     for t in open_trades:
         mid = t["market_id"]
