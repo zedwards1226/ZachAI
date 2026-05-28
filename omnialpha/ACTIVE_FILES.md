@@ -37,6 +37,7 @@ This directory is now a **shared Kalshi infrastructure library**, not a bot. See
 
 - `__init__.py`
 - `base.py` — `Strategy` ABC + `MarketSnapshot`/`StrategyContext`/`EntryDecision`/`ExitDecision` dataclasses
+- `longshot_fade.py` — NO-side maker on KXNBAGAME + KXNFLGAME at 85-99¢ band (Phase 2, paper-mode only until live promotion gate)
 
 ## `tests/`
 
@@ -46,6 +47,7 @@ This directory is now a **shared Kalshi infrastructure library**, not a bot. See
 - `test_order_placer.py` — paper/live invariants
 - `test_rate_limit_cooldown.py` — per-series 429 cooldown
 - `test_risk_engine.py` — every gate, contract clamping, bucket
+- `test_longshot_fade.py` — sector/series/price/liquidity/time gates, Kelly sizing, EV math, bucket calibration
 
 ## Runtime (gitignored, NOT committed)
 

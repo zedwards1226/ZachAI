@@ -25,6 +25,7 @@ This directory is **not a bot anymore**. There is no `main.py`, no auto-start VB
 
 ### `strategies/`
 - **`base.py`** — `Strategy` ABC + `MarketSnapshot`, `StrategyContext`, `EntryDecision`, `ExitDecision` dataclasses. Strategies are pure functions of their inputs (no I/O, no time.sleep, no side effects beyond what the runner provides). This makes backtests deterministic and tests trivial.
+- **`longshot_fade.py`** — sport-market NO-maker (Phase 2, paper mode only). Sits on the NO bid 1¢ inside the ask in the 85-99¢ longshot band on KXNBAGAME + KXNFLGAME. EPL/UCL/LIGA/etc. are blocked at code level — Phase 1 validation found soccer markets had structurally NEGATIVE edge (-8.4pp at 85-89¢). Per-bucket forecast probabilities derived from 873k-trade Phase 1 sample, shrunk 1pp toward implied to leave margin. Kelly 0.05, $30 hard cap, ≥1¢ EV per $1 risked after Kalshi's 7% fee on winnings. See `sandbox/longshot_fade_validation_2026-05-27/report.md` for the data the calibration was built on.
 
 ### `tests/`
 - **`test_kalshi_public.py`** — historical-data puller, mocks `httpx.Client`
