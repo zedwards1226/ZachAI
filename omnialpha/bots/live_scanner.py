@@ -119,7 +119,19 @@ def _market_to_snapshot(m: dict) -> MarketSnapshot | None:
 
     open_time = m.get("open_time") or ""
     close_time = m.get("close_time") or ""
-    seconds_to_close = _seconds_until(close_time)
+    # Kalshi has THREE time fields. `close_time` is the LATE settlement
+    # boundary (often 3-7 days after the game). For the strategy's time
+    # gate ("how long until this market resolves?") the right field is
+    # `expected_expiration_time` — Kalshi's estimate of when the game
+    # ends. Falls back to occurrence_datetime, then close_time.
+    # 2026-05-27 fix: previously used close_time and every sport market
+    # looked "days away," so the 4-hour-window gate rejected everything.
+    game_end_iso = (
+        m.get("expected_expiration_time")
+        or m.get("occurrence_datetime")
+        or close_time
+    )
+    seconds_to_close = _seconds_until(game_end_iso)
 
     return MarketSnapshot(
         ticker=ticker,
