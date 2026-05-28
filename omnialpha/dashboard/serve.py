@@ -64,30 +64,26 @@ def _ro_conn() -> sqlite3.Connection:
 
 
 def _bot_pid_alive() -> int | None:
-    """Return PID if the bot's PID file points at a live process. None otherwise."""
+    """Return PID if the bot's PID file points at a live process. None otherwise.
+
+    Requires psutil — on Windows, `os.kill(pid, 0)` actually calls
+    TerminateProcess (not a safe liveness check), so we refuse the fallback.
+    If psutil is missing, we assume the bot is dead and surface a warning;
+    don't ever risk killing the real process from a dashboard call.
+    """
     if not PID_FILE.exists():
         return None
     try:
         pid = int(PID_FILE.read_text().strip())
     except (ValueError, OSError):
         return None
-    # Cheap liveness check — psutil if available, else best-effort signal 0.
     try:
         import psutil  # type: ignore
-        return pid if psutil.pid_exists(pid) else None
     except ImportError:
-        if os.name == "nt":
-            # On Windows, os.kill(pid, 0) raises if pid is dead
-            try:
-                os.kill(pid, 0)
-                return pid
-            except OSError:
-                return None
-        try:
-            os.kill(pid, 0)
-            return pid
-        except OSError:
-            return None
+        log.warning("psutil missing — cannot safely check bot liveness on Windows. "
+                    "Run: pip install psutil")
+        return None
+    return pid if psutil.pid_exists(pid) else None
 
 
 # ─── Routes ─────────────────────────────────────────────────────────────
