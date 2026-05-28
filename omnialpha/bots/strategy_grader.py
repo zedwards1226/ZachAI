@@ -65,6 +65,160 @@ def is_strategy_paused(strategy_name: str) -> bool:
     return bool(row and row["paused_at"])
 
 
+# ── Per-SPORT (per-series) grading ────────────────────────────────────────
+# A single strategy (e.g. longshot_fade) can run across many sports/series.
+# Grading the whole strategy together would pause ALL sports the moment the
+# aggregate cracks — even if only one sport (say NHL) is the bleeder. These
+# functions grade each SERIES independently, keyed in strategy_state by a
+# composite "strategy@SERIES" name so we reuse the same table + pause check.
+
+def _series_key(market_ticker: str) -> str:
+    """Series prefix = everything before the first '-'.
+    e.g. 'KXMLBGAME-26MAY272210COLLAD-COL' → 'KXMLBGAME'."""
+    return market_ticker.split("-", 1)[0] if "-" in market_ticker else market_ticker
+
+
+def _composite(strategy_name: str, series: str) -> str:
+    return f"{strategy_name}@{series}"
+
+
+def is_series_paused(strategy_name: str, market_ticker: str) -> bool:
+    """Cheap hot-path check: is THIS sport auto-paused for THIS strategy?
+    Used by the live scanner before evaluating each market."""
+    key = _composite(strategy_name, _series_key(market_ticker))
+    with get_conn(readonly=True) as conn:
+        row = conn.execute(
+            "SELECT paused_at FROM strategy_state WHERE strategy_name = ?",
+            (key,),
+        ).fetchone()
+    return bool(row and row["paused_at"])
+
+
+def grade_series_for_strategy(strategy_name: str) -> dict:
+    """Grade each SERIES (sport) the strategy traded over the review window,
+    independently. Pauses a series (composite key strategy@SERIES) when its
+    win rate is below the dynamic break-even AND its P&L is negative, with a
+    real sample. Same conservative both-signals-bad rule as grade_strategies.
+
+    Returns a summary dict for logging + dashboard.
+    """
+    cutoff_iso = (datetime.now(timezone.utc)
+                  - timedelta(days=REVIEW_WINDOW_DAYS)).isoformat()
+    summary: dict = {
+        "ts": _now_iso(),
+        "strategy": strategy_name,
+        "window_days": REVIEW_WINDOW_DAYS,
+        "by_series": {},
+        "paused_this_run": [],
+    }
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT market_ticker, status, pnl_usd, price_cents
+            FROM trades
+            WHERE strategy = ?
+              AND status IN ('won','lost')
+              AND COALESCE(resolved_at, timestamp, '') >= ?
+            """,
+            (strategy_name, cutoff_iso),
+        ).fetchall()
+
+    # Aggregate by series in Python (sqlite can't easily group by a prefix).
+    agg: dict[str, dict] = {}
+    for r in rows:
+        s = _series_key(r["market_ticker"])
+        a = agg.setdefault(s, {"n": 0, "wins": 0, "losses": 0, "pnl": 0.0, "entry_sum": 0})
+        a["n"] += 1
+        a["pnl"] += float(r["pnl_usd"] or 0)
+        a["entry_sum"] += int(r["price_cents"] or 0)
+        if r["status"] == "won":
+            a["wins"] += 1
+        else:
+            a["losses"] += 1
+
+    now = _now_iso()
+    with get_conn() as conn:
+        for series, a in agg.items():
+            n = a["n"]
+            winrate = a["wins"] / n if n else 0.0
+            pnl = a["pnl"]
+            avg_entry = (a["entry_sum"] / n / 100.0) if n else 0.0
+            break_even_wr = max(MIN_WINRATE_FLOOR, avg_entry + WR_BREAKEVEN_MARGIN)
+            key = _composite(strategy_name, series)
+
+            if n < MIN_TRADES:
+                decision, reason = "skip", f"not enough trades (n={n} < {MIN_TRADES})"
+            elif winrate < break_even_wr and pnl < 0:
+                decision, reason = "pause", (
+                    f"WR {winrate*100:.1f}% < break-even {break_even_wr*100:.1f}% "
+                    f"AND P&L ${pnl:+.2f} < 0 over n={n}"
+                )
+            elif winrate < break_even_wr:
+                decision, reason = "watch", (
+                    f"low WR {winrate*100:.1f}% but P&L +${pnl:.2f} (variance)"
+                )
+            elif pnl < 0:
+                decision, reason = "watch", (
+                    f"neg P&L ${pnl:+.2f} but WR {winrate*100:.1f}% ok (asymmetric)"
+                )
+            else:
+                decision, reason = "active", f"healthy (WR {winrate*100:.1f}%)"
+
+            entry = {"n": n, "wins": a["wins"], "losses": a["losses"],
+                     "winrate": winrate, "pnl_usd": pnl, "avg_entry": avg_entry,
+                     "break_even_wr": break_even_wr, "decision": decision,
+                     "reason": reason}
+            summary["by_series"][series] = entry
+
+            is_pause = decision == "pause"
+            if is_pause:
+                conn.execute(
+                    "INSERT INTO strategy_state (strategy_name, last_review_at, "
+                    "last_review_n, last_review_winrate, last_review_pnl, "
+                    "pause_reason, paused_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(strategy_name) DO UPDATE SET "
+                    "last_review_at=excluded.last_review_at, "
+                    "last_review_n=excluded.last_review_n, "
+                    "last_review_winrate=excluded.last_review_winrate, "
+                    "last_review_pnl=excluded.last_review_pnl, "
+                    "pause_reason=excluded.pause_reason, "
+                    "paused_at=excluded.paused_at",
+                    [key, now, n, winrate, pnl, reason, now],
+                )
+                summary["paused_this_run"].append(series)
+                logger.warning("PAUSING sport %s for %s — %s", series, strategy_name, reason)
+                try:
+                    from bots import telegram_alerts
+                    telegram_alerts.send(
+                        f"⚠️ <b>I paused {series}</b>\n"
+                        f"The {series} sport has been losing too often for the "
+                        f"longshot-fade strategy ({reason}). Stopped trading it so "
+                        f"it doesn't keep bleeding.\n\n"
+                        f"<i>Other sports keep trading. To re-enable, clear its "
+                        f"row in strategy_state.</i>"
+                    )
+                except Exception as e:
+                    logger.warning("series-pause telegram failed: %s", e)
+            else:
+                conn.execute(
+                    "INSERT INTO strategy_state (strategy_name, last_review_at, "
+                    "last_review_n, last_review_winrate, last_review_pnl, "
+                    "pause_reason) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(strategy_name) DO UPDATE SET "
+                    "last_review_at=excluded.last_review_at, "
+                    "last_review_n=excluded.last_review_n, "
+                    "last_review_winrate=excluded.last_review_winrate, "
+                    "last_review_pnl=excluded.last_review_pnl, "
+                    "pause_reason=excluded.pause_reason",
+                    [key, now, n, winrate, pnl, reason],
+                )
+                logger.info("grade %s: %s — n=%d WR=%.1f%% pnl=$%+.2f",
+                            key, decision, n, winrate * 100, pnl)
+
+    return summary
+
+
 def grade_strategies() -> dict:
     """One pass: review every strategy that has settled trades in the
     window and decide whether to pause. Returns a summary dict for logging

@@ -32,7 +32,7 @@ sys.path.insert(0, str(HERE))
 
 from apscheduler.schedulers.blocking import BlockingScheduler  # type: ignore
 
-from bots import live_scanner, trade_monitor, telegram_alerts
+from bots import live_scanner, trade_monitor, telegram_alerts, strategy_grader
 from config import (
     DB_PATH, LOG_DIR, PAPER_MODE, STARTING_CAPITAL_USD, assert_paper_mode,
 )
@@ -208,6 +208,22 @@ def _todays_summary_msg() -> str:
             f"  Open: {open_n} positions · capital ${live_capital_usd():.2f}")
 
 
+def job_grade() -> None:
+    """Daily per-sport auto-pause grader. Pauses any sport whose win rate
+    fell below break-even AND P&L went negative over the review window
+    (needs 20+ settled trades to trigger). Other sports keep trading.
+    Defensive — protects against an unvalidated sport bleeding while the
+    borrowed NBA forecasts are still in place."""
+    try:
+        summary = strategy_grader.grade_series_for_strategy("longshot_fade")
+        paused = summary.get("paused_this_run", [])
+        graded = len(summary.get("by_series", {}))
+        log.info("grader: reviewed %d sports, paused %d %s",
+                 graded, len(paused), paused or "")
+    except Exception as e:
+        log.warning("grader job failed: %s", e)
+
+
 def job_digest_am() -> None:
     try:
         telegram_alerts.send(_todays_summary_msg())
@@ -249,6 +265,9 @@ def main() -> int:
                   id="pnl_snapshot", max_instances=1, coalesce=True)
     sched.add_job(job_digest_am, "cron", hour=13, minute=0, id="digest_am")
     sched.add_job(job_digest_pm, "cron", hour=23, minute=0, id="digest_pm")
+    # Per-sport auto-pause grader — runs nightly at 06:00 UTC (after the
+    # day's games have settled). Pauses any losing sport; others keep trading.
+    sched.add_job(job_grade, "cron", hour=6, minute=0, id="grade")
 
     # Startup boot-message
     try:

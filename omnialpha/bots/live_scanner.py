@@ -26,6 +26,7 @@ import json
 from bots import order_placer, telegram_alerts
 from bots.kalshi_public import classify_sector, market_row_from_api
 from bots.risk_engine import check_entry
+from bots.strategy_grader import is_series_paused
 from config import KALSHI_API_BASE
 from data_layer.database import get_conn, log_decision
 from data_layer.historical_pull import upsert_market
@@ -316,6 +317,16 @@ def scan_and_trade(
                 "skip", snap.sector,
                 f"{snap.ticker} | already holding open position",
                 json.dumps({"ticker": snap.ticker, "reason_code": "already_taken"}),
+            ))
+            continue
+
+        # Per-sport auto-pause: if the grader paused this series for losing,
+        # skip it (other sports keep trading). Cheap O(1) DB check.
+        if is_series_paused(strategy.name, snap.ticker):
+            decision_rows.append((
+                "skip", snap.sector,
+                f"{snap.ticker} | sport auto-paused (grader)",
+                json.dumps({"ticker": snap.ticker, "reason_code": "series_paused"}),
             ))
             continue
 
