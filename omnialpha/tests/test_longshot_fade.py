@@ -95,6 +95,15 @@ def test_accepts_nfl_series():
     assert s.decide_entry(m, _make_ctx()) is not None
 
 
+def test_accepts_mlb_series():
+    """MLB added 2026-05-27 (peak season). Not in Phase 1 validation —
+    forecasts borrow from NBA buckets. Strategy accepts the series; live
+    paper data will validate the edge."""
+    s = LongshotFadeStrategy()
+    m = _make_market(ticker="KXMLBGAME-26MAY27NYYBOS-NYY")
+    assert s.decide_entry(m, _make_ctx()) is not None
+
+
 # ─── Price gate ─────────────────────────────────────────────────────────
 
 def test_rejects_below_band():

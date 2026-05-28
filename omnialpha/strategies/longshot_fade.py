@@ -52,14 +52,41 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Universe filter ────────────────────────────────────────────────────
-# Whitelist: only trade these series. EPL is BLOCKED structurally.
-ALLOWED_SERIES_PREFIXES: tuple[str, ...] = ("KXNBA", "KXNFL")
+# Whitelist of series we'll trade. Phase 1 validated NBA + NFL only.
+# Everything else is unvalidated paper-mode experimentation — the per-bucket
+# forecasts (89.3%/93.9%/97.3%) come from NBA and may not transfer cleanly
+# to other sport dynamics. Watch per-series PnL in the dashboard; if any
+# series drifts negative over 30+ trades, drop it from this list.
+#
+# 2026-05-27: expanded from {NBA, NFL} to the full live-Kalshi sport
+# universe (excluding soccer — Phase 1 showed EPL has structural -8pp edge
+# from soccer's high draw rate; all soccer leagues blocked below).
+ALLOWED_SERIES_PREFIXES: tuple[str, ...] = (
+    "KXNBA",      # Phase 1 validated ✓
+    "KXNFL",      # Phase 1 validated ✓
+    "KXMLB",      # peak season — NOT validated
+    "KXNHL",      # Stanley Cup playoffs — NOT validated
+    "KXWNBA",     # season starting — NOT validated
+    "KXUFC",      # weekly fights — NOT validated
+    "KXATP",      # men's tennis (French Open active) — NOT validated
+    "KXWTA",      # women's tennis (French Open active) — NOT validated
+    "KXBOXING",   # active card schedule — NOT validated
+    "KXF1",       # Monaco GP soon — NOT validated
+)
 
-# Explicit deny list. Belt-and-suspenders — the whitelist above is the real
-# gate, but if the new ticker happens to start with KX-something-NBA we want
-# loud failure.
-BLOCKED_SERIES_PREFIXES: tuple[str, ...] = ("KXEPL", "KXUCL", "KXLIGA",
-                                            "KXSERIE", "KXBUNDES")
+# Explicit deny list. Soccer leagues are blocked because the long-tail draw
+# rate inverts the longshot pattern (Phase 1: EPL -8.4pp at 85-89¢).
+BLOCKED_SERIES_PREFIXES: tuple[str, ...] = (
+    "KXEPL",         # English Premier League
+    "KXUCL",         # UEFA Champions League
+    "KXLALIGA",      # Spanish La Liga
+    "KXSERIE",       # Italian Serie A
+    "KXBUNDES",      # German Bundesliga
+    "KXLIGUE1",      # French Ligue 1
+    "KXMLS",         # MLS (US soccer)
+    "KXALEAGUE",     # Australian A-League
+    "KXALLSVENSKAN", # Swedish Allsvenskan
+)
 
 
 # ─── Per-bucket calibration ─────────────────────────────────────────────

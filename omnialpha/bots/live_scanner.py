@@ -315,12 +315,59 @@ def scan_and_trade(
 
         decision = strategy.decide_entry(snap, ctx)
         if decision is None:
+            # Derive the SPECIFIC gate that killed it so the dashboard feed
+            # is readable at a glance. Mirrors longshot_fade.py gate order.
+            secs = snap.seconds_to_close
+            no_ask = snap.no_ask_cents or 0
+            vol = snap.volume_fp or 0
+            sector = (snap.sector or "").lower()
+            series = (snap.series_ticker or "").upper()
+            if sector != "sports":
+                reason_human = f"sector={snap.sector or '?'} (not sports)"
+                reason_code = "sector"
+            elif any(series.startswith(p) for p in (
+                "KXEPL", "KXUCL", "KXLALIGA", "KXSERIE", "KXBUNDES",
+                "KXLIGUE1", "KXMLS", "KXALEAGUE", "KXALLSVENSKAN",
+            )):
+                reason_human = f"series blocked — soccer ({series[:10]})"
+                reason_code = "series_blocked"
+            elif not any(series.startswith(p) for p in (
+                "KXNBA", "KXNFL", "KXMLB", "KXNHL", "KXWNBA",
+                "KXUFC", "KXATP", "KXWTA", "KXBOXING", "KXF1",
+            )):
+                reason_human = f"series not whitelisted ({series[:10]})"
+                reason_code = "series_not_whitelisted"
+            elif vol < 1000:
+                reason_human = f"vol ${int(vol)} below $1k floor"
+                reason_code = "low_volume"
+            elif secs <= 0:
+                reason_human = "market already closed"
+                reason_code = "market_closed"
+            elif secs < 1800:
+                reason_human = f"{secs // 60}min to settle (need 30min+)"
+                reason_code = "too_close_to_settle"
+            elif secs > 14400:
+                # express in days for far-out futures, hours otherwise
+                if secs > 86400:
+                    reason_human = f"{secs // 86400}d to settle (need <4hr)"
+                else:
+                    reason_human = f"{secs // 3600}hr to settle (need <4hr)"
+                reason_code = "too_far_from_settle"
+            elif no_ask < 85 or no_ask > 99:
+                reason_human = f"no_ask {no_ask}¢ outside 85-99 band"
+                reason_code = "price_out_of_band"
+            else:
+                # All universe gates passed, so EV/Kelly killed it
+                reason_human = "EV under fee floor"
+                reason_code = "ev_under_floor"
+
             decision_rows.append((
                 "skip", snap.sector,
-                f"{snap.ticker} | strategy rejected (gates)",
+                f"{snap.ticker} | {reason_human}",
                 json.dumps({
                     "ticker": snap.ticker,
-                    "reason_code": "strategy_reject",
+                    "reason_code": reason_code,
+                    "reason_human": reason_human,
                     "no_ask": snap.no_ask_cents,
                     "yes_ask": snap.yes_ask_cents,
                     "volume_fp": snap.volume_fp,

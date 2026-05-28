@@ -41,10 +41,27 @@ from strategies.longshot_fade import LongshotFadeStrategy
 
 
 # ─── Series the bot polls ──────────────────────────────────────────────
-# Per Phase 1 validation, KXEPLGAME is BLOCKED (negative edge). The
-# strategy enforces this at code level too, but listing only profitable
-# series here avoids burning rate-limit budget on markets we'd reject anyway.
-SERIES_TO_SCAN: tuple[str, ...] = ("KXNBAGAME", "KXNFLGAME")
+# Every sport with live Kalshi markets right now (probed 2026-05-27).
+# Soccer leagues are EXCLUDED — Phase 1 found EPL had structural -8pp edge.
+# The strategy whitelists each series too (defense in depth in
+# strategies/longshot_fade.py); this list just avoids burning rate-limit
+# budget polling sports we'd ignore anyway.
+#
+# Mix of validated (NBA, NFL) and unvalidated. Watch per-series PnL —
+# pull the plug on any series that drifts negative over 30+ trades.
+# Polls all series every 60s = ~10 req/cycle → well under Kalshi's 100/min.
+SERIES_TO_SCAN: tuple[str, ...] = (
+    "KXNBAGAME",
+    "KXNFLGAME",
+    "KXMLBGAME",
+    "KXNHLGAME",
+    "KXWNBAGAME",
+    "KXUFC",
+    "KXATPMATCH",
+    "KXWTAMATCH",
+    "KXBOXING",
+    "KXF1",
+)
 
 
 # ─── Logging ───────────────────────────────────────────────────────────
