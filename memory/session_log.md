@@ -2,6 +2,31 @@
 
 ---
 
+## 2026-05-28 → 05-29 (WeatherAlpha bug-fixes, omnialpha→longshot rename, arb research, Kelly bump)
+
+**WeatherAlpha (kalshi/) reporting-bug fixes:**
+- `scheduler.py::_snapshot_job` was writing paper-math capital (STARTING_CAPITAL + unfiltered P&L ≈ $1097) into the LIVE equity curve every hour while trader.py wrote real Kalshi cash (~$62) → alternating sawtooth. Made it mode-aware via `trader.get_capital()` (2de2dd3). Scrubbed 299 corrupted `pnl_snapshots` rows (cap>200, ts>=2026-05-16); curve reads clean ~$62 now.
+- `/api/positions` reported `unrealized_pnl: null` for contracts that collapsed to 0¢ (real full-stake losses) and excluded them from the total → dashboard looked rosier than reality. Fixed: 0 is a real price, only None=unknown (7c2eb0e). Today's open batch correctly read −$1.23 not +$7.33.
+- Deleted stale **8.56 GB** `weatheralpha.db.bak` (5/20, redundant subset of live DB — verified via trade-count compare). Pruned 2 stray `.claude/worktrees/` + branches. Kept the 365MB pre-cl-reset backup.
+- WeatherAlpha lifetime ≈ −$7.72; the BOS loss was a NO bet crushed by a **10°F cold forecast miss** (Open-Meteo ensemble said 74.9°F, actual 85.3°F — confidently wrong INPUT, bot logic was sound). Zach: variance, **do nothing**. WeatherAlpha stays LIVE (not paper).
+
+**omnialpha/ → longshot/ rename (893af76, git-rename so history intact):**
+- Folder moved (DB/state/.env carried over), all filesystem path refs updated (LongshotFade*.vbs, orb_watchdog PID path, .gitignore, run_*.bat, telegram throttle abs path, sandbox sys.path), identity (User-Agent ZachAI-OmniAlpha→Longshot, cli prog, risk_engine bot label, order_placer client_order_id prefix), docs (master CLAUDE.md roster+tree, README, longshot/CLAUDE.md rewrite, ACTIVE_FILES). 66/66 tests pass; bot restarted clean.
+- **LESSON (important):** Zach said "change that name… we could've just referred to it as longshot." He only meant a *colloquial* rename, NOT a full folder refactor. I over-did it. He said leave it (don't revert). → Next time someone says "call it X" / "rename," CONFIRM SCOPE before refactoring. Saved as feedback_rename_scope.
+- Docstring sync (9f45c42): longshot_fade docstrings said "NBA/NFL whitelist / Kelly 0.05" but code = 9 sports / Kelly 0.10.
+
+**Cross-platform arbitrage — RESEARCH ONLY, not building (Zach decided no):**
+- Polymarket re-legalized for US users Dec 2025 (bought CFTC-licensed QCEX exchange). So Kalshi↔Polymarket no longer legally blocked.
+- BUT: real arb windows last 2–7s, bot-dominated, thin net edge (1–2%); his 60s scan is too slow; resolution-mismatch is the silent killer (~78% of low-vol opps fail). Sportsbook arb = account bans. **Intra-Kalshi ladder/correlated arb (Zach's pivot) = fee-killed** — Kalshi fee 0.07×C×(1−C) rounded UP to the cent eats cheap multi-leg ladders; books 1–5 deep. Verdict: not worth building.
+
+**LongshotFade Kelly bump (c9a4b8e):** 0.10 → 0.15 for bigger paper stakes (~$3.50→~$5.50/trade) at Zach's request. Still PAPER, still under 8% per-trade cap + $30 hard cap. Bot restarted (PID 36952). Perf at session end: **+$6.39, 18/19 wins (94.7%), $306.39, paper.** Reminded Zach NOT to fund real off a 19-trade sample.
+
+**Still open / next steps:**
+- Watch LongshotFade **per-series PnL** — 8 of 9 sports use NBA-derived calibration (unvalidated); drop any series negative over 30+ trades.
+- WeatherAlpha 3 monitoring gaps STILL open (no tunnel VBS, watchdog doesn't restart dashboard, no tunnel check) — from 2026-05-27 audit.
+
+---
+
 ## 2026-05-27 (LongshotFade bot — full build, paper running overnight)
 
 **Big session. Cleaned house, then built a whole new Kalshi bot from research → live paper.**
