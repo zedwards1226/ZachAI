@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent.parent / "omnialpha"))
+sys.path.insert(0, str(HERE.parent.parent / "longshot"))
 from bots.kalshi_public import iter_historical_trades
 
 logging.basicConfig(

@@ -127,7 +127,7 @@ def place_live_order(
         "count": decision.contracts,
         "type": "limit",
         "time_in_force": "fill_or_kill",
-        "client_order_id": f"omnialpha-{uuid.uuid4().hex[:12]}",
+        "client_order_id": f"longshot-{uuid.uuid4().hex[:12]}",
     }
     if decision.side == "yes":
         body["yes_price"] = decision.price_cents

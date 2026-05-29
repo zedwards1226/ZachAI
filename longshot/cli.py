@@ -98,7 +98,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="omnialpha")
+    parser = argparse.ArgumentParser(prog="longshot")
     parser.add_argument("--log-level", default="INFO")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

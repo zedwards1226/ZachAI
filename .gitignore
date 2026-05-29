@@ -31,10 +31,10 @@ trading/weather_alpha.db
 trading/journal.db
 trading/state/
 companies/tradingagents/db/*.db
-# Kalshi shared-lib runtime state (omnialpha/ became a shared library
-# 2026-05-27; per-bot DB, PID, throttle files live here)
-omnialpha/state/
-omnialpha/logs/
+# Kalshi shared-lib runtime state (longshot/ — formerly omnialpha/, renamed
+# 2026-05-29; per-bot DB, PID, throttle files live here)
+longshot/state/
+longshot/logs/
 
 # SQLite WAL/SHM (any DB, any project)
 *.db-shm

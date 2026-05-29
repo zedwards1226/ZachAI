@@ -134,7 +134,7 @@ Each project owns a nested `CLAUDE.md` with its operational details. Claude Code
 
 - **`trading\`** — ORB NQ/MNQ futures system (live, paper mode); dashboard at http://localhost:8502 → see `trading/CLAUDE.md`
 - **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
-- **`omnialpha\`** — **Kalshi shared infrastructure library** (no longer a bot). The OmniAlpha crypto mid-band strategy was surgically deleted 2026-05-27 after losing −$230 across 247 paper trades. Loss postmortem retained for reference: NO side 82.7% WR near-breakeven (avg entry 77.5¢); YES side 68.5% WR structural loser (avg entry 75.4¢ with ~76% breakeven required); edge model overconfident — claimed 20%+ edges only hit 63% WR. KXBTCD biggest loser (−$108); only KXETHD profitable (+$16). What survives is reusable Kalshi infra (signed REST/WS client, public-data puller, scanner, risk engine, order placer, trade monitor, alerts, DB schema, Strategy ABC, CLI). Any new Kalshi bot lives at `omnialpha/strategies/<name>.py` + `omnialpha/main_<name>.py` importing the shared modules. Do NOT re-enable crypto trading without explicit approval. NEVER touch `kalshi\` for new-bot work. → see `omnialpha/CLAUDE.md`
+- **`longshot\`** — **Kalshi infra library + LongshotFade bot** (paper mode; renamed from `omnialpha\` on 2026-05-29). Runs the LongshotFade sports NO-maker (`main_longshot.py`, dashboard :8503, watchdog-supervised). The prior OmniAlpha crypto mid-band strategy was surgically deleted 2026-05-27 after losing −$230 across 247 paper trades. Loss postmortem retained for reference: NO side 82.7% WR near-breakeven (avg entry 77.5¢); YES side 68.5% WR structural loser (avg entry 75.4¢ with ~76% breakeven required); edge model overconfident — claimed 20%+ edges only hit 63% WR. KXBTCD biggest loser (−$108); only KXETHD profitable (+$16). The reusable Kalshi infra survives (signed REST/WS client, public-data puller, scanner, risk engine, order placer, trade monitor, alerts, DB schema, Strategy ABC, CLI). Any new Kalshi bot lives at `longshot/strategies/<name>.py` + `longshot/main_<name>.py` importing the shared modules. Do NOT re-enable crypto trading without explicit approval. NEVER touch `kalshi\` for new-bot work. → see `longshot/CLAUDE.md`
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
 - **`companies\tradingagents\`** — FastAPI multi-agent gate (building, paper, not auto-started) → see `companies/tradingagents/CLAUDE.md`
 - **`companies\zacks-work-drawings\`** — Flutter Android app: Google Drive PDF viewer for machine wiring diagrams (built) → see `companies/zacks-work-drawings/CLAUDE.md`
@@ -159,7 +159,7 @@ C:\ZachAI\
 ├── RULES.md / README.md / backup.bat
 ├── trading\ (ORB — has its own CLAUDE.md)
 ├── kalshi\ (WeatherAlpha — has its own CLAUDE.md)
-├── omnialpha\ (Kalshi shared infrastructure library — no bot, has its own CLAUDE.md)
+├── longshot\ (Kalshi infra library + LongshotFade bot, paper mode — has its own CLAUDE.md)
 ├── telegram-bridge\ (Jarvis bot — has its own CLAUDE.md)
 ├── companies\ (each project has its own CLAUDE.md)
 ├── sandbox\ (experiments workspace — strict isolation, no auto-start)

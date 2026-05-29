@@ -50,7 +50,7 @@ def _client() -> httpx.Client:
     return httpx.Client(
         base_url=KALSHI_API_BASE,
         timeout=HTTP_TIMEOUT_S,
-        headers={"User-Agent": "ZachAI-OmniAlpha/0.1"},
+        headers={"User-Agent": "ZachAI-Longshot/0.1"},
     )
 
 

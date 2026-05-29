@@ -29,7 +29,7 @@ from pathlib import Path
 # shared library (CLAUDE.md rewritten 2026-05-27). kalshi_public.py is
 # a pure HTTP puller with no scheduler/agent side effects, so it's safe.
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent.parent / "omnialpha"))
+sys.path.insert(0, str(HERE.parent.parent / "longshot"))
 from bots.kalshi_public import iter_historical_markets, get_cutoff
 
 logging.basicConfig(

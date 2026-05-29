@@ -9,7 +9,7 @@ REM Why no VBS auto-start: per Phase 3 plan, paper window is manual-launch
 REM only. We add auto-start (`scripts/LongshotFade.vbs`) AFTER Zach approves
 REM the live promotion gate at Day 18.
 
-cd /d C:\ZachAI\omnialpha
+cd /d C:\ZachAI\longshot
 
 REM Ensure DB schema exists before scheduler boots
 C:\Python314\python.exe -c "from data_layer.database import init_db; init_db(); print('DB initialized')"

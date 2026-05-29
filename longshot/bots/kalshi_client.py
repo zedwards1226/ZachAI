@@ -50,7 +50,7 @@ class KalshiClient:
         self._private_key = None
         self._client = httpx.Client(
             timeout=30.0,
-            headers={"User-Agent": "ZachAI-OmniAlpha/0.1"},
+            headers={"User-Agent": "ZachAI-Longshot/0.1"},
         )
 
     def _ensure_key_loaded(self) -> None:

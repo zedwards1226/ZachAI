@@ -172,7 +172,7 @@ Status: scaffolded 2026-04-17. Needs `.env` filled, `pip install -r requirements
 | `sweep-bot/` (entire dir) | 2026-05-11 | Scaffold retired entirely (was DEFERRED since 2026-04-28). Zach: "delete sweep bot if we dont use it." Master CLAUDE.md project roster + folder structure updated. Recover via git history if ever rebuilt. |
 | `__pycache__/` × 18 dirs | 2026-05-12 | Python bytecode cache, regenerates on next import. ~1.3 MB. |
 | `trading/logs/trading.log.2026-04-28` thru `.2026-05-08` | 2026-05-12 | Daily log rotations 11+ days old. Kept 5/9, 5/10, 5/11. ~120 MB. |
-| `omnialpha/logs/historical_pull_2026-05-06.log`, `historical_pull_eth_sol.log`, `historical_pull_v2.log` | 2026-05-12 | Stale backtest pull logs from the 5/6 jbecker recalibration session. |
+| `longshot/logs/historical_pull_2026-05-06.log`, `historical_pull_eth_sol.log`, `historical_pull_v2.log` | 2026-05-12 | Stale backtest pull logs from the 5/6 jbecker recalibration session. |
 | `kalshi/logs/app_start.log` | 2026-05-12 | 28-day-old startup log, no longer written to (rotated). 1.1 MB. |
 | `kalshi/bots/weatheralpha.log` | 2026-05-12 | 20-day-old inactive log path; live monitor.log replaced it. 10 MB. |
 | `trading/research/production_patterns_2026-04-30.md` | 2026-05-12 | Old research notes, recoverable from git history. 17 KB. |

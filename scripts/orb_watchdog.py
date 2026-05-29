@@ -66,7 +66,7 @@ ORB_DASHBOARD_VBS = SCRIPTS_DIR / "ORB_Dashboard.vbs"
 # main_longshot.py. These checks are OPT-IN — only fire if the PID file
 # exists (i.e. the bot has been started at least once). That way the
 # watchdog doesn't nag about a bot Zach intentionally stopped.
-LONGSHOT_PID_FILE = Path(r"C:\ZachAI\omnialpha\state\longshot.pid")
+LONGSHOT_PID_FILE = Path(r"C:\ZachAI\longshot\state\longshot.pid")
 LONGSHOT_VBS = SCRIPTS_DIR / "LongshotFade.vbs"
 LONGSHOT_DASHBOARD_VBS = SCRIPTS_DIR / "LongshotFade_Dashboard.vbs"
 

@@ -4,7 +4,7 @@ from this when backtesting; the dashboard reads from this for charts.
 
 Re-runnable: re-pulling the same series + window UPSERTS, doesn't dupe.
 
-Usage from CLI (see omnialpha/cli.py):
+Usage from CLI (see longshot/cli.py):
     python cli.py pull-historical --series KXBTC15M --days 30
     python cli.py pull-historical --series KXNBAGAME --days 7
 """

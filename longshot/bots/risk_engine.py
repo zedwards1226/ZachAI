@@ -321,7 +321,7 @@ def _read_cross_bot_state() -> dict:
 
 def update_my_section(
     *,
-    bot: str = "omnialpha",
+    bot: str = "longshot",
     daily_pnl_usd: float,
     weekly_pnl_usd: float,
     open_positions: int,

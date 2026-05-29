@@ -1,10 +1,14 @@
-# `omnialpha/` — Kalshi Shared Infrastructure Library
+# `longshot/` — Kalshi Infra Library + LongshotFade Bot
 
-## What this is now
+## What this is
 
-`omnialpha/` was the OmniAlpha crypto bot project until 2026-05-27. The bot was deleted that day after the mid-band crypto strategy lost −$230 across 247 paper trades (full postmortem in master `C:\ZachAI\CLAUDE.md`). What survives here is the **reusable Kalshi infrastructure** — auth client, public-data puller, scanner, risk engine, order placer, trade monitor, alerts, DB schema, strategy ABC, CLI. Any new Kalshi bot uses these modules instead of re-deriving them.
+`longshot/` is the **reusable Kalshi infrastructure library** plus the **LongshotFade bot** that runs on top of it. It was named `omnialpha/` until 2026-05-29 (renamed at Zach's request) and was originally the OmniAlpha crypto-bot project until 2026-05-27, when that mid-band crypto strategy was deleted after losing −$230 across 247 paper trades (full postmortem in master `C:\ZachAI\CLAUDE.md`).
 
-This directory is **not a bot anymore**. There is no `main.py`, no auto-start VBS, no dashboard, no live process. The next bot will live at `omnialpha/strategies/<name>.py` + its own `main_<name>.py` harness in this directory, importing the shared modules below.
+What survives and runs here:
+- **The shared Kalshi infra** — signed auth client, public-data puller, scanner, risk engine, order placer, trade monitor, alerts, DB schema, strategy ABC, CLI. Any new Kalshi bot imports these instead of re-deriving them.
+- **LongshotFade** — the first (and currently only) bot built on the library. Sports-market NO-maker, **live in paper mode** since Phase 3. Harness at `main_longshot.py`, dashboard at `dashboard/` on :8503. This is an active process supervised by the ORB watchdog.
+
+A second Kalshi bot would live at `longshot/strategies/<name>.py` + its own `main_<name>.py` harness, reusing the modules below.
 
 ## What's inside
 
@@ -35,31 +39,31 @@ This directory is **not a bot anymore**. There is no `main.py`, no auto-start VB
 - **`test_risk_engine.py`** — every gate, contract clamping, cross-bot state, bucket gate
 
 ### Top-level
-- **`config.py`** — paper-mode flag, capital, risk caps, sector enables, paths, Kalshi base URL. Imported by the bot's `main_<name>.py`.
+- **`config.py`** — paper-mode flag, capital, risk caps, sector enables, paths, Kalshi base URL. Imported by the bot's `main_<name>.py`. All paths are relative to this file (`BASE_DIR`), so the directory can be renamed without breaking them.
 - **`cli.py`** — operational verbs: `health`, `init-db`, `pull-historical`, `status`. Works against whichever DB `config.DB_PATH` resolves to.
 - **`requirements.txt`** — pinned deps shared across any bot built on this library.
 
 ## How to wire a new bot
 
-1. **Strategy:** create `omnialpha/strategies/<your_strategy>.py` implementing the `Strategy` ABC from `strategies/base.py`.
-2. **Harness:** create `omnialpha/main_<your_bot>.py` — APScheduler job that calls `live_scanner.scan_and_trade(strategy=YourStrategy(), series_ticker=..., capital_usd=...)` on whatever cadence you want.
-3. **Env:** create `omnialpha/.env` with `PAPER_MODE=true`, Kalshi credentials, Telegram credentials, Anthropic key (if needed).
+1. **Strategy:** create `longshot/strategies/<your_strategy>.py` implementing the `Strategy` ABC from `strategies/base.py`.
+2. **Harness:** create `longshot/main_<your_bot>.py` — APScheduler job that calls `live_scanner.scan_and_trade(strategy=YourStrategy(), series_ticker=..., capital_usd=...)` on whatever cadence you want.
+3. **Env:** create `longshot/.env` with `PAPER_MODE=true`, Kalshi credentials, Telegram credentials, Anthropic key (if needed).
 4. **Sector enable:** add your sector to `config.ENABLED_SECTORS`.
 5. **Label:** add a `STRATEGY_LABELS` entry in `bots/strategy_labels.py` for Telegram readability.
 6. **DB:** override `DB_PATH` in your harness so each bot writes to its own `state/<bot>.db`.
 7. **Auto-start (optional, after paper validation):** add a `scripts/<YourBot>.vbs` launcher.
 
-## LongshotFade harness (Phase 3 — paper mode, manual launch)
+## LongshotFade harness (Phase 3 — paper mode)
 
 The first bot built on this library. Single-strategy harness at `main_longshot.py` with the SpaceX-style mission-control dashboard at `dashboard/`.
 
-- **Launch the bot:** `omnialpha\run_longshot.bat` (or `python main_longshot.py`)
-- **Launch the dashboard:** `omnialpha\run_dashboard.bat` (or `cd dashboard && python serve.py`) → http://localhost:8503
+- **Launch the bot:** `longshot\run_longshot.bat` (or `python main_longshot.py`)
+- **Launch the dashboard:** `longshot\run_dashboard.bat` (or `cd dashboard && python serve.py`) → http://localhost:8503
 - **Scheduler:** scan every 60s, settle every 5min, equity snapshot every 15min, AM/PM Telegram digest at 13/23 UTC
-- **Universe:** KXNBAGAME + KXNFLGAME only. EPL/UCL/LIGA blocked at code level (Phase 1 found negative edge on soccer)
+- **Universe:** KXNBAGAME + KXNFLGAME per the strategy's hard-coded allowlist; EPL/UCL/LIGA blocked at code level (Phase 1 found negative edge on soccer). NOTE 2026-05-29: live trades have also been booked on KXMLBGAME / KXWNBAGAME / KXATPMATCH — reconcile whether the universe was deliberately widened or the series allowlist needs tightening.
 - **Capital:** $300 default. Recomputed every scan (start + realized − open_risk) so Kelly auto-scales.
-- **Paper-mode enforcement:** harness refuses to start unless `PAPER_MODE=true` in `omnialpha/.env`. `order_placer.place_live_order()` adds a second hard stop (refuses unless an explicit code flag is also set).
-- **Watchdog (2026-05-27):** `scripts/LongshotFade.vbs` + `scripts/LongshotFade_Dashboard.vbs` launchers exist, supervised by `scripts/orb_watchdog.py::check_longshot_main/check_longshot_dashboard`. OPT-IN — the checks no-op unless `state/longshot.pid` exists, so a deliberately-stopped bot isn't nagged. ORB watchdog runs every 5 min via Task Scheduler → bot + dashboard auto-restart on crash and survive reboot (stale PID file triggers relaunch). NOT in the Windows Startup folder — to fully auto-start on boot independent of the watchdog cadence, add the VBS to Startup at Day-18 live promotion.
+- **Paper-mode enforcement:** harness refuses to start unless `PAPER_MODE=true` in `longshot/.env`. `order_placer.place_live_order()` adds a second hard stop (refuses unless an explicit code flag is also set).
+- **Watchdog:** `scripts/LongshotFade.vbs` + `scripts/LongshotFade_Dashboard.vbs` launchers, supervised by `scripts/orb_watchdog.py::check_longshot_main/check_longshot_dashboard`. OPT-IN — the checks no-op unless `state/longshot.pid` exists, so a deliberately-stopped bot isn't nagged. ORB watchdog runs every 5 min via Task Scheduler → bot + dashboard auto-restart on crash and survive reboot (stale PID file triggers relaunch). NOT in the Windows Startup folder — to fully auto-start on boot independent of the watchdog cadence, add the VBS to Startup at Day-18 live promotion.
 
 ### Dashboard endpoints (`dashboard/serve.py`, port 8503)
 | Path | Purpose |
@@ -78,19 +82,11 @@ Dashboard reads the journal via `file:...?mode=ro` SQLite URI — dashboard bugs
 
 `config.PAPER_MODE` is read from `.env` and defaults to `true`. `order_placer.place_live_order()` refuses to run unless BOTH `PAPER_MODE=false` AND `assert_paper_mode_off_was_explicit()` returns true. Setting `PAPER_MODE=false` is one of the 3 hard stops in master CLAUDE.md and requires Zach's explicit approval.
 
-## What was removed 2026-05-27
+## History
 
-- `strategies/crypto_midband.py` (the failed strategy)
-- `backtest/` (calibration runs for the failed bands)
-- `dashboard/` (Streamlit + React scaffold, only ever served the failed bot)
-- `bots/band_tuner.py` (crypto-specific band tuner)
-- `main.py` (OmniAlpha entry point with the crypto registry)
-- `state/` runtime artifacts (`omnialpha.db`, `strategy_bands.json`, `band_history.jsonl`)
-- Tests for the deleted modules (`test_calibration.py`, `test_end_to_end.py`, `test_strategy_midband.py`, `test_strategy_labels.py`)
-- All outside callers cleaned: `scripts/orb_watchdog.py`, `trading/agents/daily_summary.py`, `.claude/launch.json`, `trading/dashboard/backend/serve.py` docstring
-
-The kalshi infra in `bots/`, `data_layer/`, `strategies/base.py`, `config.py`, `cli.py`, and the kept tests pass `pytest` clean (40/40).
+- **2026-05-29:** directory renamed `omnialpha/` → `longshot/` (project name change). Folder moved, all filesystem path references updated (VBS launchers, orb_watchdog PID path, `.gitignore`, `.bat` files, telegram throttle path, sandbox sys.path), User-Agent headers `ZachAI-OmniAlpha` → `ZachAI-Longshot`, CLI prog name, risk-engine bot label `omnialpha` → `longshot`. 66/66 tests pass. DB/capital/trade history carried over intact.
+- **2026-05-27:** OmniAlpha crypto bot deleted. Removed: `strategies/crypto_midband.py`, `backtest/`, the old Streamlit/React dashboard, `bots/band_tuner.py`, `main.py` (OmniAlpha entry point), `state/` runtime artifacts (`omnialpha.db`, `strategy_bands.json`, `band_history.jsonl`), and tests for the deleted modules. All outside callers cleaned. The kept infra passes `pytest` clean.
 
 ## Auto-merge
 
-Until a new bot ships from here, treat `omnialpha/` as a normal library — auto-merge applies, no extra approval gate. Once a strategy ships and goes live, this file gets the same auto-merge exception WeatherAlpha and ORB have (commit + push but notify Zach BEFORE merging anything touching `bots/order_placer.py` or live credentials).
+LongshotFade is a shipped, running bot. This directory carries the same auto-merge exception WeatherAlpha and ORB have: commit + push, but **notify Zach BEFORE merging** anything touching `bots/order_placer.py` (live order path) or live Kalshi credentials. Normal library changes (infra, tests, docs, other strategies) auto-merge as usual.

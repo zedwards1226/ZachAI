@@ -2,7 +2,7 @@
 
 Serves the static dashboard.html at `/` and exposes JSON endpoints that
 the dashboard polls every couple seconds. Read-only against
-omnialpha/state/kalshi.db via SQLite URI mode — the dashboard can NEVER
+longshot/state/kalshi.db via SQLite URI mode — the dashboard can NEVER
 write to or lock the journal the live bot uses.
 
 Endpoints:
@@ -15,7 +15,7 @@ Endpoints:
   GET /api/subsystems         — bot/api/db/telegram/watchdog health dots
 
 Mirrors the trading/dashboard/backend/serve.py pattern but adapted for
-omnialpha's schema (decisions, trades, pnl_snapshots).
+longshot's schema (decisions, trades, pnl_snapshots).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-# Make omnialpha importable
+# Make longshot importable
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 

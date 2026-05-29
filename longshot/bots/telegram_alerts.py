@@ -1,5 +1,5 @@
 """Telegram alerts. Uses existing Jarvis bot tokens — falls back to
-trading/.env if omnialpha/.env doesn't have its own. Always prefixes
+trading/.env if longshot/.env doesn't have its own. Always prefixes
 [OmniAlpha] so WeatherAlpha + ORB notifications stay clean.
 
 Sends but never receives. Command-driven control happens through Jarvis
@@ -50,7 +50,7 @@ def _should_send(key: str, throttle_seconds: float) -> bool:
 
 
 def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
-    """Use omnialpha/.env first, fall back to trading/.env (which already
+    """Use longshot/.env first, fall back to trading/.env (which already
     has Zach's working ORB Alerts bot token).
     """
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
@@ -361,7 +361,7 @@ def notify_error(where: str, exc: BaseException) -> None:
     send(f"🛑 <b>Error in {where}</b>\n<code>{msg}</code>")
 
 
-_STARTUP_THROTTLE_FILE = Path("C:/ZachAI/omnialpha/state/.telegram_startup_throttle")
+_STARTUP_THROTTLE_FILE = Path("C:/ZachAI/longshot/state/.telegram_startup_throttle")
 
 
 def notify_startup() -> None:

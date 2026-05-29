@@ -39,7 +39,7 @@ def _client() -> httpx.Client:
         timeout=HTTP_TIMEOUT_S,
         headers={
             # User-Agent helps if Kalshi ever needs to debug bot traffic.
-            "User-Agent": "ZachAI-OmniAlpha/0.1 (+https://github.com/zedwards1226)",
+            "User-Agent": "ZachAI-Longshot/0.1 (+https://github.com/zedwards1226)",
         },
     )
 

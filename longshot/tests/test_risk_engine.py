@@ -274,15 +274,15 @@ def test_update_my_section_writes_and_reads(tmp_path, monkeypatch):
     monkeypatch.setattr(risk_engine, "SHARED_RISK_STATE", risk_state_path)
 
     risk_engine.update_my_section(
-        bot="omnialpha",
+        bot="longshot",
         daily_pnl_usd=12.50,
         weekly_pnl_usd=88.00,
         open_positions=2,
         capital_usd=500.0,
     )
     state = risk_engine._read_cross_bot_state()
-    assert state["bots"]["omnialpha"]["daily_pnl_usd"] == 12.50
-    assert state["bots"]["omnialpha"]["open_positions"] == 2
+    assert state["bots"]["longshot"]["daily_pnl_usd"] == 12.50
+    assert state["bots"]["longshot"]["open_positions"] == 2
     assert "aggregate_daily_pnl_usd" in state
 
 

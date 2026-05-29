@@ -1,9 +1,9 @@
 """LongshotFade bot harness — single-strategy entrypoint, paper-mode only.
 
-Wires the LongshotFadeStrategy into the omnialpha shared library and
+Wires the LongshotFadeStrategy into the longshot shared library and
 schedules it on APScheduler. Modeled on the existing WeatherAlpha bot
 in kalshi/bots/app.py, but stripped to one strategy with no Flask app
-(the dashboard runs as a separate process from omnialpha/dashboard/serve.py).
+(the dashboard runs as a separate process from longshot/dashboard/serve.py).
 
 Jobs (all times UTC unless noted):
   scan          — every 60s, calls scan_and_trade(LongshotFadeStrategy)
@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Make omnialpha/ importable when launched as `python main_longshot.py`
+# Make longshot/ importable when launched as `python main_longshot.py`
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -241,7 +241,7 @@ def job_digest_pm() -> None:
 # ─── Entry point ───────────────────────────────────────────────────────
 def main() -> int:
     if not PAPER_MODE:
-        log.error("PAPER_MODE is not true — refusing to start. Set PAPER_MODE=true in omnialpha/.env.")
+        log.error("PAPER_MODE is not true — refusing to start. Set PAPER_MODE=true in longshot/.env.")
         return 2
     assert_paper_mode()
 

@@ -6,7 +6,7 @@ fall back to defaults that match the master CLAUDE.md hard caps.
 This module was OmniAlpha's config until 2026-05-27. The crypto bot was
 deleted but the risk-cap math, paper-mode guard, Kalshi endpoint, Telegram
 glue, and capital helpers are reused by whichever Kalshi bot lives in
-omnialpha/strategies/ next.
+longshot/strategies/ next.
 """
 from __future__ import annotations
 
@@ -118,5 +118,5 @@ def assert_paper_mode() -> None:
         raise RuntimeError(
             "PAPER_MODE is not enabled. The bot refuses to place live "
             "orders without explicit approval. Set PAPER_MODE=true in "
-            "omnialpha/.env to proceed in paper mode."
+            "longshot/.env to proceed in paper mode."
         )

@@ -5,7 +5,7 @@ Personal infrastructure for running autonomous AI-operated companies on a single
 ## Active projects
 - **`trading/`** — MNQ ORB futures strategy, direct CDP to TradingView Desktop (paper mode)
 - **`kalshi/`** — WeatherAlpha Kalshi weather event bot (paper mode) — dashboard at http://localhost:3001, API at http://localhost:5000
-- **`omnialpha/`** — Multi-sector 24/7 Kalshi bot (paper mode, scaffold phase) — dashboard at http://localhost:8503
+- **`longshot/`** — Kalshi infra library + LongshotFade sports NO-maker bot (paper mode) — dashboard at http://localhost:8503
 - **`telegram-bridge/`** — Jarvis Telegram bot (command surface) — http://localhost:8765
 - **`companies/`** — TradingAgents (FastAPI gate), Zacks Work Drawings (Flutter Android)
 

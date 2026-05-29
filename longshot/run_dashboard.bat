@@ -7,6 +7,6 @@ REM
 REM The dashboard is read-only against the bot's SQLite journal — running
 REM it without the bot is safe (you'll just see empty panels).
 
-cd /d C:\ZachAI\omnialpha\dashboard
+cd /d C:\ZachAI\longshot\dashboard
 
 C:\Python314\python.exe serve.py

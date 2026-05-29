@@ -1,8 +1,8 @@
-# `omnialpha/` — Active Files Manifest
+# `longshot/` — Active Files Manifest
 
-Updated 2026-05-27 after surgical OmniAlpha delete. If a file isn't listed here, it shouldn't exist (per master CLAUDE.md FILE HYGIENE rule).
+Updated 2026-05-29 (renamed from omnialpha/). If a file isn't listed here, it shouldn't exist (per master CLAUDE.md FILE HYGIENE rule).
 
-This directory is now a **shared Kalshi infrastructure library**, not a bot. See `CLAUDE.md` for what each module does and how to wire a new bot.
+This directory is the **shared Kalshi infrastructure library** plus the **LongshotFade bot** that runs on it (paper mode). See `CLAUDE.md` for what each module does and how to wire a new bot.
 
 ## Top-level
 
