@@ -476,8 +476,10 @@ def positions():
                 current_price = live.get("no_bid")
                 ask_price = live.get("no_ask")
 
-        # Unrealized P&L = contracts * (current_price - entry_price) / 100
-        if current_price is not None and current_price > 0:
+        # Unrealized P&L = contracts * (current_price - entry_price) / 100.
+        # current_price == 0 is a REAL price (the contract is now worthless →
+        # full-stake loss), not missing data. Only None (no live quote) is unknown.
+        if current_price is not None:
             unrealized_pnl = round(contracts * (current_price - entry_price) / 100, 2)
         else:
             unrealized_pnl = None
