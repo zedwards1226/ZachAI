@@ -209,7 +209,8 @@ def api_summary():
             "SELECT COUNT(*) n, "
             "SUM(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END) w, "
             "SUM(CASE WHEN outcome='LOSS' THEN 1 ELSE 0 END) l, "
-            "COALESCE(SUM(pnl_after_slippage),0) pnl "
+            "COALESCE(SUM(pnl_after_slippage),0) pnl, "
+            "COALESCE(SUM(pnl),0) pnl_raw "
             "FROM trades WHERE outcome IN ('WIN','LOSS')"
         ).fetchone()
 
@@ -224,8 +225,19 @@ def api_summary():
     if life_row["n"]:
         lifetime_wr = round(life_row["w"] / life_row["n"] * 100, 1)
 
-    lifetime_pnl = float(life_row["pnl"] or 0)
-    computed_capital = starting_capital + lifetime_pnl + _baseline_adjustment()
+    lifetime_pnl = float(life_row["pnl"] or 0)            # after-slippage — conservative PERFORMANCE view
+    lifetime_pnl_raw = float(life_row["pnl_raw"] or 0)    # raw fills — matches the real broker balance
+
+    # CAPITAL RECONCILIATION must use RAW pnl, not after-slippage.
+    # The journal applies a synthetic SLIPPAGE_PTS (2pt=$4) haircut per trade
+    # to pnl_after_slippage for conservative performance display. The real TV
+    # paper broker has NO such synthetic haircut — its balance reflects actual
+    # fills (= raw pnl). Summing after-slippage here made computed_capital fall
+    # $4/trade below the broker, so the watchdog balance-discrepancy alert
+    # re-fired every ~25 trades and we band-aided it with journal_baseline
+    # re-bases (twice). Using raw pnl makes computed track the broker exactly
+    # and permanently — no more drift, no more re-baselining.
+    computed_capital = starting_capital + lifetime_pnl_raw + _baseline_adjustment()
 
     # Real broker balance (authoritative) vs journal-computed (optimistic).
     # If the bot wrote a fresh broker_state, use the real number; otherwise
