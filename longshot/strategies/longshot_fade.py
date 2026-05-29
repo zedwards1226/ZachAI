@@ -21,7 +21,9 @@ PER-SERIES VERDICT:
               inverts the longshot pattern. **BLOCKED at code level.**
 
 Strategy mechanics:
-  1. Universe filter: sector == "sports" AND series in NBA/NFL whitelist.
+  1. Universe filter: sector == "sports" AND series in the 9-sport allowlist
+     (NBA/NFL Phase-1 validated; MLB/NHL/WNBA/UFC/ATP/WTA/boxing paper-mode
+     experimental; all soccer leagues blocked).
   2. Price gate: no_ask_cents in [85, 99].
   3. Liquidity gate: volume_fp >= 1000.
   4. Time gate: seconds_to_close in [1800, 14400]  (30min - 4hr).
@@ -33,7 +35,7 @@ Strategy mechanics:
      compression (data was 60 days stale at validation time).
   6. EV gate: ≥ 1¢ expected value per $1 risked AFTER 7% Kalshi fee on
      winnings.
-  7. Kelly sizing: 0.05 fraction. Hard $30/trade cap.
+  7. Kelly sizing: 0.10 fraction (bumped from 0.05 on 2026-05-28). Hard $30/trade cap.
   8. Order: post NO bid at `no_ask_cents - 1` (maker, near-zero fees).
 
 Per-position rule: max 8 concurrent (enforced by risk engine, not here).
@@ -183,7 +185,7 @@ class LongshotFadeStrategy(Strategy):
         if market.sector != "sports":
             return None
 
-        # Series whitelist (NBA + NFL; EPL/UCL blocked).
+        # Series allowlist (9 sport series; soccer leagues blocked).
         if not self._series_allowed(market.ticker):
             return None
 
