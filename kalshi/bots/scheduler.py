@@ -12,9 +12,9 @@ from apscheduler.triggers.cron import CronTrigger
 import pytz
 
 from config import SCAN_INTERVAL_MINUTES, TIMEZONE
-from trader import scan_and_trade, resolve_expired_trades
-from database import snapshot_pnl, get_summary, get_open_trades
-from config import STARTING_CAPITAL
+from trader import scan_and_trade, resolve_expired_trades, get_capital
+from database import snapshot_pnl, get_open_trades
+from config import PAPER_MODE
 from monitor import send_daily_digest
 from learning_agent import run_review as run_agent_review
 
@@ -56,12 +56,13 @@ def _resolve_job():
 
 def _snapshot_job():
     try:
-        summary = get_summary()
-        capital = STARTING_CAPITAL + summary["total_pnl_usd"]
+        # Mode-aware: live = real Kalshi cash, paper = STARTING_CAPITAL + P&L.
+        # Must match trader.py's own snapshot or the equity curve sawtooths.
+        capital = get_capital()
         # Live-compute open risk from actual trades — the cached
         # guardrail counter gets zeroed at midnight and triggered
         # spurious RESYNC alerts.
-        open_risk = round(sum(t["stake_usd"] for t in get_open_trades()), 2)
+        open_risk = round(sum(t["stake_usd"] for t in get_open_trades(paper=int(PAPER_MODE))), 2)
         snapshot_pnl(capital, open_risk)
     except Exception as exc:
         log.error("Snapshot job failed: %s", exc, exc_info=True)
