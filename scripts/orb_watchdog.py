@@ -581,10 +581,15 @@ def check_orb_state_drift() -> bool:
 
 
 def check_orb_balance_discrepancy() -> bool:
-    """Read /api/summary. If untracked_pnl_usd > $50, hidden P&L has appeared
-    (typically from a phantom position or unrecorded trade). Alert once
-    per cooldown so user knows the dashboard's "real" balance moved
-    without a journal trade explaining it.
+    """Read /api/summary. If untracked_pnl_usd >= $50 in the LOSS direction
+    (broker balance LOWER than journal), hidden P&L has appeared
+    (typically from a phantom position or unrecorded trade) — alert.
+
+    GAIN-direction gaps (broker HIGHER than journal) are intentionally
+    ignored: they're almost always caused by the operator manually
+    resetting the TradingView paper account, which produces a permanent
+    six-figure gap that the journal can never catch up to. The hourly
+    alert on that gap was pure noise (2026-06-09).
 
     Skip when a TRACKED position is open (audit 2026-05-19): TV locks
     ~$2,720 of cash per MNQ contract as margin while the position is
@@ -605,10 +610,12 @@ def check_orb_balance_discrepancy() -> bool:
             _clear_cooldown("orb_balance_discrepancy")
             return True
         untracked = float(data.get("untracked_pnl_usd") or 0)
-        if abs(untracked) >= ORB_UNTRACKED_PNL_THRESH:
-            direction = "LOSS" if untracked > 0 else "GAIN"
+        # 2026-06-09: only alert on LOSS-direction gaps (positive untracked).
+        # GAIN-direction (negative) is almost always a manual paper-account
+        # reset and was spamming hourly. LOSS detection is the real safety net.
+        if untracked >= ORB_UNTRACKED_PNL_THRESH:
             alert("orb_balance_discrepancy",
-                  f"🚨 <b>ORB HIDDEN {direction} ${abs(untracked):.2f}</b>\n"
+                  f"🚨 <b>ORB HIDDEN LOSS ${untracked:.2f}</b>\n"
                   f"Computed (journal-only): ${data.get('computed_capital_usd')}\n"
                   f"Real broker balance:     ${data.get('current_capital_usd')}\n"
                   f"Gap means a position opened/closed without ORB tracking it.\n"
