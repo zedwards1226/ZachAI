@@ -63,6 +63,7 @@ PAPER_MODE = _load_paper_mode()
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BOT_SCRIPT = r"C:\ZachAI\kalshi\bots\app.py"
 MONITOR_SCRIPT = r"C:\ZachAI\kalshi\bots\monitor.py"
+DASHBOARD_VBS = r"C:\ZachAI\scripts\WeatherAlpha_Dashboard.vbs"
 DB_PATH = r"C:\ZachAI\kalshi\bots\weatheralpha.db"
 LOG_DIR = Path(r"C:\ZachAI\kalshi\logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -417,17 +418,59 @@ def check_monitor_alive():
 
 
 def check_dashboard():
-    """Check dashboard on :3001 is responding."""
+    """Dashboard :3001 — HTTP health check + VBS auto-restart on persistent failure.
+
+    2026-06-08: was alert-only (per CLAUDE.md audit 2026-05-27 — dashboard
+    stayed dead for 15+ hours on 6/5 because nothing relaunched it). Ported
+    the auto-restart pattern from orb_watchdog.check_orb_dashboard: 2 quick
+    HTTP attempts, then VBS relaunch + post-restart probe + resolved/failed
+    Telegram message.
+    """
+    for attempt in range(2):
+        try:
+            r = requests.get(DASHBOARD_URL, timeout=5)
+            if r.status_code == 200:
+                _clear_cooldown("dashboard_down")
+                return True
+        except Exception:
+            pass
+        if attempt == 0:
+            time.sleep(2)
+
+    log.warning("Dashboard :3001 not responding — restarting via VBS")
+    tg_alert("dashboard_down",
+             f"📊 <b>Dashboard down</b> (:3001)\n"
+             f"🔧 Restarting via WeatherAlpha_Dashboard.vbs\n"
+             f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+
+    try:
+        subprocess.Popen(
+            ["cscript.exe", "//nologo", DASHBOARD_VBS],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+        )
+    except Exception as e:
+        log.error("Dashboard VBS launch failed: %s", e)
+        tg_alert("dashboard_fail",
+                 f"🚨 <b>Dashboard RESTART FAILED</b> — {e}\n"
+                 f"Manual: cscript {DASHBOARD_VBS}")
+        return False
+
+    time.sleep(10)
     try:
         r = requests.get(DASHBOARD_URL, timeout=5)
         if r.status_code == 200:
-            _clear_cooldown("dashboard_down")
+            tg_resolved("dashboard_down",
+                        f"✅ <b>Dashboard recovered</b>\n"
+                        f"⏰ {datetime.now().strftime('%H:%M:%S')}")
             return True
     except Exception:
         pass
-    tg_alert("dashboard_down",
-             f"⚠️ <b>WARNING:</b> Dashboard (:3001) not responding\n"
-             f"⏰ {datetime.now().strftime('%H:%M:%S')}")
+
+    tg_alert("dashboard_fail",
+             f"🚨 <b>Dashboard RESTART FAILED</b> — manual: "
+             f"cscript {DASHBOARD_VBS}")
     return False
 
 
