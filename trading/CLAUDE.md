@@ -36,7 +36,7 @@ Startup ping: "ORB online @ <ET>" via Telegram. If you reboot and don't see it, 
 - **Chart:** MNQ1! on 5m timeframe
 - **Position size:** 1 MNQ contract (paper, $5,000 demo, $2/pt)
 - **Stop:** ORB ± `STOP_EXTENSION_MULT` × range = 0.25× range beyond opposite boundary
-- **Bracket TP:** **T2** (1.5× ORB range from entry) — TV's bracket runs the trade to T2, not T1
+- **Bracket TP:** **T2** (2.0× ORB range from entry) — TV's bracket runs the trade to T2, not T1
 - **T1 = breakeven trigger** (0.5× ORB range from entry) — when price reaches T1, monitor sets virtual_stop=entry; if price drifts back through entry, monitor sends a market close (BE scratch)
 - **Order placement:** direct CDP via `trading/services/tv_trader.py::place_bracket_order` — NOT webhooks or alerts. CDP :9222 must be reachable. Single CDP evaluate() call, ~750ms place / ~375ms close
 

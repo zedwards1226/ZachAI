@@ -80,8 +80,12 @@ ROLLING_WR_ALERT_THRESHOLD = 0.40  # Alert if 20-trade WR drops below 40%
 ROLLING_WR_ALERT_WEEKS = 2  # For 2 consecutive weeks
 
 # Per-trade and per-day risk caps (account size aware — $5,000 paper baseline)
-MAX_RISK_PER_TRADE_DOLLARS = 1000000000   # 2026-05-20 DISABLED (was 350)
-DAILY_LOSS_LIMIT_DOLLARS = 1000000000     # 2026-05-20 DISABLED (was 200)
+# 2026-06-08 re-enabled at $400 after performance audit found avg loser was $366
+# (5.85:1 loss/win ratio, -$1,394 over 29 fills). The combined SHORT-block and
+# second-break filter (below) already cut signal volume substantially; the $400
+# cap stops the catastrophic wide-OR losses without strangling the rest.
+MAX_RISK_PER_TRADE_DOLLARS = 400          # was 1000000000 (disabled 2026-05-20)
+DAILY_LOSS_LIMIT_DOLLARS = 1000000000     # 2026-05-20 DISABLED (was 200) — still disabled per Zach
 
 # ── Phase 0.5 profit protection (2026-05-19) ────────────────────────────
 # Zach lost $700 today after being up $200 — bot had no daily-lock and the
@@ -99,7 +103,7 @@ MFE_GIVEBACK_ACTIVATE_R = 1.0        # Only active once trade has captured at le
 # actual exposure, which was uncapped. This is the absolute floor — any
 # trade that would risk more than this gets refused at the broker layer,
 # not just the signal layer. Cannot be toggled off via env or config flag.
-HARD_PER_TRADE_RISK_CEILING_DOLLARS = 1000000000  # 2026-05-20 DISABLED (was 700)
+HARD_PER_TRADE_RISK_CEILING_DOLLARS = 700  # 2026-06-08 re-enabled (was 1000000000 disabled 2026-05-20)
 
 # Per-trade $ risk gate (combiner.py). When False, the gate is skipped and
 # wide-OR signals fire regardless of stop distance. Set False on 2026-05-04
@@ -109,7 +113,17 @@ HARD_PER_TRADE_RISK_CEILING_DOLLARS = 1000000000  # 2026-05-20 DISABLED (was 700
 # MAX_RISK_PER_TRADE_DOLLARS — actual stop distance depends on ORB range.
 # That misunderstanding lived in the comment for 13 days. The HARD ceiling
 # above is the real ceiling now; this flag controls the soft signal-volume veto.
-RISK_CAP_ENABLED = False
+RISK_CAP_ENABLED = True   # 2026-06-08 re-enabled per performance audit (was False since 2026-05-04)
+
+# ── Performance-audit gates (2026-06-08) ────────────────────────────────
+# Data 2026-05-11..2026-06-04, n=29 real fills:
+#   SHORT 12 trades, 6 wins (50% WR), -$1,872
+#   LONG  17 trades, 13 wins (76% WR), +$478
+#   First-break  17 trades, 59% WR, -$1,598
+#   Second-break 12 trades, 75% WR, +$204
+# Backtested impact: enabling both gates would have moved bot from -$1,394 → +$700+
+BLOCK_SHORTS_VS_BULLISH_BIAS = True  # Skip SHORT entries when morning_bias=BULLISH_BIAS
+REQUIRE_SECOND_BREAK = True          # Skip first-break entries; only trade after a failed first break
 
 # ── Phase 2 (2026-05-22): real TV trailing stop ───────────────────────────
 # When True, the BE-move and trail PUSH the real TradingView bracket stop via

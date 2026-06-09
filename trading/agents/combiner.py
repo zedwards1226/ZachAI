@@ -20,6 +20,7 @@ from config import (
     MAX_RISK_PER_TRADE_DOLLARS, DAILY_LOSS_LIMIT_DOLLARS, WEEKLY_LOSS_LIMIT_PCT,
     RVOL_THRESHOLD, VIX_SWEET_SPOT_LOW, VIX_SWEET_SPOT_HIGH,
     WEIGHT_SECOND_BREAK, WEIGHT_ORB_CANDLE_DIRECTION,
+    BLOCK_SHORTS_VS_BULLISH_BIAS, REQUIRE_SECOND_BREAK,
 )
 from models import (
     Direction, TradeSize, CandleDirection, ScoreBreakdown, ORBRange, Signal,
@@ -382,6 +383,44 @@ async def poll() -> Optional[dict]:
         await telegram.notify_hard_block(block_reason)
         _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
                     block_reason=block_reason)
+        _breakout_processed = True
+        _persist_session()
+        return None
+
+    # ── Performance-audit gate #1 (2026-06-08): block SHORT vs BULLISH bias ──
+    # Data 2026-05-11..2026-06-04: SHORT 50% WR -$1,872 vs LONG 76% WR +$478.
+    # In a bullish regime shorts are negative expectancy — skip them.
+    if BLOCK_SHORTS_VS_BULLISH_BIAS:
+        morning_bias = states.get("memory", {}).get("morning_bias", "NEUTRAL")
+        if breakout_direction == Direction.SHORT and morning_bias == "BULLISH_BIAS":
+            logger.info("Setup block: SHORT against BULLISH_BIAS regime — skipping")
+            try:
+                await telegram.notify_skip(
+                    breakout_direction.value, breakdown.total,
+                    "short_against_bullish_bias",
+                )
+            except Exception as e:
+                logger.warning("Telegram notify_skip failed: %s", e)
+            _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
+                        block_reason="short_against_bullish_bias")
+            _breakout_processed = True
+            _persist_session()
+            return None
+
+    # ── Performance-audit gate #2 (2026-06-08): require second-break ──────
+    # Data 2026-05-11..2026-06-04: first-break 59% WR -$1,598 vs second-break
+    # 75% WR +$204. First-breaks are the bleed.
+    if REQUIRE_SECOND_BREAK and not is_second_break:
+        logger.info("Setup block: first-break skipped (REQUIRE_SECOND_BREAK)")
+        try:
+            await telegram.notify_skip(
+                breakout_direction.value, breakdown.total,
+                "first_break_skipped_require_second_break",
+            )
+        except Exception as e:
+            logger.warning("Telegram notify_skip failed: %s", e)
+        _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
+                    block_reason="first_break_skip")
         _breakout_processed = True
         _persist_session()
         return None
