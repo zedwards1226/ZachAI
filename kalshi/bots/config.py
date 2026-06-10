@@ -41,6 +41,16 @@ MIN_EDGE_YES = float(os.getenv("MIN_EDGE_YES", "0.15"))
 # 0.0 = trust ensemble fully  |  1.0 = trust market fully
 # 0.25 = pull ensemble 25% of the way toward Kalshi's implied probability.
 PROB_SHRINK_TO_MARKET = float(os.getenv("PROB_SHRINK_TO_MARKET", "0.25"))
+# Outer-ladder targeting (audit 2026-06-10). The 116-trade bin-position audit
+# (May 2026) showed bets <2°F from forecast won 57% (center ladder) while
+# bets 2-4°F out won 86% (outer ladder) — and Kalshi's fee peaks at 50¢
+# center-ladder prices. Only strikes at least this many °F from the ensemble
+# forecast high are considered. 0 disables the filter.
+MIN_DISTANCE_FROM_FORECAST = float(os.getenv("MIN_DISTANCE_FROM_FORECAST", "2.0"))
+# Claimed-edge cap (audit 2026-06-10). Live trades claiming 20%+ edge won
+# only 51% over 96 trades — residual edges beyond this are model error, not
+# opportunity. Edges are clamped to ±this value for gating and sizing.
+MAX_CLAIMED_EDGE = float(os.getenv("MAX_CLAIMED_EDGE", "0.15"))
 # Competitive Kalshi weather bots use 15% fractional Kelly (suislanchez et al.);
 # dropping from 25% cuts drawdown risk ~40% at small cost to compounding.
 KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.15"))

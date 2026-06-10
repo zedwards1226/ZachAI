@@ -80,6 +80,37 @@ def compute_edge(our_prob: float, kalshi_price_cents: int, shin_z: float = 0.0) 
     return round(our_prob - kalshi_prob, 4)
 
 
+def clamp_edge(our_prob: float, market_prob: float, cap: float) -> tuple[float, float]:
+    """
+    Clamp the residual edge |our_prob - market_prob| to ±cap.
+
+    Live calibration (audit 2026-06-10): trades claiming 20%+ edge won only
+    51% — the model is most wrong exactly where it disagrees most with the
+    market. Clamping pulls our probability back to market ± cap so extreme
+    claimed edges can't dominate selection or sizing.
+
+    Returns (clamped_prob, clamped_edge). cap <= 0 disables clamping.
+    """
+    e = our_prob - market_prob
+    if cap > 0.0:
+        e = max(-cap, min(cap, e))
+    return market_prob + e, e
+
+
+def passes_min_distance(strike_f: float, forecast_high_f: float,
+                        min_distance_f: float) -> bool:
+    """
+    Outer-ladder filter: True if the strike (bin midpoint for between
+    markets) is at least min_distance_f °F away from our forecast high.
+    Center-ladder bins (<2°F from forecast) won 57% vs 86% at 2-4°F in the
+    May 2026 bin-position audit, and carry Kalshi's max fee (~50¢ pricing).
+    min_distance_f <= 0 disables the filter.
+    """
+    if min_distance_f <= 0.0:
+        return True
+    return abs(strike_f - forecast_high_f) >= min_distance_f
+
+
 def best_side(edge: float) -> str:
     """Return 'yes' if positive edge, 'no' if negative."""
     return "yes" if edge >= 0 else "no"

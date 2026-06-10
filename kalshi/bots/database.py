@@ -781,6 +781,38 @@ def get_recent_city_trades(city: str, limit: int = 10) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_recent_trade_stats(days: int = 14, paper: int | None = None) -> dict:
+    """Rolling realized-trade stats over the last N days of resolved trades.
+
+    Drives the learning agent's MIN_EDGE decisions (2026-06-10). The old
+    input — signal-population Brier — looked healthy while the *selected*
+    trades lost money, because losses concentrate in the extreme-claimed-edge
+    trades the model actually takes. Grade the agent on what it bet, not on
+    everything it watched.
+    """
+    from datetime import timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    extra = "" if paper is None else f" AND paper={int(paper)}"
+    with get_conn() as conn:
+        row = conn.execute(
+            f"""SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN status='won' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(pnl_usd),0)
+               FROM trades
+               WHERE status IN ('won','lost') AND resolved_at >= ?{extra}""",
+            (cutoff,)
+        ).fetchone()
+    n, wins, pnl = row[0], row[1], row[2]
+    return {
+        "samples": n,
+        "wins": wins,
+        "losses": n - wins,
+        "win_rate": round(wins / n, 4) if n else None,
+        "pnl_usd": round(pnl, 2),
+    }
+
+
 def get_brier_recent(days: int = 14) -> dict:
     """Rolling Brier + accuracy over the last N days of settled signals."""
     from datetime import timedelta
