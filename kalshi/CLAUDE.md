@@ -1,10 +1,9 @@
 # WEATHERALPHA — Project Brain
 
 ## OVERVIEW
-Kalshi weather prediction market trading bot. Trades between-markets on daily high/low temperature contracts across 20 US cities using Open-Meteo ensemble forecasts as edge signal.
+Kalshi weather prediction market trading bot. Trades between-markets on daily high/low temperature contracts across 6 US cities using Open-Meteo forecasts as edge signal.
 
 - **LIVE real-money mode** (PAPER_MODE=false) since 2026-05-21, confirmed intentional by Zach. Flipping the mode either direction is still a hard stop — NEVER change without explicit approval.
-- **PROFITABILITY FIXES 2026-06-10** (full audit: 122 live trades, gross +$7 eaten by $13 fees; 20%+ claimed edges won only 51%): (1) `MIN_DISTANCE_FROM_FORECAST=2.0` — only bins ≥2°F from the forecast high are considered (outer-ladder targeting per the May bin-position audit: 86% WR outer vs 57% center, and Kalshi fees peak at 50¢ center pricing); (2) `MAX_CLAIMED_EDGE=0.15` — residual edges clamped to ±15% for gating and sizing; (3) learning agent MIN_EDGE moves are graded on rolling 14-day realized trade P&L/WR (`get_recent_trade_stats`), not signal-population Brier (Brier journaled as reference only).
 - **DO NOT REPOINT CITY COORDS TO AIRPORT STATIONS.** Reverted 2026-05-25 evening after a 116-trade bin-position audit proved downtown coords are a structural feature of the strategy: pre-May-21 NO bets sat 2-4°F from forecast (outer ladder, 86% WR over 93 trades); airport coords pulled bets to <2°F from forecast (center ladder, 57% WR over 23 trades). Kalshi's strike ladder rewards distance from the center — the downtown forecast bias is the noise function that keeps the bot picking outer bins. The May 21 "fix" (commit fcc8131) was structurally wrong. If you ever want technically-correct station coords, you must first redesign the edge function to deliberately target outer-ladder bins (e.g., MIN_DISTANCE_FROM_FORECAST filter); never swap coords alone. Full evidence: `C:\Users\zedwa\.claude\plans\i-want-you-look-swift-panda.md`.
 
 ## SERVICES

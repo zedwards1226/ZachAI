@@ -2,10 +2,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from edge import (
-    prob_exceeds, compute_edge, best_side, effective_edge,
-    parse_strike_from_ticker, clamp_edge, passes_min_distance,
-)
+from edge import prob_exceeds, compute_edge, best_side, effective_edge, parse_strike_from_ticker
 
 
 def test_prob_exceeds_above():
@@ -50,50 +47,6 @@ def test_parse_strike():
     assert parse_strike_from_ticker("KXHIGH-NY-20240601-T75") == 75.0
     assert parse_strike_from_ticker("KXHIGH-CHI-20240601-T82") == 82.0
     assert parse_strike_from_ticker("KXHIGH-MIA-20240601-TXYZ") is None
-
-
-def test_clamp_edge_caps_positive():
-    # Claimed 30-point edge gets pulled back to the 15-point cap
-    p, e = clamp_edge(0.80, 0.50, 0.15)
-    assert e == pytest_approx(0.15)
-    assert p == pytest_approx(0.65)
-
-
-def test_clamp_edge_caps_negative():
-    p, e = clamp_edge(0.20, 0.50, 0.15)
-    assert e == pytest_approx(-0.15)
-    assert p == pytest_approx(0.35)
-
-
-def test_clamp_edge_passthrough_small_edge():
-    # Edge inside the cap is untouched
-    p, e = clamp_edge(0.58, 0.50, 0.15)
-    assert e == pytest_approx(0.08)
-    assert p == pytest_approx(0.58)
-
-
-def test_clamp_edge_disabled_when_cap_zero():
-    p, e = clamp_edge(0.90, 0.50, 0.0)
-    assert e == pytest_approx(0.40)
-    assert p == pytest_approx(0.90)
-
-
-def test_min_distance_blocks_center_ladder():
-    # Bin 88.5 with forecast 89.2 → 0.7°F away → center ladder, blocked
-    assert passes_min_distance(88.5, 89.2, 2.0) is False
-
-
-def test_min_distance_allows_outer_ladder():
-    # Bin 92.5 with forecast 89.2 → 3.3°F away → outer ladder, allowed
-    assert passes_min_distance(92.5, 89.2, 2.0) is True
-
-
-def test_min_distance_exact_boundary_allowed():
-    assert passes_min_distance(91.0, 89.0, 2.0) is True
-
-
-def test_min_distance_disabled_when_zero():
-    assert passes_min_distance(89.0, 89.0, 0.0) is True
 
 
 # pytest_approx helper for simple test

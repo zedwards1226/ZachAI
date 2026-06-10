@@ -90,12 +90,9 @@ CITY_TZ = {
     "PHL": "America/New_York",
 }
 
-from config import (
-    CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS,
-    MIN_EDGE_YES, SHIN_Z, MIN_DISTANCE_FROM_FORECAST, MAX_CLAIMED_EDGE,
-)
+from config import CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS, MIN_EDGE_YES, SHIN_Z
 from calibration import get_shrinkage
-from edge import shin_adjust, clamp_edge, passes_min_distance
+from edge import shin_adjust
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
@@ -315,13 +312,6 @@ def scan_and_trade() -> list[dict]:
         best = None
         best_abs_edge = 0.0
         for m in markets:
-            # Outer-ladder filter: skip bins too close to our forecast high.
-            # strike_f is the bin midpoint for between markets, the strike
-            # for greater markets.
-            if not passes_min_distance(m["strike_f"], high_f, MIN_DISTANCE_FROM_FORECAST):
-                log.debug("Skipping %s -- strike %.1fF within %.1fF of forecast %.1fF (center ladder)",
-                          m["ticker"], m["strike_f"], MIN_DISTANCE_FROM_FORECAST, high_f)
-                continue
             if m["strike_type"] == "between":
                 raw_p = prob_between(member_highs, m["floor_f"], m["cap_f"])
             else:
@@ -330,17 +320,14 @@ def scan_and_trade() -> list[dict]:
             # before we decide if an edge exists.
             market_p = shin_adjust(m["yes_price_cents"] / 100.0, SHIN_Z)
             market_p_no = shin_adjust(m["no_price_cents"] / 100.0, SHIN_Z)
-            # YES view: shrink raw_p toward market_p using YES calibration,
-            # then clamp the residual edge — claimed edges past
-            # MAX_CLAIMED_EDGE are model error (51% WR on 20%+ claims).
-            our_p_yes, edge_yes = clamp_edge(
-                raw_p + shrink_yes * (market_p - raw_p), market_p, MAX_CLAIMED_EDGE)
+            # YES view: shrink raw_p toward market_p using YES calibration
+            our_p_yes = raw_p + shrink_yes * (market_p - raw_p)
+            edge_yes = our_p_yes - market_p
             # NO view: shrink (1-raw_p) toward Shin-adjusted NO market prob
             raw_p_no = 1.0 - raw_p
-            our_p_no, edge_no = clamp_edge(
-                raw_p_no + shrink_no * (market_p_no - raw_p_no), market_p_no, MAX_CLAIMED_EDGE)
+            our_p_no = raw_p_no + shrink_no * (market_p_no - raw_p_no)
             # Negative edge => side_best will flip to NO downstream via best_side()
-            edge_no_as_yes = -edge_no  # same sign convention
+            edge_no_as_yes = -(our_p_no - market_p_no)  # same sign convention
             # Pick whichever side has bigger |edge|
             if abs(edge_yes) >= abs(edge_no_as_yes):
                 our_p_chosen = our_p_yes
