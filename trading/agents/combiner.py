@@ -63,6 +63,34 @@ _logged_arm_block: bool = False
 # no Telegram alert. Zach had to check the log to know the bot was
 # sitting out. Now: alert once when the pause first triggers.
 _logged_consecutive_losses: bool = False
+# Skip-notification dedup (2026-06-10). The skip DECISION is correct and still
+# logged + journaled every poll; only the Telegram alert is deduped to once
+# per reason per session. A choppy wide-range day (CPI 2026-06-10: ORB 318pt,
+# every breakout's stop > the per-trade risk cap) re-breaks the range and each
+# re-break resent an identical "stop too wide" skip alert — ~480 messages that
+# day. Reset in _reset_session() so each new day can notify once again.
+_notified_skip_keys: set[str] = set()
+
+
+def _skip_dedup_key(reason: str) -> str:
+    """Stable dedup key — strip the variable dollar amount from risk_too_wide
+    so the same reason collapses to a single alert regardless of $ size."""
+    if reason.startswith("risk_too_wide"):
+        return "risk_too_wide"
+    return reason
+
+
+async def _notify_skip_once(direction: str, score, reason: str) -> None:
+    """Send a skip alert at most once per reason per session. Never raises —
+    a Telegram failure must never break the combiner poll."""
+    key = _skip_dedup_key(reason)
+    if key in _notified_skip_keys:
+        return
+    _notified_skip_keys.add(key)
+    try:
+        await telegram.notify_skip(direction, score, reason)
+    except Exception as e:
+        logger.warning("Telegram notify_skip failed: %s", e)
 
 
 def _persist_session() -> None:
@@ -124,6 +152,7 @@ def _reset_session():
     _logged_daily_cap = False
     _logged_weekly_cap = False
     _logged_arm_block = False
+    _notified_skip_keys.clear()
     # Phase 0.5: clear yesterday's daily P&L lock so today gets a fresh shot.
     try:
         from agents import daily_pnl_guard
@@ -394,13 +423,10 @@ async def poll() -> Optional[dict]:
         morning_bias = states.get("memory", {}).get("morning_bias", "NEUTRAL")
         if breakout_direction == Direction.SHORT and morning_bias == "BULLISH_BIAS":
             logger.info("Setup block: SHORT against BULLISH_BIAS regime — skipping")
-            try:
-                await telegram.notify_skip(
-                    breakout_direction.value, breakdown.total,
-                    "short_against_bullish_bias",
-                )
-            except Exception as e:
-                logger.warning("Telegram notify_skip failed: %s", e)
+            await _notify_skip_once(
+                breakout_direction.value, breakdown.total,
+                "short_against_bullish_bias",
+            )
             _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
                         block_reason="short_against_bullish_bias")
             _breakout_processed = True
@@ -412,13 +438,10 @@ async def poll() -> Optional[dict]:
     # 75% WR +$204. First-breaks are the bleed.
     if REQUIRE_SECOND_BREAK and not is_second_break:
         logger.info("Setup block: first-break skipped (REQUIRE_SECOND_BREAK)")
-        try:
-            await telegram.notify_skip(
-                breakout_direction.value, breakdown.total,
-                "first_break_skipped_require_second_break",
-            )
-        except Exception as e:
-            logger.warning("Telegram notify_skip failed: %s", e)
+        await _notify_skip_once(
+            breakout_direction.value, breakdown.total,
+            "first_break_skipped_require_second_break",
+        )
         _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
                     block_reason="first_break_skip")
         _breakout_processed = True
@@ -458,13 +481,10 @@ async def poll() -> Optional[dict]:
             "Trade skipped: stop $%.0f exceeds per-trade cap $%d (ORB range %.1f too wide)",
             risk_dollars, MAX_RISK_PER_TRADE_DOLLARS, orb_range,
         )
-        try:
-            await telegram.notify_skip(
-                breakout_direction.value, score,
-                f"risk_too_wide:${risk_dollars:.0f}>{MAX_RISK_PER_TRADE_DOLLARS}",
-            )
-        except Exception as e:
-            logger.warning("Telegram notify_skip failed: %s", e)
+        await _notify_skip_once(
+            breakout_direction.value, score,
+            f"risk_too_wide:${risk_dollars:.0f}>{MAX_RISK_PER_TRADE_DOLLARS}",
+        )
         _log_signal(breakout_direction, price, breakdown, TradeSize.SKIP, is_second_break,
                     block_reason=f"risk_too_wide:${risk_dollars:.0f}")
         _breakout_processed = True

@@ -51,6 +51,7 @@ Any file under `C:\ZachAI\trading\` that is NOT in this list should be deleted.
 - `tests/test_tv_modify_stop.py` — tv_trader stop-modify path
 - `tests/test_tv_position_detection.py` — tv_trader position-detect logic
 - `tests/test_tv_trader_recovery.py` — tv_trader crash-recovery flow
+- `tests/test_combiner_skip_dedup.py` — skip-alert Telegram dedup (once per reason per session; 2026-06-10 CPI storm regression)
 
 ## Dashboard
 - `dashboard/backend/serve.py` — Flask read-only API + static React serve (`:8502`)
