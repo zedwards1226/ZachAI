@@ -11,19 +11,8 @@ Kalshi weather prediction market trading bot. Trades between-markets on daily hi
   - Auto-start: `scripts/WeatherAlpha_Bot.vbs` (also aliased KalshiBot.vbs)
 - **Dashboard:** `http://localhost:3001` — React + Flask proxy at `C:\ZachAI\kalshi\dashboard\`
   - Auto-start: `scripts/WeatherAlpha_Dashboard.vbs`
-- **Tunnel:** Cloudflare trycloudflare via `cloudflared.exe` for remote dashboard access
-  - Auto-start: NOT WIRED (audit 2026-05-27 — `scripts/WeatherAlpha_Tunnel.vbs` does not exist;
-    tunnel must be started manually until the launcher is written)
-- **Watchdog:** `scripts/watchdog.py` monitors bot + dashboard, restarts bot on failure
+- **Watchdog:** `scripts/watchdog.py` monitors and restarts bot + dashboard on failure
   - Auto-start: `scripts/WeatherAlpha_Watchdog.vbs`
-
-## AUDIT NOTES — 2026-05-27 (read before touching watchdog)
-The 2026-05-27 audit found three gaps in the WA monitoring stack:
-1. `scripts/WeatherAlpha_Tunnel.vbs` is referenced in this CLAUDE.md but does NOT exist. The cloudflared tunnel currently has no auto-start. After every reboot, it must be launched by hand. **STILL OPEN.**
-2. ~~`scripts/watchdog.py::check_dashboard()` only **alerts** when :3001 is down; it does **not restart** the dashboard VBS.~~ **CLOSED 2026-06-08:** ported the orb_watchdog pattern — check_dashboard now relaunches via cscript on persistent failure with resolved/failed Telegram messages. Was hitting "Dashboard down" warning hourly because nothing was relaunching it (15+ hour outage 6/5).
-3. `scripts/watchdog.py` has no `check_tunnel()` function at all. The tunnel can die silently. **STILL OPEN.**
-
-Two remaining items (tunnel auto-start + tunnel health check) tracked for a follow-up.
 
 ## KEYS
 - Location: `C:\ZachAI\kalshi\keys\` (gitignored)

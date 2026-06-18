@@ -41,4 +41,3 @@ Any file under `C:\ZachAI\kalshi\` that is NOT in this list should be deleted.
 - `bots/weatheralpha.db.bak*` — manual backups (gitignored via `*.bak`)
 - `bots/monitor.log`, `bots/weatheralpha.log` — runtime logs
 - `logs/watchdog.log` — watchdog cycle log
-- Tunnel: cloudflared launched manually (no auto-start VBS exists yet — see audit notes in CLAUDE.md)
