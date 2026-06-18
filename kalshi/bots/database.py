@@ -390,6 +390,50 @@ def log_decision(type: str, message: str, city=None, edge=None, contracts=None,
         return cur.lastrowid
 
 
+def log_scan_actions(actions) -> int:
+    """Persist meaningful scan decisions to decision_log. Shared by the manual
+    /api/scan endpoint AND the automatic scheduler scan job so both paths leave
+    a reasoning trail. Logs trades, blocks and errors; skips the high-volume
+    `skipped_duplicate` noise. Returns the number of rows written.
+
+    Without this in the scheduler path, the bot trades automatically but never
+    records WHY (the 2026-06-10 decision-log gap)."""
+    if not isinstance(actions, list):
+        return 0
+    logged = 0
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        atype = action.get("action", "scan")
+        if atype == "skipped_duplicate":
+            continue
+        city = action.get("city", "")
+        edge = action.get("edge")
+        if atype == "traded":
+            msg = (f"{city}: {action.get('side','?')} {action.get('contracts',0)}ct "
+                   f"@ {action.get('price',0)}¢ | edge {round((edge or 0)*100,1)}% "
+                   f"stake ${action.get('stake',0):.2f}")
+        elif atype == "blocked":
+            reasons = action.get("reasons") or action.get("reason") or []
+            if isinstance(reasons, list):
+                reasons = "; ".join(reasons)
+            msg = f"{city}: blocked — {reasons}"
+        elif atype == "error":
+            msg = f"{city}: error — {action.get('error','unknown')}"
+        else:
+            msg = f"{city}: {atype}"
+        reasons = action.get("reasons")
+        reason = "; ".join(reasons) if isinstance(reasons, list) else action.get("reason")
+        log_decision(
+            type=atype, message=msg, city=city, edge=edge,
+            contracts=action.get("contracts"), side=action.get("side"),
+            price_cents=action.get("price"), stake_usd=action.get("stake"),
+            reason=reason,
+        )
+        logged += 1
+    return logged
+
+
 def get_decision_log(limit: int = 100, since: str | None = None) -> list[dict]:
     with get_conn() as conn:
         if since:

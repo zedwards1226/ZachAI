@@ -13,7 +13,7 @@ import pytz
 
 from config import SCAN_INTERVAL_MINUTES, TIMEZONE
 from trader import scan_and_trade, resolve_expired_trades, get_capital
-from database import snapshot_pnl, get_open_trades
+from database import snapshot_pnl, get_open_trades, log_scan_actions
 from config import PAPER_MODE
 from monitor import send_daily_digest
 from learning_agent import run_review as run_agent_review
@@ -28,7 +28,8 @@ def _scan_job():
     global _last_scheduled_scan
     _last_scheduled_scan = datetime.utcnow().isoformat()
     try:
-        scan_and_trade()
+        actions = scan_and_trade()
+        log_scan_actions(actions)
     except Exception as exc:
         log.error("Scan job failed: %s", exc, exc_info=True)
 

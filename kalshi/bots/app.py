@@ -24,7 +24,7 @@ from flask_cors import CORS
 from config import FLASK_HOST, FLASK_PORT, PAPER_MODE, KALSHI_DEMO, INTERNAL_API_SECRET
 from database import (
     init_db, get_trades, get_latest_forecasts, get_pnl_history,
-    get_summary, get_guardrail_state, log_decision, get_decision_log,
+    get_summary, get_guardrail_state, log_decision, log_scan_actions, get_decision_log,
     get_signals, get_equity_curve, get_calibration, get_trades_with_verification,
     get_today_stats, get_city_performance,
 )
@@ -173,44 +173,10 @@ def scan():
     try:
         actions = trigger_scan_now()
         _scan_status["last_results"] = actions if isinstance(actions, list) else []
-        # Persist each action to decision_log
-        if isinstance(actions, list):
-            for action in actions:
-                atype = action.get("action", "scan")
-                city  = action.get("city", "")
-                edge  = action.get("edge")
-                # Build a human-readable message
-                if atype == "traded":
-                    msg = (f"{city}: {action.get('side','?')} {action.get('contracts',0)}ct "
-                           f"@ {action.get('price',0)}¢ | edge {round((edge or 0)*100,1)}% "
-                           f"stake ${action.get('stake',0):.2f}")
-                elif atype == "blocked":
-                    reasons = action.get("reasons") or action.get("reason") or []
-                    if isinstance(reasons, list):
-                        reasons = "; ".join(reasons)
-                    msg = f"{city}: blocked — {reasons}"
-                elif atype == "skipped_duplicate":
-                    reason = action.get("reason", "already in position")
-                    msg = f"{city}: skipped — {reason}"
-                elif atype == "error":
-                    msg = f"{city}: error — {action.get('error','unknown')}"
-                else:
-                    msg = f"{city}: {atype}"
-                log_decision(
-                    type=atype,
-                    message=msg,
-                    city=city,
-                    edge=edge,
-                    contracts=action.get("contracts"),
-                    side=action.get("side"),
-                    price_cents=action.get("price"),
-                    stake_usd=action.get("stake"),
-                    reason="; ".join(action.get("reasons", [])) if isinstance(action.get("reasons"), list) else action.get("reason"),
-                )
-            if not actions:
-                log_decision(type="scan", message="Scan complete — no tradeable edges found")
-        else:
-            log_decision(type="scan", message="Manual scan triggered", reason="no structured results")
+        # Persist decisions to decision_log via the shared writer (same one the
+        # automatic scheduler scan uses) so both paths leave a reasoning trail.
+        if log_scan_actions(actions) == 0 and not actions:
+            log_decision(type="scan", message="Scan complete — no tradeable edges found")
         return jsonify({"ok": True, "actions": actions})
     except Exception as exc:
         log.error("Manual scan error: %s", exc)

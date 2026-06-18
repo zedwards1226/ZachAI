@@ -29,6 +29,7 @@ Any file under `C:\ZachAI\kalshi\` that is NOT in this list should be deleted.
 - `bots/tests/test_guardrail_between.py` — between-strike disagreement bypass regression
 - `bots/tests/test_guardrail_midnight.py` — midnight rollover edge case
 - `bots/tests/test_api_auth.py` — internal-secret gate on POST endpoints
+- `bots/tests/test_decision_log_scan.py` — log_scan_actions writes trades/blocks, skips duplicate noise (auto-scan logging regression)
 
 ## Dashboard (Flask proxy :3001)
 - `dashboard/backend/serve.py` — Auto-start via `scripts/WeatherAlpha_Dashboard.vbs`
