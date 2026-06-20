@@ -45,6 +45,49 @@ def test_place_order_accepts_valid_response(monkeypatch):
     assert out["status"] == "resting"
 
 
+def test_place_order_yes_maps_to_bid(monkeypatch):
+    # V2 single-book: a YES bet at 42c -> side="bid", price="0.4200" (YES leg).
+    monkeypatch.setattr(kalshi_client, "PAPER_MODE", False)
+    c = _make_client(ready=True)
+    monkeypatch.setattr(c, "_auth_headers", lambda m, p: {})
+    captured = {}
+    def cap_post(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return {"order": {"order_id": "abc", "status": "resting"}}
+    monkeypatch.setattr(c, "_post", cap_post)
+
+    c.place_order(ticker="KXHIGHNY-T70", side="yes", contracts=5,
+                  price_cents=42, client_order_id="wa-NYC-yes")
+    assert captured["path"] == "/portfolio/events/orders"
+    b = captured["body"]
+    assert b["side"] == "bid"
+    assert b["price"] == "0.4200"
+    assert b["count"] == "5"
+    assert b["time_in_force"] == "good_till_canceled"
+    assert "action" not in b and "yes_price" not in b and "no_price" not in b
+
+
+def test_place_order_no_maps_to_ask_complement(monkeypatch):
+    # V2 single-book: a NO bet at 40c == selling YES at 60c.
+    # MUST become side="ask", price="0.6000" — inverting this loses real money.
+    monkeypatch.setattr(kalshi_client, "PAPER_MODE", False)
+    c = _make_client(ready=True)
+    monkeypatch.setattr(c, "_auth_headers", lambda m, p: {})
+    captured = {}
+    def cap_post(path, body):
+        captured["body"] = body
+        return {"order": {"order_id": "abc", "status": "resting"}}
+    monkeypatch.setattr(c, "_post", cap_post)
+
+    c.place_order(ticker="KXHIGHNY-B87.5", side="no", contracts=7,
+                  price_cents=40, client_order_id="wa-NYC-no")
+    b = captured["body"]
+    assert b["side"] == "ask"
+    assert b["price"] == "0.6000"
+    assert b["count"] == "7"
+
+
 def test_place_order_accepts_flat_response(monkeypatch):
     # Some Kalshi responses may not nest under "order"
     monkeypatch.setattr(kalshi_client, "PAPER_MODE", False)

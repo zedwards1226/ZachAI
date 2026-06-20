@@ -255,35 +255,40 @@ class KalshiClient:
         if not self._ready:
             raise RuntimeError("Kalshi client not authenticated")
 
-        # Kalshi /portfolio/orders body — current API spec (2026-05-18 verified):
-        # Required: ticker, side, action
-        # Pricing: exactly one of yes_price | no_price | yes_price_dollars | no_price_dollars
-        # Sending price implies LIMIT order — explicit `type` field is no longer
-        # recognized by Kalshi's API.
+        # Kalshi V2 single-book create-order — POST /portfolio/events/orders.
+        # Migrated 2026-06-20: Kalshi removed the legacy POST /portfolio/orders
+        # endpoint, which began returning 410 Gone ("deprecated_v1_order_endpoint")
+        # on 2026-06-19 and silently blocked ALL live order placement.
+        # Docs: https://docs.kalshi.com/api-reference/orders/create-order-v2
         #
-        # Bug history:
-        #  2026-05-17: sent BOTH yes_price + no_price → 400 invalid_order (fixed)
-        #  2026-05-18 06:00 first live morning: 4 of 5 orders rejected with
-        #    "invalid_parameters" — all 4 were B-strike (between) markets,
-        #    the one that succeeded was T-strike (greater than). Common factor:
-        #    the deprecated `"type": "limit"` field. T-markets ignored it,
-        #    B-markets strictly rejected it. Removed the field; per docs an
-        #    order with a price field IS a limit order by default. Adding
-        #    explicit time_in_force=good_till_canceled to match prior
-        #    "limit" semantics (rest on book until filled or cancelled).
-        body = {
-            "ticker":          ticker,
-            "action":          "buy",
-            "side":            side,
-            "count":           contracts,
-            "client_order_id": client_order_id,
-            "time_in_force":   "good_till_canceled",
-        }
+        # The V2 book is quoted entirely from the YES leg:
+        #   side="bid" -> buy YES  at `price`
+        #   side="ask" -> sell YES at `price`   (== buy NO at 1 - price)
+        # So our internal NO bet at `price_cents` becomes an ASK at the
+        # complementary YES price (100 - price_cents). `price` is a fixed-point
+        # DOLLAR string and `count` a contract-quantity string — there are no
+        # more integer-cent yes_price/no_price fields and no `action` field.
+        #
+        # Legacy bug history (pre-migration, kept for context): 2026-05-17 sent
+        # both yes_price+no_price -> 400; 2026-05-18 the deprecated `type:limit`
+        # field broke B-strike markets (removed — a priced order is a limit by
+        # default).
         if side == "yes":
-            body["yes_price"] = price_cents
+            book_side       = "bid"
+            yes_price_cents = price_cents
         else:
-            body["no_price"] = price_cents
-        response = self._post("/portfolio/orders", body)
+            book_side       = "ask"
+            yes_price_cents = 100 - price_cents
+        body = {
+            "ticker":                     ticker,
+            "side":                       book_side,
+            "count":                      str(contracts),
+            "price":                      f"{yes_price_cents / 100:.4f}",
+            "time_in_force":              "good_till_canceled",
+            "self_trade_prevention_type": "taker_at_cross",
+            "client_order_id":            client_order_id,
+        }
+        response = self._post("/portfolio/events/orders", body)
         order    = response.get("order") or response
         # Acceptable post-place statuses. 'canceled' means Kalshi rejected
         # the order at submission — we must NOT record a trade for it. Old
