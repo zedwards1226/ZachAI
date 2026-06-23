@@ -95,7 +95,7 @@ from config import (
     MIN_EDGE_YES, SHIN_Z, MIN_DISTANCE_FROM_FORECAST, MAX_CLAIMED_EDGE,
 )
 from calibration import get_shrinkage
-from edge import shin_adjust, clamp_edge, passes_min_distance
+from edge import shin_adjust, clamp_edge, passes_min_distance, no_buy_price_cents
 from database import (
     insert_forecast, insert_trade, update_guardrail_state,
     get_guardrail_state, get_summary, snapshot_pnl, has_open_trade_for_market,
@@ -278,10 +278,19 @@ def scan_and_trade() -> list[dict]:
             if yes_price_cents <= 0 or yes_price_cents >= 100:
                 continue
 
-            # Skip illiquid penny contracts
-            if yes_price_cents < MIN_PRICE_CENTS or (100 - yes_price_cents) < MIN_PRICE_CENTS:
+            # NO buy price = the NO ask = 100 - yes_bid (marketable, crosses the
+            # book). The old 100 - yes_ask was the NO *bid* — it rested passively
+            # and filled only adversely. See edge.no_buy_price_cents.
+            yes_bid_cents = round(float(yes_bid_dollars) * 100) if yes_bid_dollars is not None else None
+            no_price_cents = no_buy_price_cents(yes_price_cents, yes_bid_cents)
+
+            if no_price_cents <= 0 or no_price_cents >= 100:
+                continue
+
+            # Skip illiquid penny contracts (either side below the floor)
+            if yes_price_cents < MIN_PRICE_CENTS or no_price_cents < MIN_PRICE_CENTS:
                 log.debug("Skipping %s -- price %d/%dc below %dc floor",
-                          ticker, yes_price_cents, 100 - yes_price_cents, MIN_PRICE_CENTS)
+                          ticker, yes_price_cents, no_price_cents, MIN_PRICE_CENTS)
                 continue
 
             # Volume filter -- skip markets with no trading activity
@@ -297,7 +306,7 @@ def scan_and_trade() -> list[dict]:
                 "floor_f": float(floor_f) if floor_f is not None else strike,
                 "cap_f": float(cap_f) if cap_f is not None else strike + 1,
                 "yes_price_cents": yes_price_cents,
-                "no_price_cents": 100 - yes_price_cents,
+                "no_price_cents": no_price_cents,
                 "volume": volume,
             })
 

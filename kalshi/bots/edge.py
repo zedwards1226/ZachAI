@@ -116,6 +116,24 @@ def best_side(edge: float) -> str:
     return "yes" if edge >= 0 else "no"
 
 
+def no_buy_price_cents(yes_buy_cents: int, yes_bid_cents: int | None) -> int:
+    """Marketable NO buy price in cents = the NO ask = 100 - yes_bid.
+
+    To CROSS the book and actually fill, you pay the ask on the side you buy.
+    The NO ask is 100 - yes_bid. The old code used 100 - yes_ask, which is the
+    NO *bid* — a passive resting price that only filled via adverse selection
+    (winning NO bets drifted away unfilled while losers filled). It also made
+    NO edges look bigger than reality by pricing the fill at the favorable bid.
+
+    Falls back to 100 - yes_buy_cents (old behavior) when yes_bid is unknown.
+    Since yes_bid <= yes_ask, the new price is always >= the old one — we pay
+    the real cost to cross, and the edge is computed net of it.
+    """
+    if yes_bid_cents is not None:
+        return 100 - yes_bid_cents
+    return 100 - yes_buy_cents
+
+
 def effective_edge(edge: float) -> float:
     """Absolute edge regardless of side."""
     return abs(edge)

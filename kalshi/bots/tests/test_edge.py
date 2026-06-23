@@ -5,7 +5,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from edge import (
     prob_exceeds, compute_edge, best_side, effective_edge,
     parse_strike_from_ticker, clamp_edge, passes_min_distance,
+    no_buy_price_cents,
 )
+
+
+def test_no_buy_price_is_no_ask():
+    # yes_ask=60, yes_bid=55 -> NO ask = 100-55 = 45 (marketable buy NO).
+    assert no_buy_price_cents(60, 55) == 45
+
+
+def test_no_buy_price_outer_strike():
+    # Cheap YES outer strike: yes_ask=10, yes_bid=8 -> NO ask = 92.
+    assert no_buy_price_cents(10, 8) == 92
+
+
+def test_no_buy_price_fallback_when_no_bid():
+    # Unknown yes_bid -> fall back to old 100 - yes_buy.
+    assert no_buy_price_cents(60, None) == 40
+
+
+def test_no_buy_price_never_below_old():
+    # NO ask (100-yes_bid) is always >= the old NO bid (100-yes_ask).
+    for yes_ask, yes_bid in [(60, 55), (10, 8), (50, 49), (90, 85)]:
+        assert no_buy_price_cents(yes_ask, yes_bid) >= 100 - yes_ask
 
 
 def test_prob_exceeds_above():
