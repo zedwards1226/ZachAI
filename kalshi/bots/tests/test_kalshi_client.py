@@ -101,6 +101,38 @@ def test_place_order_accepts_flat_response(monkeypatch):
     assert out["order_id"] == "flat123"
 
 
+def test_place_order_v2_resting_response_no_status(monkeypatch):
+    # The real V2 create-order body: flat, order_id present, NO "status",
+    # remaining_count>0 (fully resting). This is the shape my 6/20 migration
+    # mis-parsed and raised on. Must NOT raise; status derived as "resting".
+    monkeypatch.setattr(kalshi_client, "PAPER_MODE", False)
+    c = _make_client(ready=True)
+    monkeypatch.setattr(c, "_auth_headers", lambda m, p: {})
+    monkeypatch.setattr(c, "_post", lambda path, body: {
+        "order_id": "c6f012b5", "client_order_id": "wa-WDC-x",
+        "fill_count": "0.00", "remaining_count": "5.00", "ts_ms": 1782040841478,
+    })
+    out = c.place_order(ticker="KXHIGHTDC-B88.5", side="no", contracts=5,
+                        price_cents=56, client_order_id="wa-WDC-x")
+    assert out["order_id"] == "c6f012b5"
+    assert out["status"] == "resting"
+
+
+def test_place_order_v2_filled_response_no_status(monkeypatch):
+    # Flat V2 body with a (partial) fill and no "status".
+    monkeypatch.setattr(kalshi_client, "PAPER_MODE", False)
+    c = _make_client(ready=True)
+    monkeypatch.setattr(c, "_auth_headers", lambda m, p: {})
+    monkeypatch.setattr(c, "_post", lambda path, body: {
+        "order_id": "bc9883e4", "fill_count": "33.00", "remaining_count": "0.00",
+        "average_fill_price": "0.0600",
+    })
+    out = c.place_order(ticker="KXHIGHNY-T79", side="yes", contracts=33,
+                        price_cents=6, client_order_id="wa-NYC-y")
+    assert out["order_id"] == "bc9883e4"
+    assert out["status"] == "executed"
+
+
 def test_place_order_rejects_invalid_response(monkeypatch):
     monkeypatch.setattr(kalshi_client, "PAPER_MODE", False)
     c = _make_client(ready=True)

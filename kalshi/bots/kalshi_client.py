@@ -289,20 +289,33 @@ class KalshiClient:
             "client_order_id":            client_order_id,
         }
         response = self._post("/portfolio/events/orders", body)
-        order    = response.get("order") or response
-        # Acceptable post-place statuses. 'canceled' means Kalshi rejected
-        # the order at submission — we must NOT record a trade for it. Old
-        # logic let canceled-with-order_id through, creating phantom trades.
-        accepted = {"resting", "executed", "open", "pending"}
-        status   = order.get("status")
-        if status == "canceled":
+        order    = response.get("order") or response   # tolerate a future wrapper
+        # V2 create-order (POST /portfolio/events/orders) returns a FLAT body:
+        # order_id, fill_count, remaining_count, [average_fill_price]. There is
+        # NO top-level "status" and NO "order" wrapper. Acceptance == order_id
+        # present; a genuine rejection returns a 4xx (raised by _check_response
+        # above) with no order_id, so it never reaches here.
+        #
+        # BUG FIXED 2026-06-23: the old code read order["status"] against an
+        # accepted-set and raised on every V2 order (status is always None on
+        # this endpoint), which forced EVERY live fill through the reconcile
+        # path and silenced the "LIVE TRADE PLACED" Telegram from 6/20–6/23.
+        if not order.get("order_id"):
             raise RuntimeError(
-                f"Kalshi canceled order at submission (ticker={ticker}): {response}"
+                f"Kalshi rejected order (ticker={ticker}): {response}"
             )
-        if not order.get("order_id") or status not in accepted:
-            raise RuntimeError(
-                f"Kalshi rejected order (ticker={ticker}, status={status}): {response}"
-            )
+        # Synthesize a status from the count fields for downstream logging.
+        try:
+            fill      = float(order.get("fill_count", 0) or 0)
+            remaining = float(order.get("remaining_count", 0) or 0)
+        except (TypeError, ValueError):
+            fill = remaining = 0.0
+        order.setdefault(
+            "status",
+            "executed" if fill > 0 and remaining == 0
+            else "partially_filled" if fill > 0
+            else "resting",
+        )
         return order
 
     def get_orders(self, client_order_id: str | None = None,
