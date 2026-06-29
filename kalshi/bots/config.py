@@ -76,6 +76,13 @@ CALIBRATION_PRIOR_WEIGHT = int(os.getenv("CALIBRATION_PRIOR_WEIGHT", "5"))
 # computing edge, reflecting documented longshot bias in prediction markets.
 SHIN_Z = float(os.getenv("SHIN_Z", "0.05"))
 MIN_PRICE_CENTS = int(os.getenv("MIN_PRICE_CENTS", "5"))     # skip illiquid penny contracts
+# NO entry-price floor (2026-06-29). Live diagnosis of 166 NO trades by 5¢ band
+# vs breakeven WR (NO needs WR > price/100): <55¢ = guaranteed loser (-$15,
+# 42% WR); 57-64¢ = breakeven-to-slight-loss; 65-69¢ = breakeven; 70-79¢ = the
+# real outer-ladder edge (88% WR, +14% over breakeven, +$5.85); >80¢ loses by
+# expectation. 65¢ floor drops the breakeven mush and keeps the WR-positive zone
+# (≥65¢: 74% WR, +$6.24 over 46 trades). Set to 0 to disable.
+MIN_NO_PRICE_CENTS = int(os.getenv("MIN_NO_PRICE_CENTS", "65"))
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "100"))        # Kalshi weather depth is ~50-200
 
 # Strike-type blocklist informed by lifetime resolved-trade audit (2026-04-24).

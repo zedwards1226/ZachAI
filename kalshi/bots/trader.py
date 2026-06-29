@@ -93,7 +93,7 @@ CITY_TZ = {
 from config import (
     CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS,
     MIN_EDGE_YES, SHIN_Z, MIN_DISTANCE_FROM_FORECAST, MAX_CLAIMED_EDGE,
-    TRADE_YES,
+    TRADE_YES, MIN_NO_PRICE_CENTS,
 )
 from calibration import get_shrinkage
 from edge import shin_adjust, clamp_edge, passes_min_distance, no_buy_price_cents
@@ -399,6 +399,25 @@ def scan_and_trade() -> list[dict]:
         price_cents = (best["yes_price_cents"] if side == "yes"
                        else best["no_price_cents"])
         our_prob_for_side = best["our_prob"] if side == "yes" else 1 - best["our_prob"]
+
+        # 6b. NO entry-price floor: cheap NO is a longshot bet that bled -$39
+        # live (and peaks Kalshi fees). Only take NO at MIN_NO_PRICE_CENTS+.
+        if side == "no" and price_cents < MIN_NO_PRICE_CENTS:
+            reason = f"no_price_below_{MIN_NO_PRICE_CENTS}c"
+            log.info("Skipping %s %s -- %s (NO @ %d¢)",
+                     city_code, best["ticker"], reason, price_cents)
+            actions.append({"city": city_code, "ticker": best["ticker"],
+                            "action": "blocked", "reasons": [reason],
+                            "edge": best["edge"]})
+            insert_signal(
+                city=city_code, market_id=best["ticker"],
+                direction="NO", model_prob=our_prob_for_side,
+                market_price=price_cents / 100, edge=best["edge"],
+                kelly_fraction=0.0, suggested_size=0.0,
+                forecast_hi_f=high_f, forecast_lo_f=low_f, strike_f=best["strike_f"],
+                reason_skipped=reason,
+            )
+            continue
 
         # 7. Size position
         sizing = size_stake(our_prob_for_side, price_cents, capital)
