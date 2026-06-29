@@ -38,6 +38,10 @@ MIN_EDGE = float(os.getenv("MIN_EDGE", "0.08"))
 # for YES + shrink our probability toward the market's implied probability so
 # overconfident ensemble readings get pulled back toward reality.
 MIN_EDGE_YES = float(os.getenv("MIN_EDGE_YES", "0.15"))
+# YES side disabled 2026-06-29: 22 live YES trades won 14% (-$24.12, -$1.10/trade)
+# vs NO 57% — a structural loser (same pattern that killed OmniAlpha). NO-only
+# until/unless the YES model is rebuilt. Set TRADE_YES=true to re-enable.
+TRADE_YES = os.getenv("TRADE_YES", "false").lower() == "true"
 # 0.0 = trust ensemble fully  |  1.0 = trust market fully
 # 0.25 = pull ensemble 25% of the way toward Kalshi's implied probability.
 PROB_SHRINK_TO_MARKET = float(os.getenv("PROB_SHRINK_TO_MARKET", "0.25"))

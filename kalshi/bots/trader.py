@@ -93,6 +93,7 @@ CITY_TZ = {
 from config import (
     CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS,
     MIN_EDGE_YES, SHIN_Z, MIN_DISTANCE_FROM_FORECAST, MAX_CLAIMED_EDGE,
+    TRADE_YES,
 )
 from calibration import get_shrinkage
 from edge import shin_adjust, clamp_edge, passes_min_distance, no_buy_price_cents
@@ -374,12 +375,16 @@ def scan_and_trade() -> list[dict]:
         # 6a. YES-side needs a bigger edge than NO because raw ensemble has been
         # overconfident on YES. Shrinkage already pulled our_prob toward market,
         # but keep an extra gate on the residual edge.
-        if side == "yes" and best["abs_edge"] < MIN_EDGE_YES:
-            log.info("Skipping %s %s -- YES edge %.3f below MIN_EDGE_YES %.3f",
-                     city_code, best["ticker"], best["abs_edge"], MIN_EDGE_YES)
+        # YES side disabled (2026-06-29): structural loser at 14% live WR.
+        # NO-only until the YES model is rebuilt. TRADE_YES re-enables it, in
+        # which case the old MIN_EDGE_YES residual-edge gate applies instead.
+        if side == "yes" and (not TRADE_YES or best["abs_edge"] < MIN_EDGE_YES):
+            reason = "yes_side_disabled" if not TRADE_YES else f"yes_edge_below_{MIN_EDGE_YES}"
+            log.info("Skipping %s %s -- %s (edge %.3f)",
+                     city_code, best["ticker"], reason, best["abs_edge"])
             actions.append({"city": city_code, "ticker": best["ticker"],
                             "action": "blocked",
-                            "reasons": [f"yes_edge_below_{MIN_EDGE_YES}"],
+                            "reasons": [reason],
                             "edge": best["edge"]})
             _sig = dict(
                 city=city_code, market_id=best["ticker"],
@@ -388,7 +393,7 @@ def scan_and_trade() -> list[dict]:
                 kelly_fraction=0.0, suggested_size=0.0,
                 forecast_hi_f=high_f, forecast_lo_f=low_f, strike_f=best["strike_f"],
             )
-            insert_signal(**_sig, reason_skipped=f"yes_edge_below_{MIN_EDGE_YES}")
+            insert_signal(**_sig, reason_skipped=reason)
             continue
 
         price_cents = (best["yes_price_cents"] if side == "yes"
