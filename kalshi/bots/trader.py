@@ -93,7 +93,7 @@ CITY_TZ = {
 from config import (
     CITIES, PAPER_MODE, STARTING_CAPITAL, MIN_EDGE, MIN_PRICE_CENTS,
     MIN_EDGE_YES, SHIN_Z, MIN_DISTANCE_FROM_FORECAST, MAX_CLAIMED_EDGE,
-    TRADE_YES, MIN_NO_PRICE_CENTS,
+    TRADE_YES, MIN_NO_PRICE_CENTS, NO_BELOW_ONLY,
 )
 from calibration import get_shrinkage
 from edge import shin_adjust, clamp_edge, passes_min_distance, no_buy_price_cents
@@ -332,6 +332,21 @@ def scan_and_trade() -> list[dict]:
                 log.debug("Skipping %s -- strike %.1fF within %.1fF of forecast %.1fF (center ladder)",
                           m["ticker"], m["strike_f"], MIN_DISTANCE_FROM_FORECAST, high_f)
                 continue
+            # Directional filter (2026-07-06): NO is only tradable on
+            # 'between' bins at/below the forecast high — settlement
+            # stations ran hotter than the downtown forecast in 77% of
+            # disagreements, so NO-above (-$83 live) and NO-on-greater
+            # (1W/3L) are structural losers. See config.NO_BELOW_ONLY.
+            no_allowed = (not NO_BELOW_ONLY) or (
+                m["strike_type"] == "between"
+                and (m["floor_f"] + m["cap_f"]) / 2.0 <= high_f)
+            # In NO-only mode a bin with no NO side has no tradable side at
+            # all — skip it entirely so it can't outscore and displace a
+            # tradable NO-below candidate in the per-city best-edge pick.
+            if not no_allowed and not TRADE_YES:
+                log.debug("Skipping %s -- bin above forecast %.1fF (NO_BELOW_ONLY)",
+                          m["ticker"], high_f)
+                continue
             if m["strike_type"] == "between":
                 raw_p = prob_between(member_highs, m["floor_f"], m["cap_f"])
             else:
@@ -351,8 +366,9 @@ def scan_and_trade() -> list[dict]:
                 raw_p_no + shrink_no * (market_p_no - raw_p_no), market_p_no, MAX_CLAIMED_EDGE)
             # Negative edge => side_best will flip to NO downstream via best_side()
             edge_no_as_yes = -edge_no  # same sign convention
-            # Pick whichever side has bigger |edge|
-            if abs(edge_yes) >= abs(edge_no_as_yes):
+            # Pick whichever side has bigger |edge| (NO view only where the
+            # directional filter allows it)
+            if not no_allowed or abs(edge_yes) >= abs(edge_no_as_yes):
                 our_p_chosen = our_p_yes
                 e = edge_yes
             else:

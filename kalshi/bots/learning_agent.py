@@ -24,7 +24,12 @@ log = logging.getLogger(__name__)
 
 # Guardrail bounds
 MIN_EDGE_FLOOR = 0.05   # never go below 5%
-MIN_EDGE_CEIL  = 0.20   # never go above 20%
+# CEIL must stay BELOW config.MAX_CLAIMED_EDGE (0.15): every candidate's edge
+# is clamped to that cap, so a MIN_EDGE at or above it gates out ALL trades
+# permanently — and with zero new trades the 14-day P&L can never recover to
+# lower it back down. That deadlock silenced the bot 2026-07-02..07-06 (agent
+# ratcheted min_edge to 0.20 vs edges capped at 0.15).
+MIN_EDGE_CEIL  = 0.12
 EDGE_STEP      = 0.02
 # MIN_EDGE moves are driven by realized trade P&L/WR (2026-06-10), not the
 # signal-population Brier score. Brier stayed "good" across all watched

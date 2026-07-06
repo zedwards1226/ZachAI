@@ -45,12 +45,22 @@ TRADE_YES = os.getenv("TRADE_YES", "false").lower() == "true"
 # 0.0 = trust ensemble fully  |  1.0 = trust market fully
 # 0.25 = pull ensemble 25% of the way toward Kalshi's implied probability.
 PROB_SHRINK_TO_MARKET = float(os.getenv("PROB_SHRINK_TO_MARKET", "0.25"))
-# Outer-ladder targeting (audit 2026-06-10). The 116-trade bin-position audit
-# (May 2026) showed bets <2°F from forecast won 57% (center ladder) while
-# bets 2-4°F out won 86% (outer ladder) — and Kalshi's fee peaks at 50¢
-# center-ladder prices. Only strikes at least this many °F from the ensemble
-# forecast high are considered. 0 disables the filter.
-MIN_DISTANCE_FROM_FORECAST = float(os.getenv("MIN_DISTANCE_FROM_FORECAST", "2.0"))
+# Outer-ladder targeting RETIRED 2026-07-06. The May audit's distance signal
+# was confounded by bin DIRECTION: re-split of 197 live trades shows NO on
+# bins BELOW forecast <2°F out was the single best segment (+$45.21, 70% WR,
+# n=43), while the 2.0°F filter was blocking it. Direction filtering
+# (NO_BELOW_ONLY) replaces distance filtering. 0 disables.
+MIN_DISTANCE_FROM_FORECAST = float(os.getenv("MIN_DISTANCE_FROM_FORECAST", "0.0"))
+# Directional filter (audit 2026-07-06, 197 live trades + settlement-vs-
+# downtown-actual comparison). Kalshi settles on NWS station obs, which ran
+# HOTTER than the downtown Open-Meteo actual in 68 of 88 disagreements (77%).
+# The downtown ensemble is therefore structurally cold vs settlement:
+#   NO on bins ABOVE forecast high: 109 trades, 47% WR, -$83.29 (loss engine)
+#   NO on bins BELOW forecast high:  66 trades, 71% WR, +$52.34 (only
+#     consistently profitable segment: May +$33.80, Jun +$18.90)
+#   NO on 'greater' strikes: 1W/3L, -$8.32 — blocked with the above.
+# True = NO trades only on 'between' bins whose midpoint <= forecast high.
+NO_BELOW_ONLY = os.getenv("NO_BELOW_ONLY", "true").lower() == "true"
 # Claimed-edge cap (audit 2026-06-10). Live trades claiming 20%+ edge won
 # only 51% over 96 trades — residual edges beyond this are model error, not
 # opportunity. Edges are clamped to ±this value for gating and sizing.
@@ -77,12 +87,12 @@ CALIBRATION_PRIOR_WEIGHT = int(os.getenv("CALIBRATION_PRIOR_WEIGHT", "5"))
 SHIN_Z = float(os.getenv("SHIN_Z", "0.05"))
 MIN_PRICE_CENTS = int(os.getenv("MIN_PRICE_CENTS", "5"))     # skip illiquid penny contracts
 # NO entry-price floor (2026-06-29). Live diagnosis of 166 NO trades by 5¢ band
-# vs breakeven WR (NO needs WR > price/100): <55¢ = guaranteed loser (-$15,
-# 42% WR); 57-64¢ = breakeven-to-slight-loss; 65-69¢ = breakeven; 70-79¢ = the
-# real outer-ladder edge (88% WR, +14% over breakeven, +$5.85); >80¢ loses by
-# expectation. 65¢ floor drops the breakeven mush and keeps the WR-positive zone
-# (≥65¢: 74% WR, +$6.24 over 46 trades). Set to 0 to disable.
-MIN_NO_PRICE_CENTS = int(os.getenv("MIN_NO_PRICE_CENTS", "65"))
+# Floor LOWERED 65 -> 30 on 2026-07-06: the June price-band audit that set 65¢
+# pooled both bin directions, and the "cheap-NO bleed" was entirely cheap
+# NO-ABOVE (30-49¢ above forecast: 22% WR, -$48.52). With NO_BELOW_ONLY in
+# force the cheap bands are the best ones: NO-below 30-49¢ = 78% WR +$24.36,
+# 50-64¢ = 67% WR +$25.47, while 65-79¢ is breakeven (+$0.65). Set 0 to disable.
+MIN_NO_PRICE_CENTS = int(os.getenv("MIN_NO_PRICE_CENTS", "30"))
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "100"))        # Kalshi weather depth is ~50-200
 
 # Strike-type blocklist informed by lifetime resolved-trade audit (2026-04-24).
