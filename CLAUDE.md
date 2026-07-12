@@ -104,9 +104,6 @@ git branch -d [current-branch]
 Triggers: adding/updating skills, updating CLAUDE.md, finishing a feature/file, fixing a bug, ending any completed task.
 
 **Exceptions (commit + push but notify Zach BEFORE merging):**
-- Changes to `trading/services/tv_trader.py` (live order execution)
-- Changes to Kalshi credentials or keys
-- Any change affecting live trading
 - Changes to `telegram-bridge/bot.py` (show diff + wait for approval FIRST)
 
 Never leave work sitting on a branch. Master should always reflect the latest stable state.
@@ -115,7 +112,7 @@ Never leave work sitting on a branch. Master should always reflect the latest st
 - Silently read all files in `C:\ZachAI\memory\` at session start
 - Silently load `C:\ZachAI\memory\jarvis_brain.json` into memory knowledge graph
 - Do not summarize or mention memory loading unless asked
-- Run `ls` on ACTIVE BUILD DIRS ONLY (trading, kalshi, telegram-bridge, and any project being actively worked) and compare against ACTIVE_FILES.md — flag/delete orphans before any build. Skip sandbox and reference dirs.
+- Run `ls` on ACTIVE BUILD DIRS ONLY (telegram-bridge and any project being actively worked) and compare against ACTIVE_FILES.md — flag/delete orphans before any build. Skip sandbox and reference dirs.
 
 ## SESSION END (automatic)
 When Zach says "bye", "done", "closing", or "end session":
@@ -132,9 +129,7 @@ When Zach says "bye", "done", "closing", or "end session":
 ## PROJECT ROSTER
 Each project owns a nested `CLAUDE.md` with its operational details. Claude Code auto-loads them when working in that folder.
 
-- **`trading\`** — ORB NQ/MNQ futures system (live, paper mode); dashboard at http://localhost:8502 → see `trading/CLAUDE.md`
-- **`kalshi\`** — WeatherAlpha Kalshi weather bot (live, paper mode) → see `kalshi/CLAUDE.md`
-- **`longshot\`** — **Kalshi infra library + LongshotFade bot** (paper mode; renamed from `omnialpha\` on 2026-05-29). Runs the LongshotFade sports NO-maker (`main_longshot.py`, dashboard :8503, watchdog-supervised). The prior OmniAlpha crypto mid-band strategy was surgically deleted 2026-05-27 after losing −$230 across 247 paper trades. Loss postmortem retained for reference: NO side 82.7% WR near-breakeven (avg entry 77.5¢); YES side 68.5% WR structural loser (avg entry 75.4¢ with ~76% breakeven required); edge model overconfident — claimed 20%+ edges only hit 63% WR. KXBTCD biggest loser (−$108); only KXETHD profitable (+$16). The reusable Kalshi infra survives (signed REST/WS client, public-data puller, scanner, risk engine, order placer, trade monitor, alerts, DB schema, Strategy ABC, CLI). Any new Kalshi bot lives at `longshot/strategies/<name>.py` + `longshot/main_<name>.py` importing the shared modules. Do NOT re-enable crypto trading without explicit approval. NEVER touch `kalshi\` for new-bot work. → see `longshot/CLAUDE.md`
+- **ALL TRADING BOTS RETIRED & ERASED 2026-07-12.** On Zach's explicit order ("kill them / erase"), `trading\` (ORB futures), `kalshi\` (WeatherAlpha weather), and `longshot\` (Kalshi infra + LongshotFade) were stopped, their auto-start VBS + scheduled tasks (WeatherAlpha_6AM, ORB_Daily_Start, ORB_Watchdog_Heartbeat) deleted, and their directories + DBs + launcher scripts removed. Reason: WeatherAlpha was the only live bot and it had no real edge (live 52% WR / −$54; paper validation proven fake). Full postmortem in auto-memory `project_weatheralpha_2026-07-12_audit`. Recoverable from git history (`git checkout <pre-2026-07-12 commit> -- kalshi longshot trading`) but do NOT resurrect without an explicit new mandate. Kalshi account funds/API keys were NOT touched by this — revoke on kalshi.com if closing for good.
 - **`telegram-bridge\`** — Jarvis Telegram bot (command surface) → see `telegram-bridge/CLAUDE.md`
 - **`companies\tradingagents\`** — FastAPI multi-agent gate (building, paper, not auto-started) → see `companies/tradingagents/CLAUDE.md`
 - **`companies\zacks-work-drawings\`** — Flutter Android app: Google Drive PDF viewer for machine wiring diagrams (built) → see `companies/zacks-work-drawings/CLAUDE.md`
@@ -147,7 +142,7 @@ When creating a new project folder under `companies\` or `C:\ZachAI\`, the scaff
 - Key file paths + API endpoints
 - Any project-specific protections or auto-merge exceptions
 
-Template: `trading/CLAUDE.md`.
+Template: `telegram-bridge/CLAUDE.md`.
 
 ## FREE APIs AVAILABLE
 Open-Meteo (weather), FRED (economic data), NewsAPI (free tier), GDELT, Reddit API, Google Trends (pytrends), GitHub API, CoinGecko (crypto).
@@ -157,9 +152,6 @@ Open-Meteo (weather), FRED (economic data), NewsAPI (free tier), GDELT, Reddit A
 C:\ZachAI\
 ├── CLAUDE.md (this file — master brain)
 ├── RULES.md / README.md / backup.bat
-├── trading\ (ORB — has its own CLAUDE.md)
-├── kalshi\ (WeatherAlpha — has its own CLAUDE.md)
-├── longshot\ (Kalshi infra library + LongshotFade bot, paper mode — has its own CLAUDE.md)
 ├── telegram-bridge\ (Jarvis bot — has its own CLAUDE.md)
 ├── companies\ (each project has its own CLAUDE.md)
 ├── sandbox\ (experiments workspace — strict isolation, no auto-start)

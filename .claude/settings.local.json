@@ -21,7 +21,8 @@
       "mcp__playwright__browser_resize",
       "mcp__playwright__browser_wait_for",
       "mcp__playwright__browser_click",
-      "mcp__playwright__browser_close"
+      "mcp__playwright__browser_close",
+      "PowerShell(Get-Process python,pythonw,node -ErrorAction SilentlyContinue)"
     ]
   },
   "hooks": {
